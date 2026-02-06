@@ -1,0 +1,59 @@
+{
+  "variables": [
+    {
+      "name": "q",
+      "dim": 2,
+      "init": [0.0, 0.0]
+    }
+  ],
+  "terms": [
+    {
+      "expr": {
+        "type": "sub",
+        "a": {
+          "type": "get_state",
+          "name": "ee_pos",
+          "key": {
+            "k": 0,
+            "owner_type": "link",
+            "owner_name": "ee",
+            "dtype": "frame",
+            "field": "pos"
+          },
+          "jac": { "var": "q" }
+        },
+        "b": {
+          "type": "const",
+          "var": "q",
+          "name": "target_pos",
+          "value": [3.0, 4.0, 0.0]
+        }
+      },
+      "cost": { "type": "l2" }
+    },
+    {
+      "expr": {
+        "type": "sub",
+        "a": {
+          "type": "get_state",
+          "name": "joint_q",
+          "key": {
+            "k": 0,
+            "owner_type": "total_joint",
+            "owner_name": "robot",
+            "dtype": "joint",
+            "field": "q"
+          },
+          "jac": { "var": "q" }
+        },
+        "b": {
+          "type": "const",
+          "var": "q",
+          "name": "q_nom",
+          "value": [0.0, 0.0]
+        }
+      },
+      "cost": { "type": "scalar_weight", "w": 1e-6 }
+    }
+  ]
+}

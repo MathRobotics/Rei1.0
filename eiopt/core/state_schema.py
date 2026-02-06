@@ -1,0 +1,216 @@
+from __future__ import annotations
+
+from typing import Tuple
+
+import numpy as np
+
+from .state_cache import OwnerKey, StateKey
+
+# Reference (naming): RoboKots `robokots/core/state.py`
+
+# Coordinate frames (when `StateKey.frame` is used)
+FRAME_NAMES: Tuple[str, str] = ("world", "local")
+DEFAULT_FRAME: str = "world"
+
+# Common owner types (not enforced; backends may extend)
+OWNER_TYPES: Tuple[str, ...] = ("joint", "link", "total_link", "total_joint", "total")
+
+# Recommended dtype values (not enforced)
+DTYPE_FRAME = "frame"
+DTYPE_DYNAMICS = "dynamics"
+DTYPE_JOINT = "joint"
+
+DEFAULT_ROBOT_NAME: str = "robot"
+
+# Minimal standard set for a backend-agnostic library.
+#
+# Values should be numeric arrays so they can be cached/serialized easily.
+# Recommended shapes (3D):
+#   - pos   : (3,)
+#   - rot   : (9,) row-major flatten of 3x3 rotation matrix
+#   - frame : (12,) = [pos(3), rot_flat(9)]
+#   - q     : (nq,) joint angles
+# Jacobian fields follow `"{field}_J_{var}"` and must match value dimension.
+FRAME_FIELDS: Tuple[str, str, str] = ("pos", "rot", "frame")
+JOINT_FIELDS: Tuple[str, ...] = ("q",)
+
+# Kinematics-like fields (subset; backends may extend)
+KIN_FIELDS: Tuple[str, ...] = (
+    "pos",
+    "rot",
+    "frame",
+    "vel",
+    "acc",
+    "jerk",
+    "snap",
+    "crackle",
+    "pop",
+    "lock",
+    "drop",
+    "shot",
+    "put",
+)
+
+# Dynamics-like fields (subset; backends may extend)
+MOMENTUM_FIELDS: Tuple[str, ...] = (
+    "momentum",
+    "momentum_diff1",
+    "momentum_diff2",
+    "momentum_diff3",
+    "momentum_diff4",
+    "momentum_diff5",
+    "momentum_diff6",
+    "momentum_diff7",
+    "momentum_diff8",
+)
+FORCE_FIELDS: Tuple[str, ...] = (
+    "force",
+    "force_diff1",
+    "force_diff2",
+    "force_diff3",
+    "force_diff4",
+    "force_diff5",
+    "force_diff6",
+    "force_diff7",
+)
+TORQUE_FIELDS: Tuple[str, ...] = (
+    "torque",
+    "torque_diff1",
+    "torque_diff2",
+    "torque_diff3",
+    "torque_diff4",
+    "torque_diff5",
+    "torque_diff6",
+    "torque_diff7",
+)
+
+DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
+
+
+def jac_field(field: str, *, var: str) -> str:
+    """Canonical Jacobian field name: `"{field}_J_{var}"`."""
+
+    field = str(field)
+    var = str(var)
+    if field == "":
+        raise ValueError("jac_field: field must be non-empty.")
+    if var == "":
+        raise ValueError("jac_field: var must be non-empty.")
+    return f"{field}_J_{var}"
+
+
+def is_jac_field(field: str) -> bool:
+    base, sep, var = str(field).partition("_J_")
+    return bool(sep) and base != "" and var != ""
+
+
+def split_jac_field(field: str) -> tuple[str, str]:
+    base, sep, var = str(field).partition("_J_")
+    if not sep or base == "" or var == "":
+        raise ValueError(f"split_jac_field: not a jacobian field: {field!r}")
+    return base, var
+
+
+def make_key(
+    *,
+    k: int,
+    owner_type: str,
+    owner_name: str,
+    dtype: str,
+    field: str,
+    frame: str | None = None,
+    rel_frame: str | None = None,
+) -> StateKey:
+    return StateKey(
+        k=int(k),
+        owner=OwnerKey(owner_type=str(owner_type), owner_name=str(owner_name)),
+        dtype=str(dtype),
+        field=str(field),
+        frame=frame,
+        rel_frame=rel_frame,
+    )
+
+
+def make_jac_key(
+    *,
+    k: int,
+    owner_type: str,
+    owner_name: str,
+    dtype: str,
+    field: str,
+    var: str,
+    frame: str | None = None,
+    rel_frame: str | None = None,
+) -> StateKey:
+    return make_key(
+        k=k,
+        owner_type=owner_type,
+        owner_name=owner_name,
+        dtype=dtype,
+        field=jac_field(field, var=var),
+        frame=frame,
+        rel_frame=rel_frame,
+    )
+
+
+def joint_q_key(*, k: int = 0, owner_name: str = DEFAULT_ROBOT_NAME) -> StateKey:
+    return make_key(
+        k=int(k),
+        owner_type="total_joint",
+        owner_name=str(owner_name),
+        dtype=DTYPE_JOINT,
+        field="q",
+    )
+
+
+def joint_q_jac_key(
+    *,
+    k: int = 0,
+    var: str = "q",
+    owner_name: str = DEFAULT_ROBOT_NAME,
+) -> StateKey:
+    return make_jac_key(
+        k=int(k),
+        owner_type="total_joint",
+        owner_name=str(owner_name),
+        dtype=DTYPE_JOINT,
+        field="q",
+        var=str(var),
+    )
+
+
+# ---------------------------------------------------------------------
+# Canonical vectorization helpers (rotation + pose)
+# ---------------------------------------------------------------------
+def rot_flat(rot: np.ndarray) -> np.ndarray:
+    r = np.asarray(rot, dtype=float)
+    if r.shape == (3, 3):
+        return r.reshape(-1)
+    r = r.reshape(-1)
+    if r.size != 9:
+        raise ValueError(f"rot_flat: expected (3,3) or (9,), got {rot!r}")
+    return r
+
+
+def rot_mat(rot9: np.ndarray) -> np.ndarray:
+    r = np.asarray(rot9, dtype=float).reshape(-1)
+    if r.size != 9:
+        raise ValueError(f"rot_mat: expected (9,), got {rot9!r}")
+    return r.reshape(3, 3)
+
+
+def pack_frame(pos: np.ndarray, rot: np.ndarray) -> np.ndarray:
+    p = np.asarray(pos, dtype=float).reshape(-1)
+    if p.size != 3:
+        raise ValueError(f"pack_frame: pos must be (3,), got {pos!r}")
+    r = rot_flat(rot)
+    return np.concatenate([p, r], axis=0)
+
+
+def unpack_frame(frame12: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(frame12, dtype=float).reshape(-1)
+    if x.size != 12:
+        raise ValueError(f"unpack_frame: expected (12,), got {frame12!r}")
+    pos = x[:3].copy()
+    rot = x[3:].reshape(3, 3).copy()
+    return pos, rot
