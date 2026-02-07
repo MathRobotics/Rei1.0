@@ -12,6 +12,19 @@ backend(kots / pinocchio 等) と `eiopt` を繋ぐ唯一の接続点は `StateC
   - `time`: `TimeGrid`
   - `required`: 今回必要な `StateKey` の集合（これだけ計算すると速い）
 
+## Backend の最小要件
+
+backend 側で実装すべき最小要件は `build_state()` だけです。
+
+- `build_state()` は **純粋関数に近い振る舞い**（同じ入力 → 同じ出力）であること
+- `required` が渡された場合は **そのキーだけを計算して返す**こと
+- 返り値は `dict[StateKey, Any]` で、**要求された key が必ず含まれる**こと
+- 値は `numpy.ndarray` などの数値配列で、`Expr` が期待する shape に整形済みであること
+- `pack`, `time` は受け取れれば十分（未使用でも OK）
+
+`Expr.deps()` が `StateKey` を返し、`StateCache.update_if_needed(..., required=required)` がそれを使って
+必要最小限の状態計算を行います。
+
 ## StateKey の命名（推奨スキーマ）
 
 `StateKey` は「何を計算して返すか」を表すキーです（`robokots/core/state.py` の考え方に寄せています）。
