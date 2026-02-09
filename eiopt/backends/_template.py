@@ -14,7 +14,7 @@ Array = np.ndarray
 class BackendFramePosStateBuilder:
     """Template backend -> build_state() bridge for `dtype="frame", field="pos"` keys.
 
-    Copy this file when adding a new backend and adapt the internals.
+    Copy this file when adding a new backend, or subclass it.
 
     Expected keys (k=0 only):
       - dtype="frame", owner_type="link", field="pos"
@@ -31,6 +31,26 @@ class BackendFramePosStateBuilder:
         self.data = data
         self.q_var = str(q_var)
         self._frame_id_cache: dict[str, int] = {}
+
+    def _update_kinematics(self, q: Array) -> None:
+        """Run backend FK/Jacobian prerequisites for the current `q`."""
+
+        raise NotImplementedError("TODO: implement backend kinematics update.")
+
+    def _frame_pos(self, frame_id: int) -> Array:
+        """Return frame position (3,) for the given `frame_id`."""
+
+        raise NotImplementedError("TODO: implement backend position extraction.")
+
+    def _frame_pos_jacobian(self, q: Array, frame_id: int) -> Array:
+        """Return linear position Jacobian (3,n) for the given `frame_id`.
+
+        If your backend provides a 6D spatial Jacobian, the (linear, angular) row
+        order is library-dependent. Consider using helpers in `eiopt.backends._spatial`
+        and define the convention in your backend wrapper.
+        """
+
+        raise NotImplementedError("TODO: implement backend Jacobian extraction.")
 
     def _frame_id(self, frame_name: str) -> int:
         name = str(frame_name)
@@ -60,10 +80,7 @@ class BackendFramePosStateBuilder:
             s, e = pack.slices[self.q_var]
             q = np.asarray(x_all[s:e], dtype=float).reshape(-1)
 
-        # TODO: call your backend FK / Jacobian routines here.
-        # Example flow:
-        #   self.model.forward_kinematics(q)
-        #   self.model.update_frame_placements()
+        self._update_kinematics(q)
 
         pos_field = "pos"
         jac_pos_field = jac_field(pos_field, var=self.q_var)
@@ -100,14 +117,12 @@ class BackendFramePosStateBuilder:
             frame_id = self._frame_id(frame_name)
 
             if need_pos:
-                # TODO: replace with backend-specific frame position extraction.
-                # pos_by_frame[frame_name] = np.asarray(..., dtype=float).reshape(3).copy()
-                raise NotImplementedError("TODO: implement position extraction.")
+                pos = np.asarray(self._frame_pos(frame_id), dtype=float).reshape(3)
+                pos_by_frame[frame_name] = pos.copy()
 
             if need_jac:
-                # TODO: replace with backend-specific Jacobian extraction.
-                # Jpos_by_frame[frame_name] = np.asarray(..., dtype=float).copy()
-                raise NotImplementedError("TODO: implement Jacobian extraction.")
+                Jpos = np.asarray(self._frame_pos_jacobian(q, frame_id), dtype=float)
+                Jpos_by_frame[frame_name] = Jpos.copy()
 
         out: dict[StateKey, Any] = {}
         for key in required:
