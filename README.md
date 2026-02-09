@@ -65,6 +65,14 @@ PYTHONPATH=. python examples/main_pinocchio.py
 PYTHONPATH=. python examples/cli/main_pinocchio.py --help
 ```
 
+### solve_gauss_newton の返り値
+
+`solve_gauss_newton()` は最適化後の全決定変数ベクトル（`VariablePack` の順）も返します。
+
+```python
+x_star, cost, iters, rnorm, dxnorm, converged = solve_gauss_newton(problem, ctx.pack, ctx=ctx, required=required)
+```
+
 ### 最小テンプレート
 
 ```toml
