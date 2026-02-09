@@ -1,0 +1,61 @@
+[[variables]]
+name = "q"
+dim = 2
+init = [0.0, 0.0]
+
+[[terms]]
+
+[terms.expr]
+type = "sub"
+
+[terms.expr.a]
+type = "get_state"
+name = "ee_pos"
+
+[terms.expr.a.key]
+k = 0
+owner_type = "link"
+owner_name = "ee"
+dtype = "frame"
+field = "pos"
+
+[terms.expr.a.jac]
+var = "q"
+
+[terms.expr.b]
+type = "const"
+var = "q"
+name = "target_pos"
+value = [3.0, 4.0, 0.0]
+
+[terms.cost]
+type = "l2"
+
+[[terms]]
+
+[terms.expr]
+type = "sub"
+
+[terms.expr.a]
+type = "get_state"
+name = "joint_q"
+
+[terms.expr.a.key]
+k = 0
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "joint"
+field = "q"
+
+[terms.expr.a.jac]
+var = "q"
+
+[terms.expr.b]
+type = "const"
+var = "q"
+name = "q_nom"
+value = [0.0, 0.0]
+
+[terms.cost]
+type = "scalar_weight"
+w = 1e-6
