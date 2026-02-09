@@ -29,7 +29,12 @@ class TestEiOptBasic(unittest.TestCase):
         problem = Problem(variables=pack, terms=[(expr, L2Cost())])
         ctx = EvalContext(pack=pack)
 
-        solve_gauss_newton(problem, pack, max_iters=5, ctx=ctx, tol_r=1e-14, tol_dx=1e-14)
+        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(
+            problem, pack, max_iters=5, ctx=ctx, tol_r=1e-14, tol_dx=1e-14
+        )
+        self.assertTrue(converged)
+        self.assertLess(cost, 1e-20)
+        self.assertAlmostEqual(float(x_star[0]), 3.0, places=10)
         self.assertAlmostEqual(float(x_var.x[0]), 3.0, places=10)
 
     def test_get_state_expr_reads_cache(self) -> None:
