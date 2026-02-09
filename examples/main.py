@@ -31,11 +31,12 @@ def main() -> None:
     problem, ctx, required = compile_problem(dsl, build_state=build_state_backend)
 
     q0 = ctx.pack.vars[0].x.copy()
-    solve_gauss_newton(problem, ctx.pack, max_iters=10, ctx=ctx, required=required)
-    q_star = ctx.pack.vars[0].x.copy()
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
+        problem, ctx.pack, max_iters=10, ctx=ctx, required=required
+    )
 
     print("q0:", q0)
-    print("q*:", q_star)
+    print("q*:", x_star)
 
 
 if __name__ == "__main__":

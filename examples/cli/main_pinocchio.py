@@ -64,13 +64,15 @@ def main(argv: list[str] | None = None) -> int:
     print("ee_pos0:", ee_pos0)
     print("target:", target)
 
-    solve_gauss_newton(problem, ctx.pack, max_iters=20, ctx=ctx, required=required)
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
+        problem, ctx.pack, max_iters=20, ctx=ctx, required=required
+    )
 
     ctx.state.update_if_needed(ctx.pack, time=ctx.time, required=required)
     ee_pos_star = np.asarray(ctx.state.get(key_pos), dtype=float).reshape(3)
 
     print("q0:", q0)
-    print("q*:", ctx.pack.vars[0].x)
+    print("q*:", x_star)
     print("ee_pos*:", ee_pos_star)
 
     return 0
@@ -78,4 +80,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

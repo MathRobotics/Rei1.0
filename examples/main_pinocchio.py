@@ -30,10 +30,12 @@ def main() -> int:
     problem, ctx, required = compile_problem(dsl, build_state=builder.build_state)
 
     q0 = ctx.pack.vars[0].x.copy()
-    solve_gauss_newton(problem, ctx.pack, max_iters=20, ctx=ctx, required=required)
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
+        problem, ctx.pack, max_iters=20, ctx=ctx, required=required
+    )
 
     print("q0:", q0)
-    print("q*:", ctx.pack.vars[0].x)
+    print("q*:", x_star)
     return 0
 
 
