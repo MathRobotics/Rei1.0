@@ -73,6 +73,19 @@ PYTHONPATH=. python examples/cli/main_pinocchio.py --help
 x_star, cost, iters, rnorm, dxnorm, converged = solve_gauss_newton(problem, ctx.pack, ctx=ctx, required=required)
 ```
 
+### 最適化後の Expr 値レポート
+
+最適化後に、目的関数(terms)に含まれる residual と、DSLで名前が付いた Expr（例: `ee_pos`, `target_pos`）の値を
+簡潔に確認したい場合は `format_solve_report()` を使えます。`x0` を渡すと初期値と最適化後の決定変数も併せて表示します。
+
+```python
+from eiopt import format_solve_report, solve_gauss_newton
+
+x0 = ctx.pack.get().copy()
+x_star, *_ = solve_gauss_newton(problem, ctx.pack, ctx=ctx, required=required)
+print(format_solve_report(problem, ctx=ctx, required=required, x0=x0, x_star=x_star))
+```
+
 ### 最小テンプレート
 
 ```toml

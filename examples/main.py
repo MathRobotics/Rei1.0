@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from eiopt import compile_problem, load_problem_toml, solve_gauss_newton
+from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
 
 _DEFAULT_DSL_PATH = Path(__file__).parent / "specs" / "basic.toml"
 
@@ -31,12 +31,14 @@ def main() -> None:
     problem, ctx, required = compile_problem(dsl, build_state=build_state_backend)
 
     q0 = ctx.pack.vars[0].x.copy()
+    x0 = ctx.pack.get().copy()
     x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
         problem, ctx.pack, max_iters=10, ctx=ctx, required=required
     )
 
     print("q0:", q0)
     print("q*:", x_star)
+    print(format_solve_report(problem, ctx=ctx, required=required, x0=x0, x_star=x_star))
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ except ImportError as e:  # pragma: no cover
         "  PYTHONPATH=. python examples/main_pinocchio.py"
     ) from e
 
-from eiopt import compile_problem, load_problem_toml, solve_gauss_newton
+from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
 from eiopt.backends.pinocchio import PinocchioFramePosStateBuilder
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
@@ -29,13 +29,12 @@ def main() -> int:
     builder = PinocchioFramePosStateBuilder(model, data, q_var="q")
     problem, ctx, required = compile_problem(dsl, build_state=builder.build_state)
 
-    q0 = ctx.pack.vars[0].x.copy()
+    x0 = ctx.pack.get().copy()
     x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
         problem, ctx.pack, max_iters=20, ctx=ctx, required=required
     )
 
-    print("q0:", q0)
-    print("q*:", x_star)
+    print(format_solve_report(problem, ctx=ctx, required=required, x0=x0, x_star=x_star))
     return 0
 
 

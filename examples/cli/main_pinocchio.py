@@ -14,7 +14,7 @@ except ImportError as e:  # pragma: no cover
         "  PYTHONPATH=. python examples/cli/main_pinocchio.py"
     ) from e
 
-from eiopt import compile_problem, load_problem_toml, solve_gauss_newton
+from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
 from eiopt.backends.pinocchio import PinocchioFramePosStateBuilder
 from eiopt.dsl.dsl_ops import find_const_expr, find_var_spec, rewrite_get_state_owner_name
 
@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--urdf", type=Path, default=_DEFAULT_URDF_PATH, help="Path to URDF.")
     parser.add_argument("--spec", type=Path, default=_DEFAULT_SPEC_PATH, help="Path to problem spec TOML.")
     parser.add_argument("--ee", type=str, default="ee", help="End-effector frame name.")
+    parser.add_argument("--report", action="store_true", help="Print a concise expr/term report after solving.")
     args = parser.parse_args(argv)
 
     model = pin.buildModelFromUrdf(str(args.urdf))
@@ -64,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     print("ee_pos0:", ee_pos0)
     print("target:", target)
 
+    x0 = ctx.pack.get().copy()
     x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
         problem, ctx.pack, max_iters=20, ctx=ctx, required=required
     )
@@ -74,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
     print("q0:", q0)
     print("q*:", x_star)
     print("ee_pos*:", ee_pos_star)
+    if args.report:
+        print(format_solve_report(problem, ctx=ctx, required=required, x0=x0, x_star=x_star))
 
     return 0
 
