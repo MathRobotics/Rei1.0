@@ -1,39 +1,50 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 
-import robokots as kots
+try:
+    import pinocchio as pin  # robotics library
+except ImportError as e:  # pragma: no cover
+    raise SystemExit(
+        "This example requires the robotics `pinocchio` Python bindings.\n"
+        "Install Pinocchio in your environment (e.g. via conda-forge) and re-run:\n"
+        "  PYTHONPATH=. python examples/cli/main_pinocchio.py"
+    ) from e
 
-from eiopt import compile_problem, load_problem_toml, solve_gauss_newton, with_standard_joint_q
-from eiopt.backends.robokots import PinocchioFramePosStateBuilder
+from eiopt import compile_problem, load_problem_toml, solve_gauss_newton
+from eiopt.backends.pinocchio import PinocchioFramePosStateBuilder
 from eiopt.dsl.dsl_ops import find_const_expr, find_var_spec, rewrite_get_state_owner_name
 
-URDF_PATH = "models" / "planar2.urdf"
-DSL_PATH = "specs" / "pinocchio_ik_pos.toml"
+_EXAMPLES_DIR = Path(__file__).resolve().parents[1]
+_DEFAULT_URDF_PATH = _EXAMPLES_DIR / "models" / "planar2.urdf"
+_DEFAULT_SPEC_PATH = _EXAMPLES_DIR / "specs" / "pinocchio_ik_pos.toml"
 
 
-def main(a) -> int:
-    
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Pinocchio IK example for EiOpt.")
+    parser.add_argument("--urdf", type=Path, default=_DEFAULT_URDF_PATH, help="Path to URDF.")
+    parser.add_argument("--spec", type=Path, default=_DEFAULT_SPEC_PATH, help="Path to problem spec TOML.")
+    parser.add_argument("--ee", type=str, default="ee", help="End-effector frame name.")
+    args = parser.parse_args(argv)
 
-    model = pin.buildModelFromUrdf(str(Path(URDF_PATH)))
+    model = pin.buildModelFromUrdf(str(args.urdf))
     data = model.createData()
 
-    dsl_path = Path(DSL_PATH)
-    dsl = load_problem_toml(dsl_path)
+    dsl = load_problem_toml(args.spec)
 
-    ee_frame = str("ee")
+    ee_frame = str(args.ee)
     rewrite_get_state_owner_name(dsl, dtype="frame", owner_type="link", owner_name=ee_frame)
 
     q_var_spec = find_var_spec(dsl, name="q")
+    if q_var_spec is None:
+        raise SystemExit("Spec must declare a variable named 'q'.")
     q0 = np.asarray(q_var_spec["init"], dtype=float).reshape(-1)
 
     state_builder = PinocchioFramePosStateBuilder(model, data, q_var="q")
-    build_state = with_standard_joint_q(state_builder.build_state, q_var="q")
-    problem, ctx, required = compile_problem(dsl, build_state=build_state, model=model)
+    problem, ctx, required = compile_problem(dsl, build_state=state_builder.build_state, model=model)
 
     ctx.state.update_if_needed(ctx.pack, time=ctx.time, required=required)
     key_pos = next(
@@ -66,4 +77,5 @@ def main(a) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    raise SystemExit(main())
+

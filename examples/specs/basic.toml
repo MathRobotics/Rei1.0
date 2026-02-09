@@ -37,17 +37,8 @@ type = "l2"
 type = "sub"
 
 [terms.expr.a]
-type = "get_state"
+type = "get_var"
 name = "joint_q"
-
-[terms.expr.a.key]
-k = 0
-owner_type = "total_joint"
-owner_name = "robot"
-dtype = "joint"
-field = "q"
-
-[terms.expr.a.jac]
 var = "q"
 
 [terms.expr.b]
