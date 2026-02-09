@@ -7,7 +7,7 @@ import numpy as np
 from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import jac_field
 from eiopt.core.time_grid import TimeGrid
-from eiopt import compile_problem
+from eiopt import compile_problem, format_solve_report
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton
 from eiopt.model import Problem, DirectVectorExpr, EvalContext, L2Cost, Variable, VariablePack
@@ -29,6 +29,7 @@ class TestEiOptBasic(unittest.TestCase):
         problem = Problem(variables=pack, terms=[(expr, L2Cost())])
         ctx = EvalContext(pack=pack)
 
+        x0 = pack.get().copy()
         x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(
             problem, pack, max_iters=5, ctx=ctx, tol_r=1e-14, tol_dx=1e-14
         )
@@ -36,6 +37,10 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertLess(cost, 1e-20)
         self.assertAlmostEqual(float(x_star[0]), 3.0, places=10)
         self.assertAlmostEqual(float(x_var.x[0]), 3.0, places=10)
+        report = format_solve_report(problem, ctx=ctx, x0=x0, x_star=x_star)
+        self.assertIn("x_minus_3", report)
+        self.assertIn("Variables:", report)
+        self.assertIn("x0=", report)
 
     def test_get_state_expr_reads_cache(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
