@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Callable, Iterable
+from typing import Any, Callable, Iterable, Optional
 
 import numpy as np
 
 from ..core.state_cache import StateKey
 from ..model.problem import Problem
 from ..model.term import VariablePack
+
+Array = np.ndarray
 
 
 def solve_gauss_newton(
@@ -19,34 +21,64 @@ def solve_gauss_newton(
     tol_r: float = 1e-10,
     tol_dx: float = 1e-12,
     on_iter: Optional[Callable[[int, float, float], None]] = None,
-) -> None:
-    """Minimal Gauss-Newton loop for Expr-based Problem."""
+) -> tuple[Array, float, int, float, float, bool]:
+    """Minimal Gauss-Newton loop for Expr-based Problem.
 
-    for k in range(max_iters):
-        if ctx is not None and hasattr(ctx, "state") and ctx.state is not None:
-            if hasattr(ctx.state, "update_if_needed"):
-                ctx.state.update_if_needed(variables, time=getattr(ctx, "time", None), required=required)
+    Returns:
+      (x_star, cost, iters, rnorm, dxnorm, converged)
+    """
 
-        r_all, J_all = problem.linearize(ctx=ctx, time=getattr(ctx, "time", None), required=required)
+    rnorm = float("inf")
+    dxnorm = float("inf")
+    converged = False
 
-        nr = float(np.linalg.norm(r_all))
+    time = getattr(ctx, "time", None) if ctx is not None else None
+
+    for k in range(int(max_iters)):
+        if ctx is not None and getattr(ctx, "state", None) is not None:
+            update_if_needed = getattr(ctx.state, "update_if_needed", None)
+            if callable(update_if_needed):
+                update_if_needed(variables, time=time, required=required)
+
+        r_all, J_all = problem.linearize(ctx=ctx, time=time, required=required)
+        rnorm = float(np.linalg.norm(r_all))
+
         if on_iter is not None:
-            on_iter(k, nr, 0.0)
+            on_iter(k, rnorm, 0.0)
 
-        if nr < tol_r:
-            break
+        if rnorm < tol_r:
+            converged = True
+            x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+            cost = float(r_all @ r_all)
+            return x_star, cost, k, rnorm, 0.0, converged
 
         lhs = J_all.T @ J_all
         rhs = -J_all.T @ r_all
 
         dx, *_ = np.linalg.lstsq(lhs, rhs, rcond=None)
-        ndx = float(np.linalg.norm(dx))
+        dx = np.asarray(dx, dtype=float).reshape(-1)
+        dxnorm = float(np.linalg.norm(dx))
 
         if on_iter is not None:
-            on_iter(k, nr, ndx)
+            on_iter(k, rnorm, dxnorm)
 
-        if ndx < tol_dx:
-            break
+        if dxnorm < tol_dx:
+            converged = True
+            x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+            cost = float(r_all @ r_all)
+            return x_star, cost, k, rnorm, dxnorm, converged
 
         variables.apply_dx(dx)
         variables.revision += 1
+
+    # max_iters exhausted: report residual at final x (after last update)
+    if ctx is not None and getattr(ctx, "state", None) is not None:
+        update_if_needed = getattr(ctx.state, "update_if_needed", None)
+        if callable(update_if_needed):
+            update_if_needed(variables, time=time, required=required)
+
+    r_all, _J_all = problem.linearize(ctx=ctx, time=time, required=required)
+    rnorm = float(np.linalg.norm(r_all))
+    x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+    cost = float(r_all @ r_all)
+    return x_star, cost, int(max_iters), rnorm, dxnorm, converged
