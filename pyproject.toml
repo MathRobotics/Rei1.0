@@ -3,7 +3,7 @@ name = "eiopt"
 version = "0.1.0"
 description = "Optimization utilities (ported from RoboKots inward)"
 readme = "README.md"
-requires-python = ">=3.13.1"
+requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.0",
 ]
