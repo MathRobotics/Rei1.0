@@ -49,8 +49,8 @@ class RoboKotsKinemaitcsStateBuilder:
 
     Notes:
       - This is intentionally minimal. Extend as needed (rot/frame/etc).
-      - Joint angle keys (dtype="joint") are typically injected by
-        `eiopt.adapters.with_standard_joint_q`.
+      - Decision variables (e.g. joint angles) are typically read via `get_var`
+        rather than requested from `build_state()`.
     """
 
     def __init__(self, model: Any, data: Any, *, q_var: str = "q") -> None:

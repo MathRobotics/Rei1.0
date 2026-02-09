@@ -20,6 +20,16 @@ def load_problem_toml(path: str | Path) -> dict[str, Any]:
 
 
 def _normalize_toml_problem_def(data: dict[str, Any]) -> None:
+    default_var: str | None = None
+    vars_spec = data.get("variables")
+    if isinstance(vars_spec, list):
+        names = [v.get("name") for v in vars_spec if isinstance(v, dict) and "name" in v]
+        names = [str(n) for n in names if n is not None]
+        if len(names) == 1:
+            default_var = names[0]
+        elif "q" in names:
+            default_var = "q"
+
     terms = data.get("terms")
     if not isinstance(terms, list):
         return
@@ -33,6 +43,9 @@ def _normalize_toml_problem_def(data: dict[str, Any]) -> None:
             if node.get("type") != "get_state":
                 continue
             jac = node.get("jac")
-            if isinstance(jac, dict) and "var" in jac:
+            if isinstance(jac, dict):
+                if "var" not in jac and default_var is not None:
+                    jac["var"] = default_var
                 continue
-            node["jac"] = {"var": "q"}
+            if default_var is not None:
+                node["jac"] = {"var": default_var}

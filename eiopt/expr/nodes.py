@@ -29,6 +29,59 @@ class GetStateExpr:
 
 
 @dataclass
+class GetVarExpr:
+    """Read decision variables directly from the VariablePack (no StateCache deps).
+
+    If `k` is provided and the variable dimension is divisible by (time.N+1),
+    the variable is treated as a stacked trajectory and sliced by k.
+    """
+
+    name: str
+    vars: Sequence[Variable]
+    k: int | None = None
+
+    def deps(self):
+        return []
+
+    def eval(self, ctx: EvalContext):
+        x = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
+        n_total = int(x.size)
+
+        if self.k is None:
+            return x.copy(), [np.eye(n_total, dtype=float)]
+
+        k = int(self.k)
+
+        steps = 1
+        time = getattr(ctx, "time", None)
+        if time is not None and hasattr(time, "N"):
+            try:
+                steps = int(time.N) + 1
+            except Exception:
+                steps = 1
+
+        chunked = bool(steps > 1 and n_total % steps == 0)
+        if not chunked:
+            if k != 0:
+                raise ValueError(
+                    f"{self.name}: requested k={k}, but variable '{self.vars[0].name}' is not time-chunked "
+                    f"(dim={n_total}, steps={steps})."
+                )
+            return x.copy(), [np.eye(n_total, dtype=float)]
+
+        if k < 0 or k >= steps:
+            raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+
+        n = int(n_total // steps)
+        start = int(k * n)
+        y = x[start : start + n].copy()
+
+        J = np.zeros((n, n_total), dtype=float)
+        J[:, start : start + n] = np.eye(n, dtype=float)
+        return y, [J]
+
+
+@dataclass
 class ConstantExpr:
     name: str
     value: np.ndarray
