@@ -9,6 +9,7 @@ from __future__ import annotations
 from . import core, dsl, expr, model, solvers
 from .solvers import nls, solve_gauss_newton
 from .dsl import compile_problem, load_problem_toml
+from .report import format_solve_report
 
 __all__ = [
     "core",
@@ -20,4 +21,5 @@ __all__ = [
     "solve_gauss_newton",
     "compile_problem",
     "load_problem_toml",
+    "format_solve_report",
 ]
