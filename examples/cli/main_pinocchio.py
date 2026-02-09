@@ -20,7 +20,7 @@ from eiopt.dsl.dsl_ops import find_const_expr, find_var_spec, rewrite_get_state_
 
 _EXAMPLES_DIR = Path(__file__).resolve().parents[1]
 _DEFAULT_URDF_PATH = _EXAMPLES_DIR / "models" / "planar2.urdf"
-_DEFAULT_SPEC_PATH = _EXAMPLES_DIR / "specs" / "pinocchio_ik_pos.toml"
+_DEFAULT_SPEC_PATH = _EXAMPLES_DIR / "dls" / "pinocchio_ik_pos.toml"
 
 
 def main(argv: list[str] | None = None) -> int:

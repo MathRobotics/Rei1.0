@@ -6,7 +6,7 @@ import numpy as np
 
 from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
 
-_DEFAULT_DSL_PATH = Path(__file__).parent / "specs" / "basic.toml"
+_DEFAULT_DSL_PATH = Path(__file__).parent / "dls" / "basic.toml"
 
 
 def main() -> None:

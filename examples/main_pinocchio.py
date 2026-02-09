@@ -16,7 +16,7 @@ from eiopt.backends.pinocchio import PinocchioFramePosStateBuilder
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _URDF_PATH = _EXAMPLES_DIR / "models" / "planar2.urdf"
-_SPEC_PATH = _EXAMPLES_DIR / "specs" / "pinocchio_ik_pos.toml"
+_SPEC_PATH = _EXAMPLES_DIR / "dls" / "pinocchio_ik_pos.toml"
 
 
 def main() -> int:
