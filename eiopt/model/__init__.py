@@ -14,7 +14,6 @@ from .term import (
     DiagonalWeightCost,
     ScalarWeightCost,
     HuberCost,
-    evaluate_expr_with_cost,
 )
 
 __all__ = [
@@ -31,6 +30,4 @@ __all__ = [
     "DiagonalWeightCost",
     "ScalarWeightCost",
     "HuberCost",
-    "evaluate_expr_with_cost",
 ]
-

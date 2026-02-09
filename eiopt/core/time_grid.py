@@ -31,9 +31,9 @@ class TimeGrid:
         return cls(N=0, dt=0.0, revision=0)
 
     @classmethod
-    def from_spec(cls, spec: dict) -> "TimeGrid":
-        if spec is None:
-            raise ValueError("TimeGrid spec is required")
-        if "N" not in spec or "dt" not in spec:
-            raise ValueError("TimeGrid spec must contain 'N' and 'dt'")
-        return cls(N=int(spec["N"]), dt=float(spec["dt"]))
+    def from_dsl(cls, dsl: dict) -> "TimeGrid":
+        if dsl is None:
+            raise ValueError("TimeGrid dsl is required")
+        if "N" not in dsl or "dt" not in dsl:
+            raise ValueError("TimeGrid dsl must contain 'N' and 'dt'")
+        return cls(N=int(dsl["N"]), dt=float(dsl["dt"]))

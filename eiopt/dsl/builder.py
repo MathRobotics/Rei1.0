@@ -66,20 +66,20 @@ def build_expr(ctx: BuilderContext, spec: dict):
 
 
 def build_problem(
-    spec: dict,
+    dsl: dict,
     *,
     state_cache: StateCache,
     time: TimeGrid,
     registry: Registry,
     model: Any = None,
 ) -> tuple[Problem, EvalContext]:
-    variables: List[Variable] = [build_variable(v) for v in spec.get("variables", [])]
+    variables: List[Variable] = [build_variable(v) for v in dsl.get("variables", [])]
     pack = VariablePack(variables)
 
     ctx_build = BuilderContext(pack=pack, state_cache=state_cache, time=time, registry=registry, model=model)
 
     terms = []
-    for t in spec.get("terms", []):
+    for t in dsl.get("terms", []):
         expr = build_expr(ctx_build, t["expr"])
         cost = build_cost(registry, t.get("cost", {"type": "l2"}))
         terms.append((expr, cost))
@@ -116,8 +116,8 @@ def prepare_for_solve(
     return required_list
 
 
-def build_problem_from_spec(
-    spec: dict,
+def compile_problem(
+    dsl: dict,
     *,
     build_state: Callable[..., dict],
     registry: Registry | None = None,
@@ -126,10 +126,11 @@ def build_problem_from_spec(
     if registry is None:
         registry = create_default_registry()
 
-    time_spec = spec.get("time", None)
-    time = TimeGrid.single_time() if time_spec is None else TimeGrid.from_spec(time_spec)
+    time_dsl = dsl.get("time", None)
+    time = TimeGrid.single_time() if time_dsl is None else TimeGrid.from_dsl(time_dsl)
     cache = StateCache(build_state=build_state)
 
-    problem, ctx = build_problem(spec, state_cache=cache, time=time, registry=registry, model=model)
+    problem, ctx = build_problem(dsl, state_cache=cache, time=time, registry=registry, model=model)
     required = collect_required(problem)
     return problem, ctx, required
+

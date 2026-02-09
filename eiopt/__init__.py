@@ -6,10 +6,10 @@ This repository is a standalone extraction/re-implementation of the
 
 from __future__ import annotations
 
-from . import adapters, core, expr, model, solvers, spec
+from . import adapters, core, dsl, expr, model, solvers
 from .adapters import with_standard_joint_q
 from .solvers import nls, solve_gauss_newton
-from .spec import build_problem_from_spec
+from .dsl import compile_problem, load_problem_toml
 
 __all__ = [
     "adapters",
@@ -17,9 +17,10 @@ __all__ = [
     "expr",
     "model",
     "solvers",
-    "spec",
+    "dsl",
     "with_standard_joint_q",
     "nls",
     "solve_gauss_newton",
-    "build_problem_from_spec",
+    "compile_problem",
+    "load_problem_toml",
 ]

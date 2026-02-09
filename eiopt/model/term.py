@@ -190,24 +190,3 @@ class HuberCost:
         blocks2 = [sw * np.asarray(B, dtype=float) for B in blocks]
         return r2, blocks2
 
-
-def evaluate_expr_with_cost(expr: Expr, cost: Cost, ctx: EvalContext) -> Tuple[Array, Sequence[Array]]:
-    r, blocks = expr.eval(ctx)
-    r2, blocks2 = cost.apply(r, blocks)
-
-    r2 = np.asarray(r2, dtype=float).reshape(-1)
-    blocks2 = [np.asarray(B, dtype=float) for B in blocks2]
-
-    m = int(r2.size)
-    if len(blocks2) != len(expr.vars):
-        raise ValueError(
-            f"evaluate_expr_with_cost: len(blocks) != len(vars) after cost '{cost.name}'. "
-            f"{len(blocks2)} vs {len(expr.vars)}"
-        )
-    for v, B in zip(expr.vars, blocks2):
-        if B.ndim != 2 or B.shape[0] != m or B.shape[1] != v.dim():
-            raise ValueError(
-                f"evaluate_expr_with_cost: incompatible shapes after cost '{cost.name}'. "
-                f"r={r2.shape}, block={B.shape}, var='{v.name}', var_dim={v.dim()}"
-            )
-    return r2, blocks2

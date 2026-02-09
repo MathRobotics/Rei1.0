@@ -10,26 +10,6 @@ from ..core.state_schema import DEFAULT_ROBOT_NAME, DTYPE_JOINT, jac_field
 Array = np.ndarray
 
 
-def _call_build_state(
-    build_state: Callable[..., dict],
-    x_all: Array,
-    *,
-    pack: Any = None,
-    time: Any = None,
-    required: Optional[Iterable[StateKey]] = None,
-) -> dict:
-    try:
-        return build_state(x_all, pack=pack, time=time, required=required)
-    except TypeError:
-        try:
-            return build_state(x_all, time=time, required=required)
-        except TypeError:
-            try:
-                return build_state(x_all, time=time)
-            except TypeError:
-                return build_state(x_all)
-
-
 def with_standard_joint_q(
     build_state: Callable[..., dict],
     *,
@@ -61,7 +41,7 @@ def with_standard_joint_q(
         time: Any = None,
         required: Optional[Iterable[StateKey]] = None,
     ) -> dict:
-        st = _call_build_state(build_state, x_all, pack=pack, time=time, required=required)
+        st = build_state(x_all, pack=pack, time=time, required=required)
         if st is None:
             st = {}
         if not isinstance(st, dict):

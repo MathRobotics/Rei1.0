@@ -17,7 +17,7 @@ def iter_nodes(obj: Any) -> Iterator[dict]:
 
 
 def rewrite_get_state_owner_name(
-    spec: dict,
+    dsl: dict,
     *,
     dtype: str,
     owner_type: str,
@@ -32,7 +32,7 @@ def rewrite_get_state_owner_name(
     """
 
     n = 0
-    for term in spec.get("terms", []) or []:
+    for term in dsl.get("terms", []) or []:
         expr = term.get("expr", None)
         for node in iter_nodes(expr):
             if node.get("type", None) != "get_state":
@@ -49,10 +49,10 @@ def rewrite_get_state_owner_name(
     return n
 
 
-def find_const_expr(spec: dict, *, name: str) -> dict | None:
+def find_const_expr(dsl: dict, *, name: str) -> dict | None:
     """Find a `const` expression node by its `name` field."""
 
-    for term in spec.get("terms", []) or []:
+    for term in dsl.get("terms", []) or []:
         expr = term.get("expr", None)
         for node in iter_nodes(expr):
             if node.get("type", None) == "const" and node.get("name", None) == name:
@@ -60,20 +60,11 @@ def find_const_expr(spec: dict, *, name: str) -> dict | None:
     return None
 
 
-def find_var_spec(spec: dict, *, name: str) -> dict | None:
-    """Find a variable spec in `spec["variables"]` by its `name` field."""
+def find_var_spec(dsl: dict, *, name: str) -> dict | None:
+    """Find a variable entry in `dsl["variables"]` by its `name` field."""
 
-    for v in spec.get("variables", []) or []:
+    for v in dsl.get("variables", []) or []:
         if isinstance(v, dict) and v.get("name", None) == name:
             return v
     return None
-
-
-def set_const_value(spec: dict, *, name: str, value: Any) -> None:
-    """Set `value` of a `const` expr node (found by `name`)."""
-
-    node = find_const_expr(spec, name=name)
-    if node is None:
-        raise KeyError(f"const expr not found: name={name!r}")
-    node["value"] = value
 
