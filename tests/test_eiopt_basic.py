@@ -5,11 +5,10 @@ import unittest
 import numpy as np
 
 from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
-from eiopt.core.state_schema import jac_field, joint_q_jac_key, joint_q_key
+from eiopt.core.state_schema import jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt import compile_problem
-from eiopt.adapters import with_standard_joint_q
-from eiopt.expr.nodes import GetStateExpr
+from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton
 from eiopt.model import Problem, DirectVectorExpr, EvalContext, L2Cost, Variable, VariablePack
 
@@ -98,20 +97,29 @@ class TestEiOptBasic(unittest.TestCase):
         frames = {k.frame for k in required}
         self.assertEqual(frames, {"world"})
 
-    def test_backend_wrapper_injects_joint_q(self) -> None:
+    def test_get_var_expr_reads_pack(self) -> None:
+        q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
+        pack = VariablePack([q_var])
+        time = TimeGrid.single_time()
+
+        expr = GetVarExpr(name="get_q", vars=[q_var])
+        ctx = EvalContext(pack=pack, state=None, time=time)
+
+        q, blocks = expr.eval(ctx)
+        self.assertTrue(np.allclose(q, np.array([1.0, 2.0], dtype=float)))
+        self.assertEqual(len(blocks), 1)
+        self.assertTrue(np.allclose(blocks[0], np.eye(2, dtype=float)))
+
+    def test_get_var_expr_slices_time_chunked(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=float))
         pack = VariablePack([q_var])
         time = TimeGrid(N=2, dt=0.1)  # k=0,1,2
 
-        key_q = joint_q_key(k=1)
-        key_J = joint_q_jac_key(k=1, var="q")
+        expr = GetVarExpr(name="get_q1", vars=[q_var], k=1)
+        ctx = EvalContext(pack=pack, state=None, time=time)
 
-        wrapped = with_standard_joint_q(lambda x_all, *, pack=None, time=None, required=None: {})
-        cache = StateCache(build_state=wrapped)
-        cache.update_if_needed(pack, time=time, required=[key_q, key_J])
-
-        q1 = np.asarray(cache.get(key_q), dtype=float).reshape(-1)
-        J1 = np.asarray(cache.get(key_J), dtype=float)
+        q1, blocks = expr.eval(ctx)
+        J1 = np.asarray(blocks[0], dtype=float)
 
         self.assertTrue(np.allclose(q1, np.array([3.0, 4.0], dtype=float)))
 
