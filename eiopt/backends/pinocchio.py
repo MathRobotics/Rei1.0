@@ -78,6 +78,9 @@ class PinocchioFramePosStateBuilder(BackendFramePosStateBuilder):
             pin.computeJointJacobians(self.model, self.data, q)
         pin.updateFramePlacements(self.model, self.data)
 
+    def _resolve_frame_id(self, frame_name: str) -> int:
+        return int(self.model.getFrameId(str(frame_name)))
+
     def _frame_pos(self, frame_id: int) -> Array:
         return self.data.oMf[frame_id].translation
 

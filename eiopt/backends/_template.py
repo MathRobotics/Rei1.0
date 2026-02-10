@@ -37,6 +37,11 @@ class BackendFramePosStateBuilder:
 
         raise NotImplementedError("TODO: implement backend kinematics update.")
 
+    def _resolve_frame_id(self, frame_name: str) -> int:
+        """Resolve backend-specific frame identifier from a frame name."""
+
+        raise NotImplementedError("TODO: implement backend frame name resolution.")
+
     def _frame_pos(self, frame_id: int) -> Array:
         """Return frame position (3,) for the given `frame_id`."""
 
@@ -56,7 +61,7 @@ class BackendFramePosStateBuilder:
         name = str(frame_name)
         if name in self._frame_id_cache:
             return self._frame_id_cache[name]
-        frame_id = int(self.model.getFrameId(name))
+        frame_id = int(self._resolve_frame_id(name))
         self._frame_id_cache[name] = frame_id
         return frame_id
 
