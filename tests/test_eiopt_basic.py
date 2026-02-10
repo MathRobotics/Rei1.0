@@ -5,9 +5,10 @@ import unittest
 import numpy as np
 
 from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
-from eiopt.core.state_schema import jac_field
+from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt import compile_problem, format_solve_report
+from eiopt.backends._template import BackendSingleFieldStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton
 from eiopt.model import Problem, ProblemRuntime, DirectVectorExpr, RuntimeContext, L2Cost, Variable, VariablePack
@@ -169,6 +170,54 @@ class TestEiOptBasic(unittest.TestCase):
         cache.update_if_needed(pack, time=time, required=None)
         cache.update_if_needed(pack, time=time, required=[key_a])
         self.assertEqual(calls, [None])
+
+    def test_single_field_state_builder_supports_non_pos_field(self) -> None:
+        class DummyRotBuilder(BackendSingleFieldStateBuilder):
+            def __init__(self):
+                super().__init__(
+                    model=None,
+                    data=None,
+                    q_var="q",
+                    dtype=DTYPE_KINEMATICS,
+                    owner_type="joint",
+                    field="rot",
+                )
+                self.last_q = np.zeros((0,), dtype=float)
+
+            def _update_kinematics(self, q: np.ndarray) -> None:
+                self.last_q = np.asarray(q, dtype=float).reshape(-1)
+
+            def _resolve_state_ref(self, key: StateKey):
+                return str(key.owner.owner_name)
+
+            def _state_value(self, q: np.ndarray, key: StateKey, state_ref):
+                del q, key
+                return np.array([float(len(state_ref)), 1.0], dtype=float)
+
+            def _state_jacobian(self, q: np.ndarray, key: StateKey, state_ref):
+                del key, state_ref
+                n = int(np.asarray(q, dtype=float).size)
+                return np.eye(2, n, dtype=float)
+
+        builder = DummyRotBuilder()
+        owner = OwnerKey(owner_type="joint", owner_name="j1")
+        key_rot = StateKey(k=0, owner=owner, dtype=DTYPE_KINEMATICS, field="rot", frame="world")
+        key_rot_j = StateKey(k=0, owner=owner, dtype=DTYPE_KINEMATICS, field="rot_J_q", frame="world")
+
+        ignored_owner = OwnerKey(owner_type="link", owner_name="j1")
+        key_ignored = StateKey(k=0, owner=ignored_owner, dtype=DTYPE_KINEMATICS, field="rot", frame="world")
+
+        out = builder.build_state(
+            np.array([0.2, -0.1], dtype=float),
+            required=[key_rot, key_rot_j, key_ignored],
+        )
+
+        self.assertIn(key_rot, out)
+        self.assertIn(key_rot_j, out)
+        self.assertNotIn(key_ignored, out)
+        self.assertTrue(np.allclose(out[key_rot], np.array([2.0, 1.0], dtype=float)))
+        self.assertTrue(np.allclose(out[key_rot_j], np.eye(2, 2, dtype=float)))
+        self.assertTrue(np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float)))
 
 
 if __name__ == "__main__":

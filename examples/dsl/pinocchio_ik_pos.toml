@@ -1,10 +1,9 @@
 [[variables]]
-name = "q"
-dim = 2
-init = [0.0, 0.0]
+    name = "q"
+    dim = 2
+    init = [0.0, 0.0]
 
 [[terms]]
-
     [terms.expr]
     type = "sub"
 
@@ -33,7 +32,6 @@ init = [0.0, 0.0]
     type = "l2"
 
 [[terms]]
-
     [terms.expr]
     type = "sub"
 
