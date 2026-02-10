@@ -7,6 +7,7 @@ import numpy as np
 from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
 from eiopt.core.time_grid import TimeGrid
+from eiopt.core.trajectory import LinearTrajectoryMap
 from eiopt import compile_problem, format_solve_report
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
@@ -135,6 +136,51 @@ class TestEiOptBasic(unittest.TestCase):
         expected_J = np.zeros((2, 6), dtype=float)
         expected_J[:, 2:4] = np.eye(2, dtype=float)
         self.assertTrue(np.allclose(J1, expected_J))
+
+    def test_linear_trajectory_map_q_and_jac(self) -> None:
+        A = np.array(
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.5, 0.0, 0.5, 0.0],
+                [0.0, 0.5, 0.0, 0.5],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+        b = np.array([0.1, -0.2, 0.0, 0.0, -0.3, 0.4], dtype=float)
+        traj = LinearTrajectoryMap(A=A, b=b, steps=3, q_dim=2)
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+
+        q0 = traj.q_at(p, 0)
+        q1 = traj.q_at(p, 1)
+        q2 = traj.q_at(p, 2)
+
+        self.assertTrue(np.allclose(q0, np.array([1.1, 1.8], dtype=float)))
+        self.assertTrue(np.allclose(q1, np.array([2.0, 3.0], dtype=float)))
+        self.assertTrue(np.allclose(q2, np.array([2.7, 4.4], dtype=float)))
+
+        J1 = traj.dqdp_at(1)
+        self.assertTrue(np.allclose(J1, np.array([[0.5, 0.0, 0.5, 0.0], [0.0, 0.5, 0.0, 0.5]], dtype=float)))
+
+    def test_linear_trajectory_map_from_blocks(self) -> None:
+        A_blocks = [
+            np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float),
+            np.array([[0.25, 0.0], [0.0, 0.25]], dtype=float),
+        ]
+        b_blocks = [
+            np.array([0.0, 0.0], dtype=float),
+            np.array([1.0, -1.0], dtype=float),
+        ]
+        traj = LinearTrajectoryMap.from_blocks(A_blocks, b_blocks=b_blocks)
+        p = np.array([4.0, 8.0], dtype=float)
+
+        self.assertEqual(traj.steps, 2)
+        self.assertEqual(traj.q_dim, 2)
+        self.assertEqual(traj.p_dim, 2)
+        self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([4.0, 8.0], dtype=float)))
+        self.assertTrue(np.allclose(traj.q_at(p, 1), np.array([2.0, 1.0], dtype=float)))
 
     def test_state_cache_unions_required(self) -> None:
         q_var = Variable(name="q", x=np.array([0.0], dtype=float))
