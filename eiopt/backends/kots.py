@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ._template import BackendFramePosStateBuilder
+from ._template import BackendSingleFieldStateBuilder
 
 try:
     from robokots.core.state import StateType
@@ -18,16 +18,16 @@ except ImportError as e:  # pragma: no cover
 Array = np.ndarray
 
 
-class KotsFramePosStateBuilder(BackendFramePosStateBuilder):
+class KotsFramePosStateBuilder(BackendSingleFieldStateBuilder):
     """RoboKots/Kots -> `build_state()` bridge for `dtype="kinematics", field="pos"` keys.
 
     This module intentionally delegates all common logic to
-    `eiopt.backends._template.BackendFramePosStateBuilder`.
+    `eiopt.backends._template.BackendSingleFieldStateBuilder`.
 
     You typically need to adjust only:
       - `_update_kinematics()` (how to run FK / prerequisite updates for the current q)
-      - `_frame_pos()` (how to read a frame position)
-      - `_frame_pos_jacobian()` (how to compute the position Jacobian)
+      - `_state_value()` (how to read a state value)
+      - `_state_jacobian()` (how to compute the Jacobian)
     """
 
     def __init__(
@@ -37,7 +37,14 @@ class KotsFramePosStateBuilder(BackendFramePosStateBuilder):
         *,
         q_var: str = "q",
     ) -> None:
-        super().__init__(model, data, q_var=q_var)
+        super().__init__(
+            model,
+            data,
+            q_var=q_var,
+            dtype="kinematics",
+            owner_type="link",
+            field="pos",
+        )
 
     def _update_kinematics(self, q: Array) -> None:
         self.model.import_motions(np.asarray(q, dtype=float).reshape(-1))
@@ -47,15 +54,19 @@ class KotsFramePosStateBuilder(BackendFramePosStateBuilder):
         owner = getattr(key, "owner", None)
         owner_type = getattr(owner, "owner_type", None)
         owner_name = getattr(owner, "owner_name", None)
-        if owner_type != "link" or not isinstance(owner_name, str) or owner_name == "":
-            raise ValueError(f"Kots backend expects link owner in key, got: {key!r}")
+        if owner_type != self.owner_type or not isinstance(owner_name, str) or owner_name == "":
+            raise ValueError(
+                f"Kots backend expects owner_type={self.owner_type!r} in key, got: {key!r}"
+            )
         frame_name = getattr(key, "frame", None) or "world"
-        return StateType("link", owner_name, "pos", str(frame_name))
+        return StateType(self.owner_type, owner_name, self.field, str(frame_name))
 
-    def _frame_pos(self, frame_ref: Any) -> Array:
+    def _state_value(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
+        del q, key
         return np.asarray(self.model.state_info(frame_ref), dtype=float).reshape(3)
 
-    def _frame_pos_jacobian(self, q: Array, frame_ref: Any) -> Array:
+    def _state_jacobian(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
+        del key
         del q
         J = np.asarray(self.model.jacobian(frame_ref), dtype=float)
         if J.ndim != 2:

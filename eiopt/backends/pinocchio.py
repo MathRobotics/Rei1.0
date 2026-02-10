@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ._template import BackendFramePosStateBuilder
+from ._template import BackendSingleFieldStateBuilder
 from ._spatial import Jacobian6Order, linear_part_from_jacobian6
 
 try:
@@ -51,7 +51,7 @@ def compute_pinocchio_frame_jacobian(model: Any, data: Any, q: Array, frame_ref:
     return pin.computeFrameJacobian(model, data, q, frame_id)
 
 
-class PinocchioFramePosStateBuilder(BackendFramePosStateBuilder):
+class PinocchioFramePosStateBuilder(BackendSingleFieldStateBuilder):
     """Pinocchio -> `build_state()` bridge for `dtype="kinematics", field="pos"` keys.
 
     Supported keys (k=0 only):
@@ -72,7 +72,14 @@ class PinocchioFramePosStateBuilder(BackendFramePosStateBuilder):
         q_var: str = "q",
         jac6_order: Jacobian6Order = "linear_angular",
     ) -> None:
-        super().__init__(model, data, q_var=q_var)
+        super().__init__(
+            model,
+            data,
+            q_var=q_var,
+            dtype="kinematics",
+            owner_type="link",
+            field="pos",
+        )
         self.jac6_order = jac6_order
 
     def _update_kinematics(self, q: Array) -> None:
@@ -85,14 +92,18 @@ class PinocchioFramePosStateBuilder(BackendFramePosStateBuilder):
         owner = getattr(key, "owner", None)
         owner_type = getattr(owner, "owner_type", None)
         owner_name = getattr(owner, "owner_name", None)
-        if owner_type != "link" or not isinstance(owner_name, str) or owner_name == "":
-            raise ValueError(f"Pinocchio backend expects link owner in key, got: {key!r}")
+        if owner_type != self.owner_type or not isinstance(owner_name, str) or owner_name == "":
+            raise ValueError(
+                f"Pinocchio backend expects owner_type={self.owner_type!r} in key, got: {key!r}"
+            )
         return int(self.model.getFrameId(owner_name))
 
-    def _frame_pos(self, frame_ref: Any) -> Array:
+    def _state_value(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
+        del q, key
         frame_id = int(frame_ref)
         return self.data.oMf[frame_id].translation
 
-    def _frame_pos_jacobian(self, q: Array, frame_ref: Any) -> Array:
+    def _state_jacobian(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
+        del key
         J6 = compute_pinocchio_frame_jacobian(self.model, self.data, q, frame_ref)
         return linear_part_from_jacobian6(J6, order=self.jac6_order)

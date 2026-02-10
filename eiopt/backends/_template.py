@@ -11,14 +11,22 @@ from ..core.state_schema import DTYPE_KINEMATICS, jac_field
 Array = np.ndarray
 
 
-class BackendFramePosStateBuilder:
-    """Template backend -> build_state() bridge for `dtype="kinematics", field="pos"` keys.
+class BackendSingleFieldStateBuilder:
+    """Template backend -> `build_state()` bridge for one `{dtype, owner_type, field}`.
 
-    Copy this file when adding a new backend, or subclass it.
+    This helper computes values + Jacobians for one field family:
+      - value field: `{field}`
+      - jac field  : `{field}_J_{q_var}`
+    for requested keys that match:
+      - `k == 0`
+      - `dtype == self.dtype`
+      - `owner_type == self.owner_type`
 
-    Expected keys (k=0 only):
-      - dtype="kinematics", owner_type="link", field="pos"
-      - dtype="kinematics", owner_type="link", field="pos_J_<q_var>"
+    Subclasses only implement backend-specific parts:
+      - `_update_kinematics()`
+      - `_resolve_state_ref()`
+      - `_state_value()`
+      - `_state_jacobian()`
 
     Notes:
       - Keep this module importable without heavy dependencies.
@@ -26,10 +34,26 @@ class BackendFramePosStateBuilder:
       - `build_state()` should return only the keys requested in `required`.
     """
 
-    def __init__(self, model: Any, data: Any, *, q_var: str = "q") -> None:
+    def __init__(
+        self,
+        model: Any,
+        data: Any,
+        *,
+        q_var: str = "q",
+        dtype: str = DTYPE_KINEMATICS,
+        owner_type: str = "link",
+        field: str = "pos",
+    ) -> None:
         self.model = model
         self.data = data
         self.q_var = str(q_var)
+        self.dtype = str(dtype)
+        self.owner_type = str(owner_type)
+        self.field = str(field)
+        if self.q_var == "":
+            raise ValueError("BackendSingleFieldStateBuilder: q_var must be non-empty.")
+        if self.field == "":
+            raise ValueError("BackendSingleFieldStateBuilder: field must be non-empty.")
         self._state_ref_cache: dict[StateKey, Any] = {}
 
     def _update_kinematics(self, q: Array) -> None:
@@ -42,20 +66,40 @@ class BackendFramePosStateBuilder:
 
         raise NotImplementedError("TODO: implement backend state reference resolution.")
 
-    def _frame_pos(self, state_ref: Any) -> Array:
-        """Return frame position (3,) for the given backend `state_ref`."""
+    def _state_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
+        """Return state value for the canonical value key."""
 
-        raise NotImplementedError("TODO: implement backend position extraction.")
+        raise NotImplementedError("TODO: implement backend value extraction.")
 
-    def _frame_pos_jacobian(self, q: Array, state_ref: Any) -> Array:
-        """Return linear position Jacobian (3,n) for backend `state_ref`.
-
-        If your backend provides a 6D spatial Jacobian, the (linear, angular) row
-        order is library-dependent. Consider using helpers in `eiopt.backends._spatial`
-        and define the convention in your backend wrapper.
-        """
+    def _state_jacobian(self, q: Array, key: StateKey, state_ref: Any) -> Array:
+        """Return Jacobian for the canonical value key with respect to `q_var`."""
 
         raise NotImplementedError("TODO: implement backend Jacobian extraction.")
+
+    def _accept_required_key(self, key: StateKey) -> bool:
+        if not isinstance(key, StateKey):
+            return False
+        if int(getattr(key, "k", 0)) != 0:
+            return False
+        if getattr(key, "dtype", None) != self.dtype:
+            return False
+        owner = getattr(key, "owner", None)
+        if getattr(owner, "owner_type", None) != self.owner_type:
+            return False
+        owner_name = getattr(owner, "owner_name", None)
+        if not isinstance(owner_name, str) or owner_name == "":
+            return False
+        return True
+
+    def _canonical_value_key(self, key: StateKey) -> StateKey:
+        return StateKey(
+            k=int(key.k),
+            owner=key.owner,
+            dtype=self.dtype,
+            field=self.field,
+            frame=getattr(key, "frame", None),
+            rel_frame=getattr(key, "rel_frame", None),
+        )
 
     def _state_ref(self, key: StateKey) -> Any:
         if key in self._state_ref_cache:
@@ -86,87 +130,52 @@ class BackendFramePosStateBuilder:
 
         self._update_kinematics(q)
 
-        pos_field = "pos"
-        jac_pos_field = jac_field(pos_field, var=self.q_var)
+        value_field = self.field
+        jac_value_field = jac_field(value_field, var=self.q_var)
 
         needs: dict[StateKey, tuple[bool, bool]] = {}
         for key in required:
-            if not isinstance(key, StateKey):
-                continue
-            if int(getattr(key, "k", 0)) != 0:
-                continue
-            if getattr(key, "dtype", None) != DTYPE_KINEMATICS:
-                continue
-            owner = getattr(key, "owner", None)
-            if getattr(owner, "owner_type", None) != "link":
-                continue
-            frame_name = getattr(owner, "owner_name", None)
-            if not isinstance(frame_name, str) or frame_name == "":
+            if not self._accept_required_key(key):
                 continue
 
-            pos_key = StateKey(
-                k=int(key.k),
-                owner=owner,
-                dtype=str(key.dtype),
-                field=pos_field,
-                frame=getattr(key, "frame", None),
-                rel_frame=getattr(key, "rel_frame", None),
-            )
-            need_pos, need_jac = needs.get(pos_key, (False, False))
-            if key.field == pos_field:
-                need_pos = True
-            elif key.field == jac_pos_field:
+            value_key = self._canonical_value_key(key)
+            need_val, need_jac = needs.get(value_key, (False, False))
+            if key.field == value_field:
+                need_val = True
+            elif key.field == jac_value_field:
                 need_jac = True
             else:
                 continue
-            needs[pos_key] = (need_pos, need_jac)
+            needs[value_key] = (need_val, need_jac)
 
         if not needs:
             return {}
 
-        pos_by_key: dict[StateKey, Array] = {}
-        Jpos_by_key: dict[StateKey, Array] = {}
+        value_by_key: dict[StateKey, Array] = {}
+        jac_by_key: dict[StateKey, Array] = {}
 
-        for pos_key, (need_pos, need_jac) in needs.items():
-            state_ref = self._state_ref(pos_key)
+        for value_key, (need_val, need_jac) in needs.items():
+            state_ref = self._state_ref(value_key)
 
-            if need_pos:
-                pos = np.asarray(self._frame_pos(state_ref), dtype=float).reshape(3)
-                pos_by_key[pos_key] = pos.copy()
+            if need_val:
+                value = np.asarray(self._state_value(q, value_key, state_ref), dtype=float).reshape(-1)
+                value_by_key[value_key] = value.copy()
 
             if need_jac:
-                Jpos = np.asarray(self._frame_pos_jacobian(q, state_ref), dtype=float)
-                Jpos_by_key[pos_key] = Jpos.copy()
+                jac = np.asarray(self._state_jacobian(q, value_key, state_ref), dtype=float)
+                jac_by_key[value_key] = jac.copy()
 
         out: dict[StateKey, Any] = {}
         for key in required:
-            if not isinstance(key, StateKey):
+            if not self._accept_required_key(key):
                 continue
-            if int(getattr(key, "k", 0)) != 0:
-                continue
-            if getattr(key, "dtype", None) != DTYPE_KINEMATICS:
-                continue
-            owner = getattr(key, "owner", None)
-            if getattr(owner, "owner_type", None) != "link":
-                continue
-            frame_name = getattr(owner, "owner_name", None)
-            if not isinstance(frame_name, str) or frame_name == "":
+            value_key = self._canonical_value_key(key)
+            if value_key not in needs:
                 continue
 
-            pos_key = StateKey(
-                k=int(key.k),
-                owner=owner,
-                dtype=str(key.dtype),
-                field=pos_field,
-                frame=getattr(key, "frame", None),
-                rel_frame=getattr(key, "rel_frame", None),
-            )
-            if pos_key not in needs:
-                continue
-
-            if key.field == pos_field and pos_key in pos_by_key:
-                out[key] = pos_by_key[pos_key]
-            elif key.field == jac_pos_field and pos_key in Jpos_by_key:
-                out[key] = Jpos_by_key[pos_key]
+            if key.field == value_field and value_key in value_by_key:
+                out[key] = value_by_key[value_key]
+            elif key.field == jac_value_field and value_key in jac_by_key:
+                out[key] = jac_by_key[value_key]
 
         return out
