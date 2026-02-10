@@ -1,37 +1,31 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ..core.state_schema import DTYPE_KINEMATICS, jac_field
+from ..core.state_schema import jac_field
 
 Array = np.ndarray
+DispatchHandler = Callable[[Array, StateKey, Any], Any]
 
 
-class BackendSingleFieldStateBuilder:
-    """Template backend -> `build_state()` bridge for one `{dtype, owner_type, field}`.
+@dataclass(frozen=True)
+class _DispatchEntry:
+    handler: DispatchHandler
+    state_ref_field: str | None = None
 
-    This helper computes values + Jacobians for one field family:
-      - value field: `{field}`
-      - jac field  : `{field}_J_{q_var}`
-    for requested keys that match:
-      - `k == 0`
-      - `dtype == self.dtype`
-      - `owner_type == self.owner_type`
 
-    Subclasses only implement backend-specific parts:
-      - `_update_kinematics()`
-      - `_resolve_state_ref()`
-      - `_state_value()`
-      - `_state_jacobian()`
+class BackendDispatchStateBuilder:
+    """Template backend -> `build_state()` bridge using key-based dispatch.
 
-    Notes:
-      - Keep this module importable without heavy dependencies.
-        If you must import a backend package, wrap it in try/except.
-      - `build_state()` should return only the keys requested in `required`.
+    Typical usage:
+      - implement `_update_kinematics()` / `_resolve_state_ref()`
+      - register handlers with `register_handler()`
+      - or use `register_value_and_jac()` to register a field pair in one call
     """
 
     def __init__(
@@ -40,72 +34,177 @@ class BackendSingleFieldStateBuilder:
         data: Any,
         *,
         q_var: str = "q",
-        dtype: str = DTYPE_KINEMATICS,
-        owner_type: str = "link",
-        field: str = "pos",
     ) -> None:
         self.model = model
         self.data = data
         self.q_var = str(q_var)
-        self.dtype = str(dtype)
-        self.owner_type = str(owner_type)
-        self.field = str(field)
         if self.q_var == "":
-            raise ValueError("BackendSingleFieldStateBuilder: q_var must be non-empty.")
-        if self.field == "":
-            raise ValueError("BackendSingleFieldStateBuilder: field must be non-empty.")
-        self._state_ref_cache: dict[StateKey, Any] = {}
+            raise ValueError("BackendDispatchStateBuilder: q_var must be non-empty.")
+        self._dispatch: dict[tuple[str, str, str], _DispatchEntry] = {}
+        self._state_ref_cache: dict[tuple[int, str, str, str, str, str | None, str | None], Any] = {}
 
     def _update_kinematics(self, q: Array) -> None:
         """Run backend FK/Jacobian prerequisites for the current `q`."""
 
-        raise NotImplementedError("TODO: implement backend kinematics update.")
+        del q
 
     def _resolve_state_ref(self, key: StateKey) -> Any:
         """Resolve backend-specific state reference from a requested StateKey."""
 
         raise NotImplementedError("TODO: implement backend state reference resolution.")
 
-    def _state_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        """Return state value for the canonical value key."""
+    def register_handler(
+        self,
+        *,
+        dtype: str,
+        owner_type: str,
+        field: str,
+        handler: DispatchHandler,
+        state_ref_field: str | None = None,
+    ) -> None:
+        route = (str(dtype), str(owner_type), str(field))
+        if any(part == "" for part in route):
+            raise ValueError("BackendDispatchStateBuilder: dtype/owner_type/field must be non-empty.")
+        if not callable(handler):
+            raise TypeError("BackendDispatchStateBuilder: handler must be callable.")
+        if state_ref_field is not None and str(state_ref_field) == "":
+            raise ValueError("BackendDispatchStateBuilder: state_ref_field must be non-empty.")
+        if route in self._dispatch:
+            raise ValueError(f"BackendDispatchStateBuilder: duplicate handler route: {route}.")
+        self._dispatch[route] = _DispatchEntry(
+            handler=handler,
+            state_ref_field=None if state_ref_field is None else str(state_ref_field),
+        )
 
-        raise NotImplementedError("TODO: implement backend value extraction.")
+    def register_handlers(
+        self,
+        *,
+        dtype: str,
+        owner_type: str,
+        handlers: Mapping[str, DispatchHandler],
+    ) -> None:
+        for field, handler in handlers.items():
+            self.register_handler(
+                dtype=dtype,
+                owner_type=owner_type,
+                field=str(field),
+                handler=handler,
+            )
 
-    def _state_jacobian(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        """Return Jacobian for the canonical value key with respect to `q_var`."""
+    def register_value_and_jac(
+        self,
+        *,
+        dtype: str,
+        owner_type: str,
+        field: str,
+        value_handler: DispatchHandler | None = None,
+        jac_handler: DispatchHandler | None = None,
+        jac_var: str | None = None,
+    ) -> tuple[str, str]:
+        """Register value/jacobian handlers for one logical field family."""
 
-        raise NotImplementedError("TODO: implement backend Jacobian extraction.")
+        field_name = str(field)
+        if field_name == "":
+            raise ValueError("BackendDispatchStateBuilder: field must be non-empty.")
+        if value_handler is None and jac_handler is None:
+            raise ValueError("BackendDispatchStateBuilder: value_handler and jac_handler cannot both be None.")
+
+        var = self.q_var if jac_var is None else str(jac_var)
+        if var == "":
+            raise ValueError("BackendDispatchStateBuilder: jac_var must be non-empty.")
+        jac_name = jac_field(field_name, var=var)
+
+        if value_handler is not None:
+            self.register_handler(
+                dtype=dtype,
+                owner_type=owner_type,
+                field=field_name,
+                handler=value_handler,
+                state_ref_field=field_name,
+            )
+        if jac_handler is not None:
+            self.register_handler(
+                dtype=dtype,
+                owner_type=owner_type,
+                field=jac_name,
+                handler=jac_handler,
+                state_ref_field=field_name,
+            )
+        return field_name, jac_name
 
     def _accept_required_key(self, key: StateKey) -> bool:
         if not isinstance(key, StateKey):
             return False
         if int(getattr(key, "k", 0)) != 0:
             return False
-        if getattr(key, "dtype", None) != self.dtype:
+        dtype = getattr(key, "dtype", None)
+        if not isinstance(dtype, str) or dtype == "":
             return False
         owner = getattr(key, "owner", None)
-        if getattr(owner, "owner_type", None) != self.owner_type:
-            return False
+        owner_type = getattr(owner, "owner_type", None)
         owner_name = getattr(owner, "owner_name", None)
+        if not isinstance(owner_type, str) or owner_type == "":
+            return False
         if not isinstance(owner_name, str) or owner_name == "":
+            return False
+        field = getattr(key, "field", None)
+        if not isinstance(field, str) or field == "":
             return False
         return True
 
-    def _canonical_value_key(self, key: StateKey) -> StateKey:
+    def _route_for_key(self, key: StateKey) -> tuple[str, str, str] | None:
+        owner = getattr(key, "owner", None)
+        owner_type = getattr(owner, "owner_type", None)
+        dtype = getattr(key, "dtype", None)
+        field = getattr(key, "field", None)
+        if not isinstance(owner_type, str) or not isinstance(dtype, str) or not isinstance(field, str):
+            return None
+        return dtype, owner_type, field
+
+    def _extract_q(self, x_all: Array, *, pack: Any = None) -> Array:
+        q = np.asarray(x_all, dtype=float).reshape(-1)
+        if pack is not None and hasattr(pack, "slices") and self.q_var in getattr(pack, "slices", {}):
+            s, e = pack.slices[self.q_var]
+            q = np.asarray(q[s:e], dtype=float).reshape(-1)
+        return q
+
+    def _state_ref_query_key(self, key: StateKey, *, state_ref_field: str | None = None) -> StateKey:
+        if state_ref_field is None or state_ref_field == key.field:
+            return key
         return StateKey(
             k=int(key.k),
             owner=key.owner,
-            dtype=self.dtype,
-            field=self.field,
+            dtype=key.dtype,
+            field=state_ref_field,
             frame=getattr(key, "frame", None),
             rel_frame=getattr(key, "rel_frame", None),
         )
 
-    def _state_ref(self, key: StateKey) -> Any:
-        if key in self._state_ref_cache:
-            return self._state_ref_cache[key]
-        state_ref = self._resolve_state_ref(key)
-        self._state_ref_cache[key] = state_ref
+    def _state_ref_cache_key(self, key: StateKey, *, state_ref_field: str | None = None) -> tuple[int, str, str, str, str, str | None, str | None]:
+        owner = getattr(key, "owner", None)
+        owner_type = str(getattr(owner, "owner_type", ""))
+        owner_name = str(getattr(owner, "owner_name", ""))
+        dtype = str(getattr(key, "dtype", ""))
+        field = str(getattr(key, "field", "")) if state_ref_field is None else str(state_ref_field)
+        frame = getattr(key, "frame", None)
+        rel_frame = getattr(key, "rel_frame", None)
+        return (
+            int(getattr(key, "k", 0)),
+            owner_type,
+            owner_name,
+            dtype,
+            field,
+            None if frame is None else str(frame),
+            None if rel_frame is None else str(rel_frame),
+        )
+
+    def _state_ref(self, key: StateKey, *, state_ref_field: str | None = None) -> Any:
+        query_key = self._state_ref_query_key(key, state_ref_field=state_ref_field)
+        cache_key = self._state_ref_cache_key(query_key, state_ref_field=state_ref_field)
+        if cache_key in self._state_ref_cache:
+            return self._state_ref_cache[cache_key]
+        state_ref = self._resolve_state_ref(query_key)
+        self._state_ref_cache[cache_key] = state_ref
         return state_ref
 
     def build_state(
@@ -121,61 +220,19 @@ class BackendSingleFieldStateBuilder:
         if required is None:
             return {}
 
-        x_all = np.asarray(x_all, dtype=float).reshape(-1)
-
-        q = x_all
-        if pack is not None and hasattr(pack, "slices") and self.q_var in getattr(pack, "slices", {}):
-            s, e = pack.slices[self.q_var]
-            q = np.asarray(x_all[s:e], dtype=float).reshape(-1)
-
+        q = self._extract_q(x_all, pack=pack)
         self._update_kinematics(q)
-
-        value_field = self.field
-        jac_value_field = jac_field(value_field, var=self.q_var)
-
-        needs: dict[StateKey, tuple[bool, bool]] = {}
-        for key in required:
-            if not self._accept_required_key(key):
-                continue
-
-            value_key = self._canonical_value_key(key)
-            need_val, need_jac = needs.get(value_key, (False, False))
-            if key.field == value_field:
-                need_val = True
-            elif key.field == jac_value_field:
-                need_jac = True
-            else:
-                continue
-            needs[value_key] = (need_val, need_jac)
-
-        if not needs:
-            return {}
-
-        value_by_key: dict[StateKey, Array] = {}
-        jac_by_key: dict[StateKey, Array] = {}
-
-        for value_key, (need_val, need_jac) in needs.items():
-            state_ref = self._state_ref(value_key)
-
-            if need_val:
-                value = np.asarray(self._state_value(q, value_key, state_ref), dtype=float).reshape(-1)
-                value_by_key[value_key] = value.copy()
-
-            if need_jac:
-                jac = np.asarray(self._state_jacobian(q, value_key, state_ref), dtype=float)
-                jac_by_key[value_key] = jac.copy()
 
         out: dict[StateKey, Any] = {}
         for key in required:
             if not self._accept_required_key(key):
                 continue
-            value_key = self._canonical_value_key(key)
-            if value_key not in needs:
+            route = self._route_for_key(key)
+            if route is None:
                 continue
-
-            if key.field == value_field and value_key in value_by_key:
-                out[key] = value_by_key[value_key]
-            elif key.field == jac_value_field and value_key in jac_by_key:
-                out[key] = jac_by_key[value_key]
-
+            entry = self._dispatch.get(route, None)
+            if entry is None:
+                continue
+            state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
+            out[key] = entry.handler(q, key, state_ref)
         return out

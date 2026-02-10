@@ -15,7 +15,7 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
-from eiopt.backends.pinocchio import PinocchioFramePosStateBuilder
+from eiopt.backends.pinocchio import PinocchioStateBuilder
 from eiopt.dsl.dsl_ops import find_const_expr, find_var_dsl, rewrite_get_state_owner_name
 
 _EXAMPLES_DIR = Path(__file__).resolve().parents[1]
@@ -44,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("Spec must declare a variable named 'q'.")
     q0 = np.asarray(q_var_dsl["init"], dtype=float).reshape(-1)
 
-    state_builder = PinocchioFramePosStateBuilder(model, data, q_var="q")
+    state_builder = PinocchioStateBuilder(model, data, q_var="q")
     runtime = compile_problem(dsl, build_state=state_builder.build_state)
 
     runtime.update_state_if_needed()

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ._template import BackendSingleFieldStateBuilder
+from ..core.state_schema import DTYPE_KINEMATICS
+from ._template import BackendDispatchStateBuilder
 
 try:
     from robokots.core.state import StateType
@@ -18,17 +21,21 @@ except ImportError as e:  # pragma: no cover
 Array = np.ndarray
 
 
-class KotsFramePosStateBuilder(BackendSingleFieldStateBuilder):
-    """RoboKots/Kots -> `build_state()` bridge for `dtype="kinematics", field="pos"` keys.
+@dataclass(frozen=True)
+class KotsFieldFamily:
+    field: str
 
-    This module intentionally delegates all common logic to
-    `eiopt.backends._template.BackendSingleFieldStateBuilder`.
 
-    You typically need to adjust only:
-      - `_update_kinematics()` (how to run FK / prerequisite updates for the current q)
-      - `_state_value()` (how to read a state value)
-      - `_state_jacobian()` (how to compute the Jacobian)
-    """
+# kots.py 内で「どの field ファミリを提供するか」を宣言する登録リスト。
+KOTS_DEFAULT_FIELD_FAMILIES: tuple[KotsFieldFamily, ...] = (
+    KotsFieldFamily(field="pos"),
+    KotsFieldFamily(field="rot"),
+    KotsFieldFamily(field="frame"),
+)
+
+
+class KotsStateBuilder(BackendDispatchStateBuilder):
+    """RoboKots/Kots -> `build_state()` bridge with StateKey-based automatic dispatch."""
 
     def __init__(
         self,
@@ -36,15 +43,34 @@ class KotsFramePosStateBuilder(BackendSingleFieldStateBuilder):
         data: Any,
         *,
         q_var: str = "q",
+        fields: Sequence[str] | None = None,
     ) -> None:
-        super().__init__(
-            model,
-            data,
-            q_var=q_var,
-            dtype="kinematics",
-            owner_type="link",
-            field="pos",
-        )
+        super().__init__(model, data, q_var=q_var)
+        self.dtype = DTYPE_KINEMATICS
+        self.owner_type = "link"
+
+        family_map = {spec.field: spec for spec in KOTS_DEFAULT_FIELD_FAMILIES}
+        selected_fields = [spec.field for spec in KOTS_DEFAULT_FIELD_FAMILIES] if fields is None else [str(f) for f in fields]
+        if len(selected_fields) == 0:
+            raise ValueError("KotsStateBuilder: fields must be non-empty.")
+
+        self.field_to_jac: dict[str, str] = {}
+        for field in selected_fields:
+            spec = family_map.get(field, None)
+            if spec is None:
+                supported = ", ".join(sorted(family_map.keys()))
+                raise ValueError(
+                    f"KotsStateBuilder: unsupported field {field!r}. "
+                    f"Supported fields: {supported}."
+                )
+            _value_name, jac_name = self.register_value_and_jac(
+                dtype=self.dtype,
+                owner_type=self.owner_type,
+                field=spec.field,
+                value_handler=self._handle_value,
+                jac_handler=self._handle_jac,
+            )
+            self.field_to_jac[spec.field] = jac_name
 
     def _update_kinematics(self, q: Array) -> None:
         self.model.import_motions(np.asarray(q, dtype=float).reshape(-1))
@@ -59,20 +85,25 @@ class KotsFramePosStateBuilder(BackendSingleFieldStateBuilder):
                 f"Kots backend expects owner_type={self.owner_type!r} in key, got: {key!r}"
             )
         frame_name = getattr(key, "frame", None) or "world"
-        return StateType(self.owner_type, owner_name, self.field, str(frame_name))
+        return StateType(self.owner_type, owner_name, key.field, str(frame_name))
 
-    def _state_value(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
+    def _value_from_state_ref(self, state_ref: Any) -> Array:
+        return np.asarray(self.model.state_info(state_ref), dtype=float).reshape(-1)
+
+    def _handle_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del q, key
-        return np.asarray(self.model.state_info(frame_ref), dtype=float).reshape(3)
+        return self._value_from_state_ref(state_ref)
 
-    def _state_jacobian(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
+    def _handle_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del key
         del q
-        J = np.asarray(self.model.jacobian(frame_ref), dtype=float)
+        J = np.asarray(self.model.jacobian(state_ref), dtype=float)
         if J.ndim != 2:
             raise ValueError(f"Kots Jacobian must be 2D, got shape {J.shape}.")
-        if J.shape[0] == 3:
+
+        m = int(self._value_from_state_ref(state_ref).size)
+        if J.shape[0] == m:
             return J
-        if J.shape[1] == 3:
+        if J.shape[1] == m:
             return J.T
-        raise ValueError(f"Kots Jacobian must be (3,n) or (n,3), got {J.shape}.")
+        raise ValueError(f"Kots Jacobian must be ({m},n) or (n,{m}), got {J.shape}.")

@@ -8,7 +8,7 @@ from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt import compile_problem, format_solve_report
-from eiopt.backends._template import BackendSingleFieldStateBuilder
+from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton
 from eiopt.model import Problem, ProblemRuntime, DirectVectorExpr, RuntimeContext, L2Cost, Variable, VariablePack
@@ -171,16 +171,17 @@ class TestEiOptBasic(unittest.TestCase):
         cache.update_if_needed(pack, time=time, required=[key_a])
         self.assertEqual(calls, [None])
 
-    def test_single_field_state_builder_supports_non_pos_field(self) -> None:
-        class DummyRotBuilder(BackendSingleFieldStateBuilder):
+    def test_dispatch_state_builder_registers_value_and_jac_in_one_call(self) -> None:
+        class DummyRotBuilder(BackendDispatchStateBuilder):
             def __init__(self):
-                super().__init__(
-                    model=None,
-                    data=None,
-                    q_var="q",
+                super().__init__(model=None, data=None, q_var="q")
+                self.resolve_calls = 0
+                self.register_value_and_jac(
                     dtype=DTYPE_KINEMATICS,
                     owner_type="joint",
                     field="rot",
+                    value_handler=self._handle_rot,
+                    jac_handler=self._handle_rot_jac,
                 )
                 self.last_q = np.zeros((0,), dtype=float)
 
@@ -188,13 +189,14 @@ class TestEiOptBasic(unittest.TestCase):
                 self.last_q = np.asarray(q, dtype=float).reshape(-1)
 
             def _resolve_state_ref(self, key: StateKey):
+                self.resolve_calls += 1
                 return str(key.owner.owner_name)
 
-            def _state_value(self, q: np.ndarray, key: StateKey, state_ref):
+            def _handle_rot(self, q: np.ndarray, key: StateKey, state_ref):
                 del q, key
                 return np.array([float(len(state_ref)), 1.0], dtype=float)
 
-            def _state_jacobian(self, q: np.ndarray, key: StateKey, state_ref):
+            def _handle_rot_jac(self, q: np.ndarray, key: StateKey, state_ref):
                 del key, state_ref
                 n = int(np.asarray(q, dtype=float).size)
                 return np.eye(2, n, dtype=float)
@@ -218,6 +220,58 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(out[key_rot], np.array([2.0, 1.0], dtype=float)))
         self.assertTrue(np.allclose(out[key_rot_j], np.eye(2, 2, dtype=float)))
         self.assertTrue(np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float)))
+        self.assertEqual(builder.resolve_calls, 1)
+
+    def test_dispatch_state_builder_routes_handlers_by_key(self) -> None:
+        class DummyDispatchBuilder(BackendDispatchStateBuilder):
+            def __init__(self):
+                super().__init__(model=None, data=None, q_var="q")
+                self.resolve_calls = 0
+                self.last_q = np.zeros((0,), dtype=float)
+                self.register_handlers(
+                    dtype=DTYPE_KINEMATICS,
+                    owner_type="link",
+                    handlers={
+                        "pos": self._handle_pos,
+                        "rot": self._handle_rot,
+                    },
+                )
+
+            def _update_kinematics(self, q: np.ndarray) -> None:
+                self.last_q = np.asarray(q, dtype=float).reshape(-1)
+
+            def _resolve_state_ref(self, key: StateKey):
+                self.resolve_calls += 1
+                return str(key.owner.owner_name)
+
+            def _handle_pos(self, q: np.ndarray, key: StateKey, state_ref):
+                del q, key
+                return np.array([float(len(state_ref)), 1.0], dtype=float)
+
+            def _handle_rot(self, q: np.ndarray, key: StateKey, state_ref):
+                del q, key
+                return np.array([float(len(state_ref)), 2.0], dtype=float)
+
+        builder = DummyDispatchBuilder()
+        owner = OwnerKey(owner_type="link", owner_name="ee")
+        key_pos = StateKey(k=0, owner=owner, dtype=DTYPE_KINEMATICS, field="pos", frame="world")
+        key_rot = StateKey(k=0, owner=owner, dtype=DTYPE_KINEMATICS, field="rot", frame="world")
+        key_ignored = StateKey(k=0, owner=owner, dtype=DTYPE_KINEMATICS, field="acc", frame="world")
+        key_ignored_k = StateKey(k=1, owner=owner, dtype=DTYPE_KINEMATICS, field="pos", frame="world")
+
+        out = builder.build_state(
+            np.array([0.2, -0.1], dtype=float),
+            required=[key_pos, key_rot, key_ignored, key_ignored_k],
+        )
+
+        self.assertIn(key_pos, out)
+        self.assertIn(key_rot, out)
+        self.assertNotIn(key_ignored, out)
+        self.assertNotIn(key_ignored_k, out)
+        self.assertTrue(np.allclose(out[key_pos], np.array([2.0, 1.0], dtype=float)))
+        self.assertTrue(np.allclose(out[key_rot], np.array([2.0, 2.0], dtype=float)))
+        self.assertTrue(np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float)))
+        self.assertEqual(builder.resolve_calls, 2)
 
 
 if __name__ == "__main__":
