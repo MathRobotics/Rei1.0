@@ -73,8 +73,71 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             self.field_to_jac[spec.field] = jac_name
 
     def _update_kinematics(self, q: Array) -> None:
-        self.model.import_motions(np.asarray(q, dtype=float).reshape(-1))
+        q_vec = np.asarray(q, dtype=float).reshape(-1)
+        dof = self._model_dof()
+        order = self._model_order()
+
+        if q_vec.size == dof * order:
+            motion = q_vec
+        elif q_vec.size == dof:
+            motion = self._expand_coordinate_motion(q_vec, dof=dof, order=order)
+        else:
+            raise ValueError(
+                "KotsStateBuilder: unexpected q size. "
+                f"Expected dof ({dof}) or dof*order ({dof * order}), got {q_vec.size}."
+            )
+
+        self.model.import_motions(motion)
         self.model.kinematics()
+
+    def _model_dof(self) -> int:
+        dof_fn = getattr(self.model, "dof", None)
+        if callable(dof_fn):
+            return int(dof_fn())
+        robot = getattr(self.model, "robot_", None)
+        if robot is not None and hasattr(robot, "dof"):
+            return int(getattr(robot, "dof"))
+        raise ValueError("KotsStateBuilder: unable to resolve model dof.")
+
+    def _model_order(self) -> int:
+        order_fn = getattr(self.model, "order", None)
+        if callable(order_fn):
+            order = int(order_fn())
+        else:
+            order = int(getattr(self.model, "order_", 1))
+        if order < 1:
+            raise ValueError(f"KotsStateBuilder: model order must be >= 1, got {order}.")
+        return order
+
+    def _expand_coordinate_motion(self, q: Array, *, dof: int, order: int) -> Array:
+        motion = np.zeros(dof * order, dtype=float)
+        robot = getattr(self.model, "robot_", None)
+        if robot is None:
+            for i in range(min(q.size, dof)):
+                motion[i * order] = float(q[i])
+            return motion
+
+        owners = [*getattr(robot, "links", []), *getattr(robot, "joints", [])]
+        owners = [owner for owner in owners if int(getattr(owner, "dof", 0)) > 0]
+        owners.sort(key=lambda owner: int(getattr(owner, "dof_index", 0)))
+
+        cursor = 0
+        for owner in owners:
+            owner_dof = int(getattr(owner, "dof", 0))
+            dof_index = int(getattr(owner, "dof_index", 0))
+            start = dof_index * order
+            stop = start + owner_dof
+            if stop > motion.size:
+                raise ValueError("KotsStateBuilder: invalid dof_index/dof in robot structure.")
+            motion[start:stop] = q[cursor : cursor + owner_dof]
+            cursor += owner_dof
+
+        if cursor != q.size:
+            raise ValueError(
+                "KotsStateBuilder: failed to map q into motion coordinates. "
+                f"Mapped {cursor} elements from q size {q.size}."
+            )
+        return motion
 
     def _resolve_state_ref(self, key: StateKey) -> Any:
         owner = getattr(key, "owner", None)

@@ -65,6 +65,12 @@ PYTHONPATH=. python examples/main_pinocchio.py
 PYTHONPATH=. python examples/cli/main_pinocchio.py --help
 ```
 
+RoboKots 例（`robokots` と互換 `mathrobo` が必要）:
+
+```bash
+PYTHONPATH=. python examples/main_robokots.py
+```
+
 ### solve_gauss_newton の返り値
 
 `solve_gauss_newton()` は最適化後の全決定変数ベクトル（`VariablePack` の順）も返します。

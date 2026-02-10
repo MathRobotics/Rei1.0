@@ -16,7 +16,15 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["eiopt*"]
 
+[tool.uv.sources]
+mathrobo = { git = "https://github.com/MathRobotics/MathRobo.git", rev = "develop" }
+robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "develop" }
+
 [dependency-groups]
+kots = [
+    "mathrobo",
+    "robokots",
+]
 pinocchio = [
     "pin>=3.8.0",
 ]
