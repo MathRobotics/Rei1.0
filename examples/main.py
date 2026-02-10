@@ -22,9 +22,9 @@ def main() -> None:
             return out
 
         for key in required:
-            if getattr(key, "dtype", None) == "frame" and getattr(key, "field", None) == "pos":
+            if getattr(key, "dtype", None) == "kinematics" and getattr(key, "field", None) == "pos":
                 out[key] = pos
-            elif getattr(key, "dtype", None) == "frame" and getattr(key, "field", None) == "pos_J_q":
+            elif getattr(key, "dtype", None) == "kinematics" and getattr(key, "field", None) == "pos_J_q":
                 out[key] = J_pos
         return out
 

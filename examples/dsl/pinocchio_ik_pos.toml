@@ -16,7 +16,7 @@ init = [0.0, 0.0]
     k = 0
     owner_type = "link"
     owner_name = "ee"
-    dtype = "frame"
+    dtype = "kinematics"
     field = "pos"
     frame = "world"
 

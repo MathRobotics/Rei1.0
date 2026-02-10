@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     dsl = load_problem_toml(args.dsl)
 
     ee_frame = str(args.ee)
-    rewrite_get_state_owner_name(dsl, dtype="frame", owner_type="link", owner_name=ee_frame)
+    rewrite_get_state_owner_name(dsl, dtype="kinematics", owner_type="link", owner_name=ee_frame)
 
     q_var_dsl = find_var_dsl(dsl, name="q")
     if q_var_dsl is None:
@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     key_pos = next(
         k
         for k in runtime.required
-        if getattr(k, "dtype", None) == "frame"
+        if getattr(k, "dtype", None) == "kinematics"
         and getattr(k, "field", None) == "pos"
         and getattr(getattr(k, "owner", None), "owner_name", None) == ee_frame
     )
