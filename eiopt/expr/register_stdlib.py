@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import numpy as np
 
-from .registry import Registry
+from .expr_register import ExprRegister
 from .nodes import ConstantExpr, GetStateExpr, GetVarExpr, SubExpr, StackExpr, HingeExpr
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import DEFAULT_FRAME, DTYPE_FRAME, jac_field
 
 
-def register_stdlib(reg: Registry) -> None:
-    reg.register_expr("const", build_const)
-    reg.register_expr("get_state", build_get_state)
-    reg.register_expr("get_var", build_get_var)
-    reg.register_expr("sub", build_sub)
-    reg.register_expr("stack", build_stack)
-    reg.register_expr("hinge", build_hinge)
+def register_stdlib(expr_register: ExprRegister) -> None:
+    expr_register.register_expr("const", build_const)
+    expr_register.register_expr("get_state", build_get_state)
+    expr_register.register_expr("get_var", build_get_var)
+    expr_register.register_expr("sub", build_sub)
+    expr_register.register_expr("stack", build_stack)
+    expr_register.register_expr("hinge", build_hinge)
 
 
 def _default_var_name(ctx, *, preferred: str = "q") -> str:

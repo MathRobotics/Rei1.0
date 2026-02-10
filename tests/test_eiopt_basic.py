@@ -10,7 +10,7 @@ from eiopt.core.time_grid import TimeGrid
 from eiopt import compile_problem, format_solve_report
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton
-from eiopt.model import Problem, DirectVectorExpr, RuntimeContext, L2Cost, Variable, VariablePack
+from eiopt.model import Problem, ProblemRuntime, DirectVectorExpr, RuntimeContext, L2Cost, Variable, VariablePack
 
 
 class TestEiOptBasic(unittest.TestCase):
@@ -27,17 +27,15 @@ class TestEiOptBasic(unittest.TestCase):
 
         expr = DirectVectorExpr(name="x_minus_3", vars=[x_var], fn_value=value, fn_blocks=blocks)
         problem = Problem(variables=pack, terms=[(expr, L2Cost())])
-        ctx = RuntimeContext(pack=pack)
+        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
         x0 = pack.get().copy()
-        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(
-            problem, pack, max_iters=5, ctx=ctx, tol_r=1e-14, tol_dx=1e-14
-        )
+        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(runtime, max_iters=5, tol_r=1e-14, tol_dx=1e-14)
         self.assertTrue(converged)
         self.assertLess(cost, 1e-20)
         self.assertAlmostEqual(float(x_star[0]), 3.0, places=10)
         self.assertAlmostEqual(float(x_var.x[0]), 3.0, places=10)
-        report = format_solve_report(problem, ctx=ctx, x0=x0, x_star=x_star)
+        report = format_solve_report(runtime, x0=x0, x_star=x_star)
         self.assertIn("x_minus_3", report)
         self.assertIn("Variables:", report)
         self.assertIn("x0=", report)
@@ -100,11 +98,11 @@ class TestEiOptBasic(unittest.TestCase):
         def build_state(_x_all: np.ndarray, *, pack=None, time=None, required=None):
             return {}
 
-        _problem, _ctx, required = compile_problem(dsl, build_state=build_state)
-        fields = {k.field for k in required}
+        runtime = compile_problem(dsl, build_state=build_state)
+        fields = {k.field for k in runtime.required}
         self.assertIn("pos", fields)
         self.assertIn(jac_field("pos", var="q"), fields)
-        frames = {k.frame for k in required}
+        frames = {k.frame for k in runtime.required}
         self.assertEqual(frames, {"world"})
 
     def test_get_var_expr_reads_pack(self) -> None:

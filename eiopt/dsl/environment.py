@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..core.time_grid import TimeGrid
-from ..expr.registry import Registry
+from ..expr.expr_register import ExprRegister
 from ..model.term import VariablePack
 
 
@@ -12,18 +12,18 @@ from ..model.term import VariablePack
 class DslBuildEnv:
     pack: VariablePack
     time: TimeGrid
-    registry: Registry
+    expr_register: ExprRegister
 
     def build_expr(self, dsl: dict[str, Any]) -> Any:
         typ = str(dsl["type"])
-        builder = self.registry.expr.get(typ, None)
+        builder = self.expr_register.expr.get(typ, None)
         if builder is None:
             raise ValueError(f"unknown expr type: {typ}")
         return builder(self, dsl)
 
     def build_cost(self, dsl: dict[str, Any]) -> Any:
         typ = str(dsl.get("type", "l2"))
-        builder = self.registry.cost.get(typ, None)
+        builder = self.expr_register.cost.get(typ, None)
         if builder is None:
             raise ValueError(f"unknown cost type: {typ}")
         return builder(dsl)

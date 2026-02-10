@@ -45,17 +45,17 @@ def main(argv: list[str] | None = None) -> int:
     q0 = np.asarray(q_var_dsl["init"], dtype=float).reshape(-1)
 
     state_builder = PinocchioFramePosStateBuilder(model, data, q_var="q")
-    problem, ctx, required = compile_problem(dsl, build_state=state_builder.build_state)
+    runtime = compile_problem(dsl, build_state=state_builder.build_state)
 
-    ctx.state.update_if_needed(ctx.pack, time=ctx.time, required=required)
+    runtime.update_state_if_needed()
     key_pos = next(
         k
-        for k in required
+        for k in runtime.required
         if getattr(k, "dtype", None) == "frame"
         and getattr(k, "field", None) == "pos"
         and getattr(getattr(k, "owner", None), "owner_name", None) == ee_frame
     )
-    ee_pos0 = np.asarray(ctx.state.get(key_pos), dtype=float).reshape(3)
+    ee_pos0 = np.asarray(runtime.state.get(key_pos), dtype=float).reshape(3)
 
     target_expr = find_const_expr(dsl, name="target_pos")
     if target_expr is None:
@@ -65,19 +65,17 @@ def main(argv: list[str] | None = None) -> int:
     print("ee_pos0:", ee_pos0)
     print("target:", target)
 
-    x0 = ctx.pack.get().copy()
-    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
-        problem, ctx.pack, max_iters=20, ctx=ctx, required=required
-    )
+    x0 = runtime.pack.get().copy()
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(runtime, max_iters=20)
 
-    ctx.state.update_if_needed(ctx.pack, time=ctx.time, required=required)
-    ee_pos_star = np.asarray(ctx.state.get(key_pos), dtype=float).reshape(3)
+    runtime.update_state_if_needed()
+    ee_pos_star = np.asarray(runtime.state.get(key_pos), dtype=float).reshape(3)
 
     print("q0:", q0)
     print("q*:", x_star)
     print("ee_pos*:", ee_pos_star)
     if args.report:
-        print(format_solve_report(problem, ctx=ctx, required=required, x0=x0, x_star=x_star))
+        print(format_solve_report(runtime, x0=x0, x_star=x_star))
 
     return 0
 

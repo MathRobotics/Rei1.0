@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from .registry import Registry
+from .expr_register import ExprRegister
 from .nodes import ConstantExpr, GetStateExpr, SubExpr, StackExpr, HingeExpr
 from .register_stdlib import register_stdlib
 
 __all__ = [
-    "Registry",
+    "ExprRegister",
     "ConstantExpr",
     "GetStateExpr",
     "SubExpr",
@@ -13,4 +13,3 @@ __all__ = [
     "HingeExpr",
     "register_stdlib",
 ]
-

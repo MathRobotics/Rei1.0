@@ -5,7 +5,7 @@ from typing import Callable, Any
 
 
 @dataclass
-class Registry:
+class ExprRegister:
     expr: dict[str, Callable[[Any, dict], Any]]
     cost: dict[str, Callable[[dict], Any]]
 
@@ -18,4 +18,3 @@ class Registry:
 
     def register_cost(self, typ: str, fn: Callable[[dict], Any]) -> None:
         self.cost[typ] = fn
-

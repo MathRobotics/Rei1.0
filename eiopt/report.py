@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from .core.state_cache import StateKey
-from .model.problem import Problem
+from .model.runtime import ProblemRuntime
 
 Array = np.ndarray
 
@@ -18,27 +18,6 @@ _DEFAULT_NAME_BLACKLIST = {
     "stack",
     "sub",
 }
-
-
-def _dedupe_required(keys: Iterable[StateKey]) -> list[StateKey]:
-    out: list[StateKey] = []
-    seen: set[StateKey] = set()
-    for k in keys:
-        if k in seen:
-            continue
-        out.append(k)
-        seen.add(k)
-    return out
-
-
-def _collect_required(problem: Problem) -> list[StateKey]:
-    req: list[StateKey] = []
-    for expr, _cost in problem.terms:
-        deps = getattr(expr, "deps", None)
-        if callable(deps):
-            req.extend(list(deps()))
-    return _dedupe_required(req)
-
 
 def _format_vector(x: Array, *, max_elems: int, precision: int) -> str:
     x = np.asarray(x, dtype=float).reshape(-1)
@@ -87,9 +66,8 @@ def _walk_expr(expr: Any) -> Iterator[Any]:
 
 
 def format_solve_report(
-    problem: Problem,
+    runtime: ProblemRuntime,
     *,
-    ctx: Any,
     x0: Array | None = None,
     x_star: Array | None = None,
     required: Iterable[StateKey] | None = None,
@@ -110,17 +88,11 @@ def format_solve_report(
     if name_blacklist is None:
         name_blacklist = set(_DEFAULT_NAME_BLACKLIST)
 
-    required_list = _collect_required(problem) if required is None else list(required)
-
-    time = getattr(ctx, "time", None) if ctx is not None else None
-    pack = getattr(ctx, "pack", None) if ctx is not None else None
-    if pack is None:
-        pack = problem.variables
-
-    state = getattr(ctx, "state", None) if ctx is not None else None
-    update_if_needed = getattr(state, "update_if_needed", None) if state is not None else None
-    if callable(update_if_needed):
-        update_if_needed(pack, time=time, required=required_list)
+    problem = runtime.problem
+    ctx = runtime.ctx
+    pack = runtime.pack
+    required_list = runtime.required_list(required)
+    runtime.update_state_if_needed(required=required_list)
 
     lines: list[str] = []
 

@@ -28,17 +28,15 @@ def main() -> None:
                 out[key] = J_pos
         return out
 
-    problem, ctx, required = compile_problem(dsl, build_state=build_state_backend)
+    runtime = compile_problem(dsl, build_state=build_state_backend)
 
-    q0 = ctx.pack.vars[0].x.copy()
-    x0 = ctx.pack.get().copy()
-    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
-        problem, ctx.pack, max_iters=10, ctx=ctx, required=required
-    )
+    q0 = runtime.pack.vars[0].x.copy()
+    x0 = runtime.pack.get().copy()
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(runtime, max_iters=10)
 
     print("q0:", q0)
     print("q*:", x_star)
-    print(format_solve_report(problem, ctx=ctx, required=required, x0=x0, x_star=x_star))
+    print(format_solve_report(runtime, x0=x0, x_star=x_star))
 
 
 if __name__ == "__main__":

@@ -1,28 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ..model.problem import Problem
-from ..model.term import VariablePack
+from ..model.runtime import ProblemRuntime
 
 Array = np.ndarray
 
 
 def solve_gauss_newton(
-    problem: Problem,
-    variables: VariablePack,
+    runtime: ProblemRuntime,
     max_iters: int = 20,
     *,
-    ctx: Any = None,
     required: Optional[Iterable[StateKey]] = None,
     tol_r: float = 1e-10,
     tol_dx: float = 1e-12,
     on_iter: Optional[Callable[[int, float, float], None]] = None,
 ) -> tuple[Array, float, int, float, float, bool]:
-    """Minimal Gauss-Newton loop for Expr-based Problem.
+    """Minimal Gauss-Newton loop for a `ProblemRuntime`.
 
     Returns:
       (x_star, cost, iters, rnorm, dxnorm, converged)
@@ -32,15 +29,10 @@ def solve_gauss_newton(
     dxnorm = float("inf")
     converged = False
 
-    time = getattr(ctx, "time", None) if ctx is not None else None
+    variables = runtime.pack
 
     for k in range(int(max_iters)):
-        if ctx is not None and getattr(ctx, "state", None) is not None:
-            update_if_needed = getattr(ctx.state, "update_if_needed", None)
-            if callable(update_if_needed):
-                update_if_needed(variables, time=time, required=required)
-
-        r_all, J_all = problem.linearize(ctx=ctx, time=time, required=required)
+        r_all, J_all = runtime.linearize(required=required)
         rnorm = float(np.linalg.norm(r_all))
 
         if on_iter is not None:
@@ -72,12 +64,7 @@ def solve_gauss_newton(
         variables.revision += 1
 
     # max_iters exhausted: report residual at final x (after last update)
-    if ctx is not None and getattr(ctx, "state", None) is not None:
-        update_if_needed = getattr(ctx.state, "update_if_needed", None)
-        if callable(update_if_needed):
-            update_if_needed(variables, time=time, required=required)
-
-    r_all, _J_all = problem.linearize(ctx=ctx, time=time, required=required)
+    r_all, _J_all = runtime.linearize(required=required)
     rnorm = float(np.linalg.norm(r_all))
     x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
     cost = float(r_all @ r_all)

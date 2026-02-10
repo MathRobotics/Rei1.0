@@ -27,14 +27,12 @@ def main() -> int:
     dsl = load_problem_toml(_DSL_PATH)
 
     builder = PinocchioFramePosStateBuilder(model, data, q_var="q")
-    problem, ctx, required = compile_problem(dsl, build_state=builder.build_state)
+    runtime = compile_problem(dsl, build_state=builder.build_state)
 
-    x0 = ctx.pack.get().copy()
-    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(
-        problem, ctx.pack, max_iters=20, ctx=ctx, required=required
-    )
+    x0 = runtime.pack.get().copy()
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(runtime, max_iters=20)
 
-    print(format_solve_report(problem, ctx=ctx, required=required, x0=x0, x_star=x_star))
+    print(format_solve_report(runtime, x0=x0, x_star=x_star))
     return 0
 
 

@@ -7,13 +7,13 @@ import numpy as np
 from ..core.state_cache import StateCache, StateKey
 from ..core.time_grid import TimeGrid
 from ..expr.register_stdlib import register_stdlib
-from ..expr.registry import Registry
+from ..expr.expr_register import ExprRegister
 from ..model.problem import Problem
+from ..model.runtime import ProblemRuntime
 from ..model.term import (
     DiagonalWeightCost,
     HuberCost,
     L2Cost,
-    RuntimeContext,
     ScalarWeightCost,
     Variable,
     VariablePack,
@@ -23,18 +23,18 @@ from .environment import DslBuildEnv
 Array = np.ndarray
 
 
-def register_default_costs(registry: Registry) -> None:
-    registry.register_cost("l2", lambda dsl: L2Cost())
-    registry.register_cost("diag_weight", lambda dsl: DiagonalWeightCost(w=np.asarray(dsl["w"], float)))
-    registry.register_cost("scalar_weight", lambda dsl: ScalarWeightCost(w=float(dsl["w"])))
-    registry.register_cost("huber", lambda dsl: HuberCost(delta=float(dsl["delta"])))
+def register_default_costs(expr_register: ExprRegister) -> None:
+    expr_register.register_cost("l2", lambda dsl: L2Cost())
+    expr_register.register_cost("diag_weight", lambda dsl: DiagonalWeightCost(w=np.asarray(dsl["w"], float)))
+    expr_register.register_cost("scalar_weight", lambda dsl: ScalarWeightCost(w=float(dsl["w"])))
+    expr_register.register_cost("huber", lambda dsl: HuberCost(delta=float(dsl["delta"])))
 
 
-def create_default_registry() -> Registry:
-    registry = Registry()
-    register_stdlib(registry)
-    register_default_costs(registry)
-    return registry
+def create_default_expr_register() -> ExprRegister:
+    expr_register = ExprRegister()
+    register_stdlib(expr_register)
+    register_default_costs(expr_register)
+    return expr_register
 
 
 def build_variable(dsl: dict[str, Any]) -> Variable:
@@ -69,12 +69,12 @@ def build_term(env: DslBuildEnv, dsl: dict[str, Any]) -> tuple[Any, Any]:
     return expr, cost
 
 
-def build_problem(dsl: dict[str, Any], *, registry: Registry) -> tuple[Problem, TimeGrid]:
+def build_problem(dsl: dict[str, Any], *, expr_register: ExprRegister) -> tuple[Problem, TimeGrid]:
     time_dsl = dsl.get("time", None)
     time = TimeGrid.single_time() if time_dsl is None else TimeGrid.from_dsl(time_dsl)
 
     pack = build_variable_pack(dsl)
-    env = DslBuildEnv(pack=pack, time=time, registry=registry)
+    env = DslBuildEnv(pack=pack, time=time, expr_register=expr_register)
     terms = [build_term(env, term_dsl) for term_dsl in dsl.get("terms", [])]
 
     return Problem(variables=pack, terms=terms), time
@@ -94,18 +94,12 @@ def compile_problem(
     dsl: dict[str, Any],
     *,
     build_state: Callable[..., dict],
-    registry: Registry | None = None,
-) -> tuple[Problem, RuntimeContext, list[StateKey]]:
-    if registry is None:
-        registry = create_default_registry()
+    expr_register: ExprRegister | None = None,
+) -> ProblemRuntime:
+    if expr_register is None:
+        expr_register = create_default_expr_register()
 
-    problem, time = build_problem(dsl, registry=registry)
+    problem, time = build_problem(dsl, expr_register=expr_register)
     cache = StateCache(build_state=build_state)
-    ctx = RuntimeContext(
-        pack=problem.variables,
-        state=cache,
-        time=time,
-        revision=int(getattr(time, "revision", 0)),
-    )
     required = collect_required(problem)
-    return problem, ctx, required
+    return ProblemRuntime.from_problem(problem, state=cache, time=time, required=required)
