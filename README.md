@@ -77,6 +77,8 @@ RoboKots 軌道最適化例（線形な `p -> q(k)` マップ）:
 PYTHONPATH=. python examples/main_robokots_traj.py
 ```
 
+※ この例は `matplotlib` を使って軌道を描画します。
+
 ### solve_gauss_newton の返り値
 
 `solve_gauss_newton()` は最適化後の全決定変数ベクトル（`VariablePack` の順）も返します。
