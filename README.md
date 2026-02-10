@@ -102,7 +102,7 @@ type = "get_state"
 k = 0
 owner_type = "link"
 owner_name = "ee"
-dtype = "frame"
+dtype = "kinematics"
 field = "pos"
 
 [terms.expr.jac]
@@ -119,7 +119,7 @@ type = "l2"
 - `owner.owner_type`: `"link" | "joint" | ...`
 - `owner.owner_name`: link/joint 名
 - `k`: 時刻インデックス（`TimeGrid` の `k`）
-- `dtype`: 大分類（推奨: `"frame"` / `"joint"` / `"dynamics"`）
+- `dtype`: 大分類（推奨: `"kinematics"` / `"joint"` / `"dynamics"`）
 - `field`: 量の名前（例: `"pos"`, `"rot"`, `"vel"`, `"acc"`, `"momentum"`, `"force"`, `"torque"`）
 - `frame`: 座標系（推奨: `"world"` / `"local"`）
 - `rel_frame`: 相対量が必要なときの相手フレーム（任意）
@@ -133,7 +133,7 @@ Python 側は `eiopt.core.state_schema.jac_field()` が使えます。
 ## 決定変数の取得（get_var）
 
 `q` などの **決定変数そのもの** は backend の状態計算ではなく、`get_var` Expr で `VariablePack` から直接読み出すのを推奨します。
-この場合 `build_state()` は frame/dynamics など「backend で計算が必要な状態」だけを担当できます。
+この場合 `build_state()` は kinematics/dynamics など「backend で計算が必要な状態」だけを担当できます。
 
 ```toml
 [terms.expr]
@@ -148,7 +148,7 @@ var = "q" # 省略可（変数が1つなら自動）
 backend から `eiopt` に提供する “標準の最小セット” として、まずは以下に絞るのが扱いやすいです。
 （誤差の定義は後から Expr/Residual として設計できるように、ここでは **生の状態** を揃えます）
 
-- `dtype="frame"`
+- `dtype="kinematics"`
   - `frame="world"`（ひとまず world 固定。DSL では省略可で、デフォルト world 扱い）
   - `field="pos"`: `(3,)` 位置ベクトル
   - `field="rot"`: `(9,)` 回転行列 `(3,3)` の row-major flatten
