@@ -20,13 +20,13 @@ from eiopt.dsl.dsl_ops import find_const_expr, find_var_dsl, rewrite_get_state_o
 
 _EXAMPLES_DIR = Path(__file__).resolve().parents[1]
 _DEFAULT_URDF_PATH = _EXAMPLES_DIR / "models" / "planar2.urdf"
-_DEFAULT_DSL_PATH = _EXAMPLES_DIR / "dls" / "pinocchio_ik_pos.toml"
+_DEFAULT_DSL_PATH = _EXAMPLES_DIR / "dsl" / "pinocchio_ik_pos.toml"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pinocchio IK example for EiOpt.")
     parser.add_argument("--urdf", type=Path, default=_DEFAULT_URDF_PATH, help="Path to URDF.")
-    parser.add_argument("--dsl", type=Path, default=_DEFAULT_DSL_PATH, help="Path to problem dsl TOML.")
+    parser.add_argument("--dsl", type=Path, default=_DEFAULT_DSL_PATH, help="Path to problem DSL TOML.")
     parser.add_argument("--ee", type=str, default="ee", help="End-effector frame name.")
     parser.add_argument("--report", action="store_true", help="Print a concise expr/term report after solving.")
     args = parser.parse_args(argv)
