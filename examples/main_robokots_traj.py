@@ -34,6 +34,15 @@ _DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos.toml"
 
 
 def _build_linear_interp_map(*, steps: int, nq: int) -> LinearTrajectoryMap:
+    # Endpoint-parameterized linear trajectory:
+    #   p = [q_start; q_goal] in R^(2*nq)
+    #   q(k) = (1 - alpha_k) q_start + alpha_k q_goal
+    #   alpha_k = k / (steps - 1),  k = 0, ..., steps-1
+    #
+    # In stacked form:
+    #   q_traj = A p + b
+    #   A_k = [ (1-alpha_k) I_nq   alpha_k I_nq ]  (row block for step k)
+    #   b = 0
     if steps < 2:
         raise ValueError(f"steps must be >= 2 for interpolation, got {steps}.")
 
@@ -78,17 +87,76 @@ def _collect_ee_pos_traj(runtime, *, steps: int, owner_name: str = "ee") -> np.n
     return ee
 
 
-def _load_target_pos_traj(dsl: dict, *, steps: int) -> np.ndarray:
+def _resample_xyz_traj(points: np.ndarray, *, steps: int) -> np.ndarray:
+    src = np.asarray(points, dtype=float).reshape(-1, 3)
+    src_steps = int(src.shape[0])
+    if src_steps == steps:
+        return src
+    if src_steps < 2:
+        raise ValueError(
+            "Cannot resample target trajectory from fewer than 2 points. "
+            f"Got {src_steps} point(s)."
+        )
+
+    u_src = np.linspace(0.0, 1.0, src_steps)
+    u_dst = np.linspace(0.0, 1.0, steps)
+    out = np.zeros((steps, 3), dtype=float)
+    for i in range(3):
+        out[:, i] = np.interp(u_dst, u_src, src[:, i])
+    return out
+
+
+def _load_target_pos_traj(dsl: dict, *, steps: int, resample_to_steps: bool = False) -> np.ndarray:
     target_expr = find_const_expr(dsl, name="target_pos_traj")
     if target_expr is None:
         raise ValueError("DSL must contain const expr with name='target_pos_traj'.")
     target = np.asarray(target_expr.get("value", []), dtype=float).reshape(-1)
-    if target.size != steps * 3:
+    if target.size % 3 != 0:
+        raise ValueError(
+            "target_pos_traj length mismatch. "
+            f"Expected multiple of 3, got {target.size}."
+        )
+
+    points = target.reshape(-1, 3)
+    if points.shape[0] == steps:
+        return points
+    if not resample_to_steps:
         raise ValueError(
             "target_pos_traj length mismatch. "
             f"Expected {steps * 3} (=steps*3), got {target.size}."
         )
-    return target.reshape(steps, 3)
+
+    points_rs = _resample_xyz_traj(points, steps=steps)
+    target_expr["value"] = points_rs.reshape(-1).tolist()
+    return points_rs
+
+
+def _sync_stack_range(dsl: dict, *, stack_name: str, steps: int) -> None:
+    terms = dsl.get("terms", [])
+    if not isinstance(terms, list):
+        raise ValueError("DSL must contain list 'terms'.")
+
+    for term in terms:
+        if not isinstance(term, dict):
+            continue
+        expr = term.get("expr", None)
+        if not isinstance(expr, dict):
+            continue
+        a = expr.get("a", None)
+        if not isinstance(a, dict):
+            continue
+        if a.get("type", None) != "stack":
+            continue
+        if a.get("name", None) != stack_name:
+            continue
+        r = a.setdefault("range", {})
+        if not isinstance(r, dict):
+            raise ValueError(f"stack range for '{stack_name}' must be a dict.")
+        r["k0"] = 0
+        r["k1"] = int(steps - 1)
+        return
+
+    raise ValueError(f"Could not find stack expr with name={stack_name!r} in DSL.")
 
 
 def _plot_trajectory(*, ee_opt: np.ndarray, ee_target: np.ndarray, q_opt: np.ndarray) -> None:
@@ -134,6 +202,8 @@ def main() -> int:
     time_dsl = dsl.get("time", {})
     steps = int(time_dsl.get("N", 0)) + 1
     nq = int(kots.dof())
+    _sync_stack_range(dsl, stack_name="ee_pos_traj", steps=steps)
+    ee_target = _load_target_pos_traj(dsl, steps=steps, resample_to_steps=True)
 
     traj_map = _build_linear_interp_map(steps=steps, nq=nq)
 
@@ -149,7 +219,6 @@ def main() -> int:
     x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(runtime, max_iters=20)
     q_opt = np.vstack([traj_map.q_at(x_star, k) for k in range(steps)])
     ee_opt = _collect_ee_pos_traj(runtime, steps=steps, owner_name="ee")
-    ee_target = _load_target_pos_traj(dsl, steps=steps)
 
     print("p*:", x_star)
     for k in range(steps):

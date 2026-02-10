@@ -180,6 +180,8 @@ runtime = compile_problem(dsl, build_state=builder.build_state)
 
 DSL 側では `get_state.jac.var = "p"` を指定します。実例は
 `examples/dsl/kots_traj_pos.toml` と `examples/main_robokots_traj.py` を参照してください。
+`kots_traj_pos.toml` の `time.N` を増やすとステップ数を増やせます
+（この example では `stack.range` と `target_pos_traj` が自動でステップ数に同期されます）。
 
 ## 最小標準セット（pos/rot/frame + (optional) q）
 

@@ -1,5 +1,5 @@
 [time]
-N = 2
+N = 10
 dt = 0.1
 
 [[variables]]
@@ -17,7 +17,7 @@ name = "ee_pos_traj"
 
 [terms.expr.a.range]
 k0 = 0
-k1 = 2
+k1 = 10
 
 [terms.expr.a.inner]
 type = "get_state"
