@@ -6,7 +6,7 @@ from typing import Sequence
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ..model.term import Variable, EvalContext, Expr
+from ..model.term import Variable, RuntimeContext, Expr
 
 
 @dataclass
@@ -19,7 +19,7 @@ class GetStateExpr:
     def deps(self):
         return [self.key_value, self.key_jac_q]
 
-    def eval(self, ctx: EvalContext):
+    def eval(self, ctx: RuntimeContext):
         sc = ctx.state  # StateCache-like
         y = np.asarray(sc.get(self.key_value), dtype=float).reshape(-1)
         J = np.asarray(sc.get(self.key_jac_q), dtype=float)
@@ -43,7 +43,7 @@ class GetVarExpr:
     def deps(self):
         return []
 
-    def eval(self, ctx: EvalContext):
+    def eval(self, ctx: RuntimeContext):
         x = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
         n_total = int(x.size)
 
@@ -90,7 +90,7 @@ class ConstantExpr:
     def deps(self):
         return []
 
-    def eval(self, ctx: EvalContext):
+    def eval(self, ctx: RuntimeContext):
         y = np.asarray(self.value, dtype=float).reshape(-1)
         blocks = [np.zeros((y.size, v.dim()), dtype=float) for v in self.vars]
         return y, blocks
@@ -109,7 +109,7 @@ class SubExpr:
     def deps(self):
         return list(self.a.deps()) + list(self.b.deps())
 
-    def eval(self, ctx: EvalContext):
+    def eval(self, ctx: RuntimeContext):
         ra, Ja = self.a.eval(ctx)
         rb, Jb = self.b.eval(ctx)
         if ra.shape != rb.shape:
@@ -136,7 +136,7 @@ class StackExpr:
             out.extend(list(p.deps()))
         return out
 
-    def eval(self, ctx: EvalContext):
+    def eval(self, ctx: RuntimeContext):
         r_list = []
         J_list = None
         for p in self.parts:
@@ -163,7 +163,7 @@ class HingeExpr:
     def deps(self):
         return self.base.deps()
 
-    def eval(self, ctx: EvalContext):
+    def eval(self, ctx: RuntimeContext):
         h, blocks = self.base.eval(ctx)
 
         h = np.asarray(h, dtype=float).reshape(-1)

@@ -6,14 +6,14 @@ import numpy as np
 
 from ..core.state_cache import StateCache, StateKey
 from ..core.time_grid import TimeGrid
-from .context import BuilderContext
+from .context import DslBuildEnv
 from ..expr.registry import Registry
 from ..expr.register_stdlib import register_stdlib
 from ..model.problem import Problem
 from ..model.term import (
     Variable,
     VariablePack,
-    EvalContext,
+    RuntimeContext,
     L2Cost,
     DiagonalWeightCost,
     ScalarWeightCost,
@@ -57,7 +57,7 @@ def build_cost(registry: Registry, spec: dict):
     return fn(spec)
 
 
-def build_expr(ctx: BuilderContext, spec: dict):
+def build_expr(ctx: DslBuildEnv, spec: dict):
     typ = spec["type"]
     fn = ctx.registry.expr.get(typ, None)
     if fn is None:
@@ -72,11 +72,11 @@ def build_problem(
     time: TimeGrid,
     registry: Registry,
     model: Any = None,
-) -> tuple[Problem, EvalContext]:
+) -> tuple[Problem, RuntimeContext]:
     variables: List[Variable] = [build_variable(v) for v in dsl.get("variables", [])]
     pack = VariablePack(variables)
 
-    ctx_build = BuilderContext(pack=pack, state_cache=state_cache, time=time, registry=registry, model=model)
+    ctx_build = DslBuildEnv(pack=pack, state_cache=state_cache, time=time, registry=registry, model=model)
 
     terms = []
     for t in dsl.get("terms", []):
@@ -85,7 +85,7 @@ def build_problem(
         terms.append((expr, cost))
 
     problem = Problem(variables=pack, terms=terms)
-    ctx_eval = EvalContext(pack=pack, state=state_cache, time=time, revision=int(getattr(time, "revision", 0)))
+    ctx_eval = RuntimeContext(pack=pack, state=state_cache, time=time, revision=int(getattr(time, "revision", 0)))
     return problem, ctx_eval
 
 
@@ -106,7 +106,7 @@ def collect_required(problem: Problem) -> list[StateKey]:
 
 def prepare_for_solve(
     problem: Problem,
-    ctx: EvalContext,
+    ctx: RuntimeContext,
     *,
     required: Optional[Iterable[StateKey]] = None,
 ) -> list[StateKey]:
@@ -122,7 +122,7 @@ def compile_problem(
     build_state: Callable[..., dict],
     registry: Registry | None = None,
     model: Any = None,
-) -> tuple[Problem, EvalContext, list[StateKey]]:
+) -> tuple[Problem, RuntimeContext, list[StateKey]]:
     if registry is None:
         registry = create_default_registry()
 
@@ -133,4 +133,3 @@ def compile_problem(
     problem, ctx = build_problem(dsl, state_cache=cache, time=time, registry=registry, model=model)
     required = collect_required(problem)
     return problem, ctx, required
-

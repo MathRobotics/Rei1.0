@@ -63,7 +63,7 @@ class VariablePack:
 
 
 @dataclass(frozen=True)
-class EvalContext:
+class RuntimeContext:
     """Minimal evaluation context passed to Expr.eval()."""
 
     pack: VariablePack
@@ -76,7 +76,7 @@ class Expr(Protocol):
     name: str
     vars: Sequence[Variable]
 
-    def eval(self, ctx: EvalContext) -> Tuple[Array, Sequence[Array]]:
+    def eval(self, ctx: RuntimeContext) -> Tuple[Array, Sequence[Array]]:
         """Return (residual, Jacobian blocks aligned with self.vars)."""
 
     def deps(self) -> Iterable[StateKey]:
@@ -93,10 +93,10 @@ class DirectVectorExpr:
 
     name: str
     vars: Sequence[Variable]
-    fn_value: Callable[[EvalContext], Array]
-    fn_blocks: Callable[[EvalContext], Sequence[Array]]
+    fn_value: Callable[[RuntimeContext], Array]
+    fn_blocks: Callable[[RuntimeContext], Sequence[Array]]
 
-    def eval(self, ctx: EvalContext) -> Tuple[Array, Sequence[Array]]:
+    def eval(self, ctx: RuntimeContext) -> Tuple[Array, Sequence[Array]]:
         r = np.asarray(self.fn_value(ctx), dtype=float).reshape(-1)
 
         blocks = [np.asarray(B, dtype=float) for B in self.fn_blocks(ctx)]
@@ -189,4 +189,3 @@ class HuberCost:
         r2 = sw * r
         blocks2 = [sw * np.asarray(B, dtype=float) for B in blocks]
         return r2, blocks2
-

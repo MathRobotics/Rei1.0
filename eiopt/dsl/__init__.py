@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .context import BuilderContext
+from .context import DslBuildEnv
 from .builder import (
     register_default_costs,
     create_default_registry,
@@ -16,7 +16,7 @@ from .io import load_problem_toml
 from .dsl_ops import find_const_expr, find_var_spec, rewrite_get_state_owner_name
 
 __all__ = [
-    "BuilderContext",
+    "DslBuildEnv",
     "register_default_costs",
     "create_default_registry",
     "build_variable",

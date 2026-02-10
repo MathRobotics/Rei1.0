@@ -10,7 +10,7 @@ from ..model.term import VariablePack
 
 
 @dataclass
-class BuilderContext:
+class DslBuildEnv:
     pack: VariablePack
     state_cache: StateCache
     time: TimeGrid

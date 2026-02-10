@@ -10,7 +10,7 @@ from eiopt.core.time_grid import TimeGrid
 from eiopt import compile_problem, format_solve_report
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton
-from eiopt.model import Problem, DirectVectorExpr, EvalContext, L2Cost, Variable, VariablePack
+from eiopt.model import Problem, DirectVectorExpr, RuntimeContext, L2Cost, Variable, VariablePack
 
 
 class TestEiOptBasic(unittest.TestCase):
@@ -18,16 +18,16 @@ class TestEiOptBasic(unittest.TestCase):
         x_var = Variable(name="x", x=np.array([0.0], dtype=float))
         pack = VariablePack([x_var])
 
-        def value(ctx: EvalContext) -> np.ndarray:
+        def value(ctx: RuntimeContext) -> np.ndarray:
             x = float(ctx.pack.vars[0].x[0])
             return np.array([x - 3.0], dtype=float)
 
-        def blocks(ctx: EvalContext):
+        def blocks(ctx: RuntimeContext):
             return [np.array([[1.0]], dtype=float)]
 
         expr = DirectVectorExpr(name="x_minus_3", vars=[x_var], fn_value=value, fn_blocks=blocks)
         problem = Problem(variables=pack, terms=[(expr, L2Cost())])
-        ctx = EvalContext(pack=pack)
+        ctx = RuntimeContext(pack=pack)
 
         x0 = pack.get().copy()
         x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(
@@ -69,7 +69,7 @@ class TestEiOptBasic(unittest.TestCase):
         cache.update_if_needed(pack, time=time, required=[key_val, key_jac])
 
         expr = GetStateExpr(name="get_y", vars=[q_var], key_value=key_val, key_jac_q=key_jac)
-        ctx = EvalContext(pack=pack, state=cache, time=time)
+        ctx = RuntimeContext(pack=pack, state=cache, time=time)
 
         y, blocks = expr.eval(ctx)
         self.assertTrue(np.allclose(y, np.array([1.0, 2.0])))
@@ -113,7 +113,7 @@ class TestEiOptBasic(unittest.TestCase):
         time = TimeGrid.single_time()
 
         expr = GetVarExpr(name="get_q", vars=[q_var])
-        ctx = EvalContext(pack=pack, state=None, time=time)
+        ctx = RuntimeContext(pack=pack, state=None, time=time)
 
         q, blocks = expr.eval(ctx)
         self.assertTrue(np.allclose(q, np.array([1.0, 2.0], dtype=float)))
@@ -126,7 +126,7 @@ class TestEiOptBasic(unittest.TestCase):
         time = TimeGrid(N=2, dt=0.1)  # k=0,1,2
 
         expr = GetVarExpr(name="get_q1", vars=[q_var], k=1)
-        ctx = EvalContext(pack=pack, state=None, time=time)
+        ctx = RuntimeContext(pack=pack, state=None, time=time)
 
         q1, blocks = expr.eval(ctx)
         J1 = np.asarray(blocks[0], dtype=float)
