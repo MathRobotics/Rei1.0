@@ -85,7 +85,7 @@ class TestEiOptBasic(unittest.TestCase):
                             "k": 0,
                             "owner_type": "link",
                             "owner_name": "end",
-                            "dtype": "frame",
+                            "dtype": "kinematics",
                             "field": "pos",
                         },
                         "jac": {"var": "q"},
