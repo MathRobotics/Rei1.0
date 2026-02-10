@@ -6,7 +6,7 @@ import numpy as np
 
 from ..core.state_cache import StateCache, StateKey
 from ..core.time_grid import TimeGrid
-from .context import DslBuildEnv
+from .environment import DslBuildEnv
 from ..expr.registry import Registry
 from ..expr.register_stdlib import register_stdlib
 from ..model.problem import Problem
@@ -57,12 +57,12 @@ def build_cost(registry: Registry, spec: dict):
     return fn(spec)
 
 
-def build_expr(ctx: DslBuildEnv, spec: dict):
+def build_expr(env: DslBuildEnv, spec: dict):
     typ = spec["type"]
-    fn = ctx.registry.expr.get(typ, None)
+    fn = env.registry.expr.get(typ, None)
     if fn is None:
         raise ValueError(f"unknown expr type: {typ}")
-    return fn(ctx, spec)
+    return fn(env, spec)
 
 
 def build_problem(
@@ -76,11 +76,11 @@ def build_problem(
     variables: List[Variable] = [build_variable(v) for v in dsl.get("variables", [])]
     pack = VariablePack(variables)
 
-    ctx_build = DslBuildEnv(pack=pack, state_cache=state_cache, time=time, registry=registry, model=model)
+    env_build = DslBuildEnv(pack=pack, state_cache=state_cache, time=time, registry=registry, model=model)
 
     terms = []
     for t in dsl.get("terms", []):
-        expr = build_expr(ctx_build, t["expr"])
+        expr = build_expr(env_build, t["expr"])
         cost = build_cost(registry, t.get("cost", {"type": "l2"}))
         terms.append((expr, cost))
 

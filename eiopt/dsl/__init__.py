@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .context import DslBuildEnv
+from .environment import DslBuildEnv
 from .builder import (
     register_default_costs,
     create_default_registry,
