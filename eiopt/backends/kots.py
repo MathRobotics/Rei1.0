@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ..core.state_schema import DTYPE_KINEMATICS
+from ..core.state_schema import DTYPE_KINEMATICS, split_jac_field
+from ..core.trajectory import LinearTrajectoryMap
 from ._template import BackendDispatchStateBuilder
 
 try:
@@ -170,3 +171,130 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if J.shape[1] == m:
             return J.T
         raise ValueError(f"Kots Jacobian must be ({m},n) or (n,{m}), got {J.shape}.")
+
+
+class KotsTrajectoryStateBuilder(KotsStateBuilder):
+    """RoboKots trajectory builder with linear parameterization.
+
+    Decision variable is `p` (configurable by `p_var`), and generalized coordinates are:
+
+      q(k) = A_k p + b_k
+
+    where `(A_k, b_k)` come from `trajectory_map`.
+    """
+
+    def __init__(
+        self,
+        model: Any,
+        data: Any,
+        *,
+        trajectory_map: LinearTrajectoryMap,
+        p_var: str = "p",
+        fields: Sequence[str] | None = None,
+    ) -> None:
+        self.trajectory_map = trajectory_map
+        super().__init__(model, data, q_var=p_var, fields=fields)
+
+    def _expected_steps(self, *, time: Any = None) -> int:
+        steps = int(self.trajectory_map.steps)
+        if time is None or not hasattr(time, "N"):
+            return steps
+        try:
+            time_steps = int(time.N) + 1
+        except Exception:
+            return steps
+        if time_steps != steps:
+            raise ValueError(
+                "KotsTrajectoryStateBuilder: time grid mismatch. "
+                f"trajectory_map.steps={steps}, time steps={time_steps} (N+1)."
+            )
+        return steps
+
+    def _accept_required_key_for_traj(self, key: StateKey, *, steps: int) -> bool:
+        if not isinstance(key, StateKey):
+            return False
+        k = int(getattr(key, "k", -1))
+        if k < 0 or k >= steps:
+            return False
+        dtype = getattr(key, "dtype", None)
+        if not isinstance(dtype, str) or dtype == "":
+            return False
+        owner = getattr(key, "owner", None)
+        owner_type = getattr(owner, "owner_type", None)
+        owner_name = getattr(owner, "owner_name", None)
+        if not isinstance(owner_type, str) or owner_type == "":
+            return False
+        if not isinstance(owner_name, str) or owner_name == "":
+            return False
+        field = getattr(key, "field", None)
+        if not isinstance(field, str) or field == "":
+            return False
+        return True
+
+    def _is_param_jac_key(self, key: StateKey) -> bool:
+        field = getattr(key, "field", None)
+        if not isinstance(field, str) or field == "":
+            return False
+        try:
+            _base, var = split_jac_field(field)
+        except ValueError:
+            return False
+        return var == self.q_var
+
+    def build_state(
+        self,
+        x_all: Array,
+        *,
+        pack: Any = None,
+        time: Any = None,
+        required: Iterable[StateKey] | None = None,
+    ) -> dict[StateKey, Any]:
+        if required is None:
+            return {}
+
+        steps = self._expected_steps(time=time)
+        p = self._extract_q(x_all, pack=pack)
+        if p.size != self.trajectory_map.p_dim:
+            raise ValueError(
+                "KotsTrajectoryStateBuilder: parameter size mismatch. "
+                f"Expected p_dim={self.trajectory_map.p_dim}, got {p.size}."
+            )
+
+        grouped: dict[int, list[tuple[StateKey, Any]]] = {}
+        for key in required:
+            if not self._accept_required_key_for_traj(key, steps=steps):
+                continue
+            route = self._route_for_key(key)
+            if route is None:
+                continue
+            entry = self._dispatch.get(route, None)
+            if entry is None:
+                continue
+            grouped.setdefault(int(key.k), []).append((key, entry))
+
+        out: dict[StateKey, Any] = {}
+        for k in sorted(grouped.keys()):
+            q_k = self.trajectory_map.q_at(p, k)
+            dqdp_k = self.trajectory_map.dqdp_at(k)
+            self._update_kinematics(q_k)
+
+            for key, entry in grouped[k]:
+                state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
+                value = entry.handler(q_k, key, state_ref)
+
+                if self._is_param_jac_key(key):
+                    J_q = np.asarray(value, dtype=float)
+                    if J_q.ndim != 2:
+                        raise ValueError(
+                            f"KotsTrajectoryStateBuilder: Jacobian must be 2D, got shape {J_q.shape} for key {key!r}."
+                        )
+                    if J_q.shape[1] != dqdp_k.shape[0]:
+                        raise ValueError(
+                            "KotsTrajectoryStateBuilder: Jacobian chain mismatch. "
+                            f"J_q has shape {J_q.shape}, dqdp has shape {dqdp_k.shape}."
+                        )
+                    value = J_q @ dqdp_k
+
+                out[key] = value
+
+        return out
