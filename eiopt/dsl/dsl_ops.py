@@ -60,7 +60,7 @@ def find_const_expr(dsl: dict, *, name: str) -> dict | None:
     return None
 
 
-def find_var_spec(dsl: dict, *, name: str) -> dict | None:
+def find_var_dsl(dsl: dict, *, name: str) -> dict | None:
     """Find a variable entry in `dsl["variables"]` by its `name` field."""
 
     for v in dsl.get("variables", []) or []:

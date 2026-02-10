@@ -16,17 +16,17 @@ except ImportError as e:  # pragma: no cover
 
 from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
 from eiopt.backends.pinocchio import PinocchioFramePosStateBuilder
-from eiopt.dsl.dsl_ops import find_const_expr, find_var_spec, rewrite_get_state_owner_name
+from eiopt.dsl.dsl_ops import find_const_expr, find_var_dsl, rewrite_get_state_owner_name
 
 _EXAMPLES_DIR = Path(__file__).resolve().parents[1]
 _DEFAULT_URDF_PATH = _EXAMPLES_DIR / "models" / "planar2.urdf"
-_DEFAULT_SPEC_PATH = _EXAMPLES_DIR / "dls" / "pinocchio_ik_pos.toml"
+_DEFAULT_DSL_PATH = _EXAMPLES_DIR / "dls" / "pinocchio_ik_pos.toml"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pinocchio IK example for EiOpt.")
     parser.add_argument("--urdf", type=Path, default=_DEFAULT_URDF_PATH, help="Path to URDF.")
-    parser.add_argument("--spec", type=Path, default=_DEFAULT_SPEC_PATH, help="Path to problem spec TOML.")
+    parser.add_argument("--dsl", type=Path, default=_DEFAULT_DSL_PATH, help="Path to problem dsl TOML.")
     parser.add_argument("--ee", type=str, default="ee", help="End-effector frame name.")
     parser.add_argument("--report", action="store_true", help="Print a concise expr/term report after solving.")
     args = parser.parse_args(argv)
@@ -34,15 +34,15 @@ def main(argv: list[str] | None = None) -> int:
     model = pin.buildModelFromUrdf(str(args.urdf))
     data = model.createData()
 
-    dsl = load_problem_toml(args.spec)
+    dsl = load_problem_toml(args.dsl)
 
     ee_frame = str(args.ee)
     rewrite_get_state_owner_name(dsl, dtype="frame", owner_type="link", owner_name=ee_frame)
 
-    q_var_spec = find_var_spec(dsl, name="q")
-    if q_var_spec is None:
+    q_var_dsl = find_var_dsl(dsl, name="q")
+    if q_var_dsl is None:
         raise SystemExit("Spec must declare a variable named 'q'.")
-    q0 = np.asarray(q_var_spec["init"], dtype=float).reshape(-1)
+    q0 = np.asarray(q_var_dsl["init"], dtype=float).reshape(-1)
 
     state_builder = PinocchioFramePosStateBuilder(model, data, q_var="q")
     problem, ctx, required = compile_problem(dsl, build_state=state_builder.build_state)

@@ -12,7 +12,7 @@ from .builder import (
     compile_problem,
 )
 from .io import load_problem_toml
-from .dsl_ops import find_const_expr, find_var_spec, rewrite_get_state_owner_name
+from .dsl_ops import find_const_expr, find_var_dsl, rewrite_get_state_owner_name
 
 __all__ = [
     "DslBuildEnv",
@@ -26,6 +26,6 @@ __all__ = [
     "compile_problem",
     "load_problem_toml",
     "find_const_expr",
-    "find_var_spec",
+    "find_var_dsl",
     "rewrite_get_state_owner_name",
 ]

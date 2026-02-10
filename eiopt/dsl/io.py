@@ -21,9 +21,9 @@ def load_problem_toml(path: str | Path) -> dict[str, Any]:
 
 def _normalize_toml_problem_def(data: dict[str, Any]) -> None:
     default_var: str | None = None
-    vars_spec = data.get("variables")
-    if isinstance(vars_spec, list):
-        names = [v.get("name") for v in vars_spec if isinstance(v, dict) and "name" in v]
+    vars_dsl = data.get("variables")
+    if isinstance(vars_dsl, list):
+        names = [v.get("name") for v in vars_dsl if isinstance(v, dict) and "name" in v]
         names = [str(n) for n in names if n is not None]
         if len(names) == 1:
             default_var = names[0]

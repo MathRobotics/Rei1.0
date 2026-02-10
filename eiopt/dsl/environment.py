@@ -14,16 +14,16 @@ class DslBuildEnv:
     time: TimeGrid
     registry: Registry
 
-    def build_expr(self, spec: dict[str, Any]) -> Any:
-        typ = str(spec["type"])
+    def build_expr(self, dsl: dict[str, Any]) -> Any:
+        typ = str(dsl["type"])
         builder = self.registry.expr.get(typ, None)
         if builder is None:
             raise ValueError(f"unknown expr type: {typ}")
-        return builder(self, spec)
+        return builder(self, dsl)
 
-    def build_cost(self, spec: dict[str, Any]) -> Any:
-        typ = str(spec.get("type", "l2"))
+    def build_cost(self, dsl: dict[str, Any]) -> Any:
+        typ = str(dsl.get("type", "l2"))
         builder = self.registry.cost.get(typ, None)
         if builder is None:
             raise ValueError(f"unknown cost type: {typ}")
-        return builder(spec)
+        return builder(dsl)
