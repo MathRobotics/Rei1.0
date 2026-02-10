@@ -30,25 +30,40 @@ class BackendFramePosStateBuilder:
         self.model = model
         self.data = data
         self.q_var = str(q_var)
-        self._frame_id_cache: dict[str, int] = {}
+        self._frame_ref_cache: dict[str, Any] = {}
+        # Backward-compatible alias (legacy name used by old subclasses/tests).
+        self._frame_id_cache = self._frame_ref_cache
 
     def _update_kinematics(self, q: Array) -> None:
         """Run backend FK/Jacobian prerequisites for the current `q`."""
 
         raise NotImplementedError("TODO: implement backend kinematics update.")
 
+    def _resolve_frame_ref(self, frame_name: str) -> Any:
+        """Resolve backend-specific frame reference from a frame name.
+
+        The reference may be an integer frame id, a string name, or any
+        backend-native handle.
+        """
+
+        # Backward-compatible fallback for older subclasses.
+        return self._resolve_frame_id(frame_name)
+
     def _resolve_frame_id(self, frame_name: str) -> int:
-        """Resolve backend-specific frame identifier from a frame name."""
+        """Legacy API: resolve backend-specific frame id from a frame name."""
 
-        raise NotImplementedError("TODO: implement backend frame name resolution.")
+        raise NotImplementedError(
+            "TODO: implement backend frame name resolution. "
+            "Override `_resolve_frame_ref()` (preferred) or `_resolve_frame_id()`."
+        )
 
-    def _frame_pos(self, frame_id: int) -> Array:
-        """Return frame position (3,) for the given `frame_id`."""
+    def _frame_pos(self, frame_ref: Any) -> Array:
+        """Return frame position (3,) for the given backend `frame_ref`."""
 
         raise NotImplementedError("TODO: implement backend position extraction.")
 
-    def _frame_pos_jacobian(self, q: Array, frame_id: int) -> Array:
-        """Return linear position Jacobian (3,n) for the given `frame_id`.
+    def _frame_pos_jacobian(self, q: Array, frame_ref: Any) -> Array:
+        """Return linear position Jacobian (3,n) for backend `frame_ref`.
 
         If your backend provides a 6D spatial Jacobian, the (linear, angular) row
         order is library-dependent. Consider using helpers in `eiopt.backends._spatial`
@@ -57,13 +72,18 @@ class BackendFramePosStateBuilder:
 
         raise NotImplementedError("TODO: implement backend Jacobian extraction.")
 
-    def _frame_id(self, frame_name: str) -> int:
+    def _frame_ref(self, frame_name: str) -> Any:
         name = str(frame_name)
-        if name in self._frame_id_cache:
-            return self._frame_id_cache[name]
-        frame_id = int(self._resolve_frame_id(name))
-        self._frame_id_cache[name] = frame_id
-        return frame_id
+        if name in self._frame_ref_cache:
+            return self._frame_ref_cache[name]
+        frame_ref = self._resolve_frame_ref(name)
+        self._frame_ref_cache[name] = frame_ref
+        return frame_ref
+
+    def _frame_id(self, frame_name: str) -> Any:
+        """Legacy alias for `_frame_ref()`."""
+
+        return self._frame_ref(frame_name)
 
     def build_state(
         self,
@@ -119,14 +139,14 @@ class BackendFramePosStateBuilder:
         Jpos_by_frame: dict[str, Array] = {}
 
         for frame_name, (need_pos, need_jac) in needs.items():
-            frame_id = self._frame_id(frame_name)
+            frame_ref = self._frame_ref(frame_name)
 
             if need_pos:
-                pos = np.asarray(self._frame_pos(frame_id), dtype=float).reshape(3)
+                pos = np.asarray(self._frame_pos(frame_ref), dtype=float).reshape(3)
                 pos_by_frame[frame_name] = pos.copy()
 
             if need_jac:
-                Jpos = np.asarray(self._frame_pos_jacobian(q, frame_id), dtype=float)
+                Jpos = np.asarray(self._frame_pos_jacobian(q, frame_ref), dtype=float)
                 Jpos_by_frame[frame_name] = Jpos.copy()
 
         out: dict[StateKey, Any] = {}

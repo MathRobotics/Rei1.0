@@ -27,13 +27,15 @@ if _missing:  # pragma: no cover
 
 Array = np.ndarray
 
-def compute_pinocchio_frame_jacobian(model: Any, data: Any, q: Array, frame_id: int) -> Array:
+
+def compute_pinocchio_frame_jacobian(model: Any, data: Any, q: Array, frame_ref: Any) -> Array:
     """Pinocchio-specific `computeFrameJacobian` wrapper with API/version fallbacks.
 
     Some Pinocchio versions expose `ReferenceFrame` and accept it as an extra argument,
     while others only support the 4-argument form. We prefer `LOCAL_WORLD_ALIGNED`
     (useful for position tasks) and fall back to `LOCAL`, then to the legacy call.
     """
+    frame_id = int(frame_ref)
 
     ref = getattr(pin, "ReferenceFrame", None)
     for name in ("LOCAL_WORLD_ALIGNED", "LOCAL"):
@@ -78,12 +80,13 @@ class PinocchioFramePosStateBuilder(BackendFramePosStateBuilder):
             pin.computeJointJacobians(self.model, self.data, q)
         pin.updateFramePlacements(self.model, self.data)
 
-    def _resolve_frame_id(self, frame_name: str) -> int:
+    def _resolve_frame_ref(self, frame_name: str) -> Any:
         return int(self.model.getFrameId(str(frame_name)))
 
-    def _frame_pos(self, frame_id: int) -> Array:
+    def _frame_pos(self, frame_ref: Any) -> Array:
+        frame_id = int(frame_ref)
         return self.data.oMf[frame_id].translation
 
-    def _frame_pos_jacobian(self, q: Array, frame_id: int) -> Array:
-        J6 = compute_pinocchio_frame_jacobian(self.model, self.data, q, frame_id)
+    def _frame_pos_jacobian(self, q: Array, frame_ref: Any) -> Array:
+        J6 = compute_pinocchio_frame_jacobian(self.model, self.data, q, frame_ref)
         return linear_part_from_jacobian6(J6, order=self.jac6_order)

@@ -47,16 +47,17 @@ class KotsFramePosStateBuilder(BackendFramePosStateBuilder):
         self.model.forward_kinematics()
         self.data.dict.append(self.model.state_dict())
 
-    def _resolve_frame_id(self, frame_name: str) -> int:
+    def _resolve_frame_ref(self, frame_name: str) -> Any:
         get_frame_id = getattr(self.model, "getFrameId", None)
         if callable(get_frame_id):
             return int(get_frame_id(str(frame_name)))
         raise NotImplementedError("Kots backend must implement frame name to id resolution.")
 
-    def _frame_pos(self, frame_id: int) -> Array:
+    def _frame_pos(self, frame_ref: Any) -> Array:
+        frame_id = int(frame_ref)
         self.data.dict[frame_id]
         return robotkos.outward.state.get_value(self.model.robot, self.state) 
 
-    def _frame_pos_jacobian(self, q: Array, frame_id: int) -> Array:
-        del q, frame_id
+    def _frame_pos_jacobian(self, q: Array, frame_ref: Any) -> Array:
+        del q, frame_ref
         return self.model.jacobian(self.state)
