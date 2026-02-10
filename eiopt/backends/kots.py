@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 
-from ._spatial import Jacobian6Order, linear_part_from_jacobian6
+from ..core.state_cache import StateKey
 from ._template import BackendFramePosStateBuilder
 
 try:
-    from robokots.kots import *
+    from robokots.core.state import StateType
 except ImportError as e:  # pragma: no cover
     raise ImportError(
-        "`eiopt.backends.robokots` requires the robotics RoboKots bindings. "
+        "`eiopt.backends.kots` requires the robotics RoboKots bindings. "
         "Install RoboKots (e.g. via github) and retry."
     ) from e
 
 Array = np.ndarray
 
+
 class KotsFramePosStateBuilder(BackendFramePosStateBuilder):
-    """RoboKots/Kots -> `build_state()` bridge for `dtype="frame", field="pos"` keys.
+    """RoboKots/Kots -> `build_state()` bridge for `dtype="kinematics", field="pos"` keys.
 
     This module intentionally delegates all common logic to
     `eiopt.backends._template.BackendFramePosStateBuilder`.
@@ -36,28 +36,32 @@ class KotsFramePosStateBuilder(BackendFramePosStateBuilder):
         data: Any,
         *,
         q_var: str = "q",
-        jac6_order: Jacobian6Order = "angular_linear",
     ) -> None:
         super().__init__(model, data, q_var=q_var)
-        self.jac6_order = jac6_order
-        self.state = StateType('link','end','snap')
 
     def _update_kinematics(self, q: Array) -> None:
-        self.model.import_motion(q)
-        self.model.forward_kinematics()
-        self.data.dict.append(self.model.state_dict())
+        self.model.import_motions(np.asarray(q, dtype=float).reshape(-1))
+        self.model.kinematics()
 
-    def _resolve_frame_ref(self, frame_name: str) -> Any:
-        get_frame_id = getattr(self.model, "getFrameId", None)
-        if callable(get_frame_id):
-            return int(get_frame_id(str(frame_name)))
-        raise NotImplementedError("Kots backend must implement frame name to id resolution.")
+    def _resolve_state_ref(self, key: StateKey) -> Any:
+        owner = getattr(key, "owner", None)
+        owner_type = getattr(owner, "owner_type", None)
+        owner_name = getattr(owner, "owner_name", None)
+        if owner_type != "link" or not isinstance(owner_name, str) or owner_name == "":
+            raise ValueError(f"Kots backend expects link owner in key, got: {key!r}")
+        frame_name = getattr(key, "frame", None) or "world"
+        return StateType("link", owner_name, "pos", str(frame_name))
 
     def _frame_pos(self, frame_ref: Any) -> Array:
-        frame_id = int(frame_ref)
-        self.data.dict[frame_id]
-        return robotkos.outward.state.get_value(self.model.robot, self.state) 
+        return np.asarray(self.model.state_info(frame_ref), dtype=float).reshape(3)
 
     def _frame_pos_jacobian(self, q: Array, frame_ref: Any) -> Array:
-        del q, frame_ref
-        return self.model.jacobian(self.state)
+        del q
+        J = np.asarray(self.model.jacobian(frame_ref), dtype=float)
+        if J.ndim != 2:
+            raise ValueError(f"Kots Jacobian must be 2D, got shape {J.shape}.")
+        if J.shape[0] == 3:
+            return J
+        if J.shape[1] == 3:
+            return J.T
+        raise ValueError(f"Kots Jacobian must be (3,n) or (n,3), got {J.shape}.")

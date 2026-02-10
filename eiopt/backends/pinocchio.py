@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 
+from ..core.state_cache import StateKey
 from ._template import BackendFramePosStateBuilder
 from ._spatial import Jacobian6Order, linear_part_from_jacobian6
 
@@ -51,11 +52,11 @@ def compute_pinocchio_frame_jacobian(model: Any, data: Any, q: Array, frame_ref:
 
 
 class PinocchioFramePosStateBuilder(BackendFramePosStateBuilder):
-    """Pinocchio -> `build_state()` bridge for `dtype="frame", field="pos"` keys.
+    """Pinocchio -> `build_state()` bridge for `dtype="kinematics", field="pos"` keys.
 
     Supported keys (k=0 only):
-      - dtype="frame", owner_type="link", field="pos"
-      - dtype="frame", owner_type="link", field="pos_J_<q_var>"
+      - dtype="kinematics", owner_type="link", field="pos"
+      - dtype="kinematics", owner_type="link", field="pos_J_<q_var>"
 
     Notes:
       - This is intentionally minimal. Extend as needed (rot/frame/etc).
@@ -80,8 +81,13 @@ class PinocchioFramePosStateBuilder(BackendFramePosStateBuilder):
             pin.computeJointJacobians(self.model, self.data, q)
         pin.updateFramePlacements(self.model, self.data)
 
-    def _resolve_frame_ref(self, frame_name: str) -> Any:
-        return int(self.model.getFrameId(str(frame_name)))
+    def _resolve_state_ref(self, key: StateKey) -> Any:
+        owner = getattr(key, "owner", None)
+        owner_type = getattr(owner, "owner_type", None)
+        owner_name = getattr(owner, "owner_name", None)
+        if owner_type != "link" or not isinstance(owner_name, str) or owner_name == "":
+            raise ValueError(f"Pinocchio backend expects link owner in key, got: {key!r}")
+        return int(self.model.getFrameId(owner_name))
 
     def _frame_pos(self, frame_ref: Any) -> Array:
         frame_id = int(frame_ref)

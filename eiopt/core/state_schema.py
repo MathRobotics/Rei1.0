@@ -16,7 +16,7 @@ DEFAULT_FRAME: str = "world"
 OWNER_TYPES: Tuple[str, ...] = ("joint", "link", "total_link", "total_joint", "total")
 
 # Recommended dtype values (not enforced)
-DTYPE_FRAME = "frame"
+DTYPE_KINEMATICS = "kinematics"
 DTYPE_DYNAMICS = "dynamics"
 DTYPE_JOINT = "joint"
 

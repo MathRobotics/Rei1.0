@@ -5,7 +5,7 @@ import numpy as np
 from .expr_register import ExprRegister
 from .nodes import ConstantExpr, GetStateExpr, GetVarExpr, SubExpr, StackExpr, HingeExpr
 from ..core.state_cache import OwnerKey, StateKey
-from ..core.state_schema import DEFAULT_FRAME, DTYPE_FRAME, jac_field
+from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, jac_field
 
 
 def register_stdlib(expr_register: ExprRegister) -> None:
@@ -57,12 +57,12 @@ def build_get_state(ctx, dsl):
     key_dsl = dsl["key"]
     k = int(key_dsl.get("k", 0))
     owner = OwnerKey(key_dsl["owner_type"], key_dsl["owner_name"])
-    dtype = key_dsl["dtype"]
+    dtype = str(key_dsl["dtype"])
     field = key_dsl["field"]
     frame = key_dsl.get("frame", None)
     rel_frame = key_dsl.get("rel_frame", None)
 
-    if dtype == DTYPE_FRAME:
+    if dtype == DTYPE_KINEMATICS:
         if frame is None:
             frame = DEFAULT_FRAME
         elif frame != DEFAULT_FRAME:
