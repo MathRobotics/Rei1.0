@@ -45,7 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     q0 = np.asarray(q_var_spec["init"], dtype=float).reshape(-1)
 
     state_builder = PinocchioFramePosStateBuilder(model, data, q_var="q")
-    problem, ctx, required = compile_problem(dsl, build_state=state_builder.build_state, model=model)
+    problem, ctx, required = compile_problem(dsl, build_state=state_builder.build_state)
 
     ctx.state.update_if_needed(ctx.pack, time=ctx.time, required=required)
     key_pos = next(

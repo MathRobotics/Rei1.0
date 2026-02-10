@@ -106,8 +106,8 @@ def build_get_var(ctx, spec):
 
 
 def build_sub(ctx, spec):
-    a = ctx.registry.expr[spec["a"]["type"]](ctx, spec["a"])
-    b = ctx.registry.expr[spec["b"]["type"]](ctx, spec["b"])
+    a = ctx.build_expr(spec["a"])
+    b = ctx.build_expr(spec["b"])
     return SubExpr(name=spec.get("name", "sub"), a=a, b=b)
 
 
@@ -120,10 +120,10 @@ def build_stack(ctx, spec):
         inner_k = dict(inner)
         inner_k.setdefault("key", dict(inner.get("key", {})))
         inner_k["key"]["k"] = k
-        parts.append(ctx.registry.expr[inner_k["type"]](ctx, inner_k))
+        parts.append(ctx.build_expr(inner_k))
     return StackExpr(name=spec.get("name", "stack"), parts=parts)
 
 
 def build_hinge(ctx, spec):
-    base = ctx.registry.expr[spec["base"]["type"]](ctx, spec["base"])
+    base = ctx.build_expr(spec["base"])
     return HingeExpr(name=spec.get("name", "hinge"), base=base)

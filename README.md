@@ -33,7 +33,7 @@ backend 側で実装すべき最小要件は `build_state()` だけです。
 from eiopt import compile_problem, load_problem_toml
 
 dsl = load_problem_toml("examples/specs/basic.toml")
-problem, ctx, required = compile_problem(dsl, build_state=build_state)
+problem, ctx, required = compile_problem(dsl, state_builder=build_state)
 ```
 
 サンプルは `examples/specs/basic.toml` を参照してください。
