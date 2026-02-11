@@ -16,16 +16,14 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 from eiopt import load_problem_toml
+from eiopt.core.bspline import bspline_basis_matrix, default_clamped_uniform_knots
 from eiopt.core.trajectory import TrajectoryMap
-
-
-def _pick_dsl_value(dsl: Mapping[str, object], *, section: str, key: str) -> object | None:
-    if key in dsl:
-        return dsl[key]
-    section_obj = dsl.get(section, None)
-    if isinstance(section_obj, Mapping) and key in section_obj:
-        return section_obj[key]
-    return None
+from eiopt.dsl.trajectory import (
+    build_trajectory_map,
+    default_steps_from_time,
+    infer_bspline_q_dim_from_var,
+    pick_trajectory_value,
+)
 
 
 def _resolve_positive_int(value: object, *, name: str) -> int:
@@ -56,57 +54,6 @@ def _find_var_dsl(dsl: Mapping[str, object], *, name: str) -> Mapping[str, objec
         if isinstance(v, Mapping) and str(v.get("name", "")).strip() == name:
             return v
     return None
-
-
-def _infer_steps(root_dsl: Mapping[str, object], traj_dsl: Mapping[str, object], cli_steps: int | None) -> int:
-    if cli_steps is not None:
-        return int(cli_steps)
-
-    steps_raw = _pick_dsl_value(traj_dsl, section="bspline", key="steps")
-    if steps_raw is not None:
-        return _resolve_positive_int(steps_raw, name="steps")
-
-    time_dsl = root_dsl.get("time", None)
-    if isinstance(time_dsl, Mapping) and "N" in time_dsl:
-        return _resolve_positive_int(int(time_dsl["N"]) + 1, name="time.N + 1")
-
-    raise ValueError(
-        "Could not infer steps. Set trajectory.steps, or [time].N, or pass --steps."
-    )
-
-
-def _infer_q_dim(
-    root_dsl: Mapping[str, object],
-    traj_dsl: Mapping[str, object],
-    *,
-    num_ctrl_points: int,
-    var_name: str,
-    cli_q_dim: int | None,
-) -> int:
-    if cli_q_dim is not None:
-        return int(cli_q_dim)
-
-    q_dim_raw = _pick_dsl_value(traj_dsl, section="bspline", key="q_dim")
-    if q_dim_raw is not None:
-        return _resolve_positive_int(q_dim_raw, name="q_dim")
-
-    var_dsl = _find_var_dsl(root_dsl, name=var_name)
-    if var_dsl is None:
-        raise ValueError(
-            "Could not infer q_dim. Set trajectory.q_dim, pass --q-dim, "
-            f"or add variable {var_name!r} with a valid dim."
-        )
-
-    dim_raw = var_dsl.get("dim", None)
-    if dim_raw is None:
-        raise ValueError(f"Variable {var_name!r} has no 'dim'; cannot infer q_dim.")
-    p_dim = _resolve_positive_int(dim_raw, name=f"variables[{var_name!r}].dim")
-    if p_dim % int(num_ctrl_points) != 0:
-        raise ValueError(
-            "Cannot infer q_dim from variable dim and num_ctrl_points. "
-            f"p_dim={p_dim}, num_ctrl_points={num_ctrl_points}."
-        )
-    return int(p_dim // int(num_ctrl_points))
 
 
 def _demo_control_points(*, num_ctrl_points: int, q_dim: int) -> np.ndarray:
@@ -159,8 +106,8 @@ def _build_bspline_debug_data(
     if typ != "bspline":
         raise ValueError(f"trajectory.type must be 'bspline', got {typ!r}.")
 
-    degree_raw = _pick_dsl_value(traj_dsl, section="bspline", key="degree")
-    nctrl_raw = _pick_dsl_value(traj_dsl, section="bspline", key="num_ctrl_points")
+    degree_raw = pick_trajectory_value(traj_dsl, section="bspline", key="degree")
+    nctrl_raw = pick_trajectory_value(traj_dsl, section="bspline", key="num_ctrl_points")
     if degree_raw is None or nctrl_raw is None:
         raise ValueError("trajectory.degree and trajectory.num_ctrl_points are required.")
 
@@ -168,42 +115,42 @@ def _build_bspline_debug_data(
     num_ctrl_points = _resolve_positive_int(nctrl_raw, name="num_ctrl_points")
     var_name = str(traj_dsl.get("var", "p")).strip() or "p"
 
-    steps_res = _infer_steps(root_dsl, traj_dsl, steps)
-    q_dim_res = _infer_q_dim(
-        root_dsl,
+    default_steps = int(steps) if steps is not None else default_steps_from_time(root_dsl)
+    if default_steps is None:
+        raise ValueError("Could not infer steps. Set trajectory.steps, [time].N, or pass --steps.")
+
+    default_q_dim = None
+    if q_dim is not None:
+        default_q_dim = int(q_dim)
+    else:
+        var_dsl = _find_var_dsl(root_dsl, name=var_name)
+        if var_dsl is not None and "dim" in var_dsl:
+            var_dim = _resolve_positive_int(var_dsl["dim"], name=f"variables[{var_name!r}].dim")
+            default_q_dim = infer_bspline_q_dim_from_var(traj_dsl, var_dim=var_dim)
+
+    traj = build_trajectory_map(
         traj_dsl,
-        num_ctrl_points=num_ctrl_points,
-        var_name=var_name,
-        cli_q_dim=q_dim,
+        default_steps=default_steps,
+        default_q_dim=default_q_dim,
     )
+    steps_res = int(traj.steps)
+    q_dim_res = int(traj.q_dim)
 
-    knot_vector_raw = _pick_dsl_value(traj_dsl, section="bspline", key="knot_vector")
-    u_samples_raw = _pick_dsl_value(traj_dsl, section="bspline", key="u_samples")
-    knots = None if knot_vector_raw is None else np.asarray(knot_vector_raw, dtype=float).reshape(-1)
-    u_samples = None if u_samples_raw is None else np.asarray(u_samples_raw, dtype=float).reshape(-1)
-
-    traj = TrajectoryMap.from_bspline(
-        steps=steps_res,
-        q_dim=q_dim_res,
-        degree=degree,
-        num_ctrl_points=num_ctrl_points,
-        knot_vector=knots,
-        u_samples=u_samples,
+    knot_vector_raw = pick_trajectory_value(traj_dsl, section="bspline", key="knot_vector")
+    u_samples_raw = pick_trajectory_value(traj_dsl, section="bspline", key="u_samples")
+    knots = (
+        default_clamped_uniform_knots(num_ctrl_points=num_ctrl_points, degree=degree)
+        if knot_vector_raw is None
+        else np.asarray(knot_vector_raw, dtype=float).reshape(-1)
     )
-
-    if knots is None:
-        knots = TrajectoryMap._default_clamped_uniform_knots(  # noqa: SLF001
-            num_ctrl_points=num_ctrl_points,
-            degree=degree,
-        )
-    if u_samples is None:
+    if u_samples_raw is None:
         u_min = float(knots[degree])
         u_max = float(knots[num_ctrl_points])
         u_samples = np.linspace(u_min, u_max, steps_res, dtype=float)
     else:
-        u_samples = np.asarray(u_samples, dtype=float).reshape(-1)
+        u_samples = np.asarray(u_samples_raw, dtype=float).reshape(-1)
 
-    basis = TrajectoryMap._bspline_basis_matrix(  # noqa: SLF001
+    basis = bspline_basis_matrix(
         u_vec=u_samples,
         degree=degree,
         knots=knots,

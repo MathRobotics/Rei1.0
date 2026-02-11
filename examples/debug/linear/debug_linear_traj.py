@@ -17,6 +17,7 @@ except ImportError as e:  # pragma: no cover
 
 from eiopt import load_problem_toml
 from eiopt.core.trajectory import TrajectoryMap
+from eiopt.dsl.trajectory import build_trajectory_map, default_steps_from_time
 
 
 def _resolve_positive_int(value: object, *, name: str) -> int:
@@ -52,15 +53,6 @@ def _parse_cli_p(raw: str | None) -> np.ndarray | None:
         return np.asarray([float(p) for p in parts], dtype=float).reshape(-1)
     except Exception as e:  # pragma: no cover
         raise ValueError(f"Failed to parse --p values: {raw!r}.") from e
-
-
-def _default_steps_from_time(root_dsl: Mapping[str, object]) -> int | None:
-    time_dsl = root_dsl.get("time", None)
-    if not isinstance(time_dsl, Mapping):
-        return None
-    if "N" not in time_dsl:
-        return None
-    return _resolve_positive_int(int(time_dsl["N"]) + 1, name="time.N + 1")
 
 
 def _make_demo_p(p_dim: int) -> np.ndarray:
@@ -190,15 +182,15 @@ def _plot_debug_figure(
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Debug plot utility for TrajectoryMap.from_dsl(type='linear').")
+    parser = argparse.ArgumentParser(description="Debug plot utility for linear trajectory maps.")
     parser.add_argument(
         "--dsl",
         type=Path,
         default=Path("examples/debug/linear/linear_traj_demo.toml"),
         help="Path to TOML with [trajectory] type='linear'.",
     )
-    parser.add_argument("--steps", type=int, default=None, help="Override default steps passed to from_dsl.")
-    parser.add_argument("--q-dim", type=int, default=None, help="Override default q_dim passed to from_dsl.")
+    parser.add_argument("--steps", type=int, default=None, help="Override default trajectory steps.")
+    parser.add_argument("--q-dim", type=int, default=None, help="Override default trajectory q_dim.")
     parser.add_argument(
         "--p",
         type=str,
@@ -237,10 +229,10 @@ def main() -> int:
     if str(traj_dsl.get("type", "")).strip().lower() != "linear":
         raise SystemExit(f"trajectory.type must be 'linear', got {traj_dsl.get('type', None)!r}.")
 
-    default_steps = _resolve_positive_int(args.steps, name="--steps") if args.steps is not None else _default_steps_from_time(root_dsl)
+    default_steps = _resolve_positive_int(args.steps, name="--steps") if args.steps is not None else default_steps_from_time(root_dsl)
     default_q_dim = _resolve_positive_int(args.q_dim, name="--q-dim") if args.q_dim is not None else None
 
-    traj = TrajectoryMap.from_dsl(traj_dsl, default_steps=default_steps, default_q_dim=default_q_dim)
+    traj = build_trajectory_map(traj_dsl, default_steps=default_steps, default_q_dim=default_q_dim)
     var_name = str(traj_dsl.get("var", "p")).strip() or "p"
     p_override = _parse_cli_p(args.p)
     p, p_source = _load_or_generate_p(root_dsl, var_name=var_name, p_dim=traj.p_dim, p_override=p_override)

@@ -1,6 +1,6 @@
 # Linear Trajectory Debug Utilities
 
-This folder contains a debug utility for `TrajectoryMap.from_dsl` with `type = "linear"`.
+This folder contains a debug utility for linear trajectory DSL (`[trajectory].type = "linear"`).
 
 The script loads a TOML file with `[trajectory]`, builds the linear trajectory map, and writes a debug plot PNG.
 
@@ -16,8 +16,8 @@ PYTHONPATH=. MPLBACKEND=Agg MPLCONFIGDIR=/tmp/mplconfig XDG_CACHE_HOME=/tmp \
 
 ## Main options
 
-- `--steps`: Override `default_steps` passed to `TrajectoryMap.from_dsl`.
-- `--q-dim`: Override `default_q_dim` passed to `TrajectoryMap.from_dsl`.
+- `--steps`: Override default trajectory steps.
+- `--q-dim`: Override default trajectory q-dim.
 - `--p`: Override decision vector `p` with comma-separated values.
 - `--show`: Display a plot window in addition to saving.
 - `--check-jacobian`: Validate `dq/dp` by finite differences.

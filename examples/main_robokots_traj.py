@@ -25,6 +25,8 @@ except ImportError as e:  # pragma: no cover
 from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
 from eiopt.core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, make_key
+from eiopt.dsl.dsl_ops import find_var_dsl
+from eiopt.dsl.trajectory import build_trajectory_map, default_steps_from_time
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
@@ -125,6 +127,22 @@ def _collect_target_waypoints(dsl: dict) -> tuple[np.ndarray, np.ndarray]:
     return target_ks, target_pos
 
 
+def _infer_model_dof(model) -> int | None:
+    dof_fn = getattr(model, "dof", None)
+    if callable(dof_fn):
+        try:
+            return int(dof_fn())
+        except Exception:
+            return None
+    robot = getattr(model, "robot_", None)
+    if robot is not None and hasattr(robot, "dof"):
+        try:
+            return int(getattr(robot, "dof"))
+        except Exception:
+            return None
+    return None
+
+
 def main() -> int:
     if not _MODEL_PATH.is_file():
         raise SystemExit(
@@ -136,8 +154,34 @@ def main() -> int:
     data = kots.state_dict_
     dsl = load_problem_toml(_DSL_PATH)
 
-    builder = KotsTrajectoryStateBuilder.from_dsl(kots, data, dsl=dsl)
-    traj_map = builder.trajectory_map
+    traj_dsl = dsl.get("trajectory", None)
+    if not isinstance(traj_dsl, dict):
+        raise SystemExit("DSL must contain [trajectory] section.")
+    p_var = str(traj_dsl.get("var", "p")).strip()
+    if p_var == "":
+        raise SystemExit("trajectory.var must be non-empty.")
+
+    traj_map = build_trajectory_map(
+        traj_dsl,
+        default_steps=default_steps_from_time(dsl),
+        default_q_dim=_infer_model_dof(kots),
+    )
+
+    p_var_dsl = find_var_dsl(dsl, name=p_var)
+    if p_var_dsl is None:
+        raise SystemExit(f"DSL must declare variable {p_var!r}.")
+    p_dim_dsl = int(p_var_dsl.get("dim", -1))
+    if p_dim_dsl != traj_map.p_dim:
+        raise SystemExit(
+            f"variable {p_var!r} dim mismatch: dsl={p_dim_dsl}, trajectory p_dim={traj_map.p_dim}."
+        )
+
+    builder = KotsTrajectoryStateBuilder(
+        kots,
+        data,
+        trajectory_map=traj_map,
+        p_var=p_var,
+    )
     runtime = compile_problem(dsl, build_state=builder.build_state)
 
     x0 = runtime.pack.get().copy()
