@@ -3,3 +3,4 @@
 /eiopt.egg-info/
 *.pyc
 *.png
+uv.lock
