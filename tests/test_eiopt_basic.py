@@ -8,7 +8,7 @@ from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt.core.trajectory import TrajectoryMap
-from eiopt import compile_problem, format_solve_report
+from eiopt import compile_problem, format_solve_report, get_named_expr_value
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton
@@ -136,6 +136,167 @@ class TestEiOptBasic(unittest.TestCase):
         expected_J = np.zeros((2, 6), dtype=float)
         expected_J[:, 2:4] = np.eye(2, dtype=float)
         self.assertTrue(np.allclose(J1, expected_J))
+
+    def test_get_named_expr_value_single(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 2, "init": [1.5, -2.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_err",
+                        "a": {"type": "get_var", "name": "x_now", "var": "x"},
+                        "b": {"type": "const", "name": "x_ref", "var": "x", "value": [0.0, 0.0]},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        x_now = get_named_expr_value(runtime, name="x_now")
+        self.assertTrue(np.allclose(x_now, np.array([1.5, -2.0], dtype=float)))
+
+    def test_get_named_expr_value_raises_on_ambiguous_match(self) -> None:
+        dsl = {
+            "time": {"N": 1, "dt": 0.1},
+            "variables": [{"name": "x", "dim": 2, "init": [1.0, 2.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "stack",
+                        "name": "x_stack",
+                        "range": {"k0": 0, "k1": 1},
+                        "inner": {"type": "get_var", "name": "x_k", "var": "x"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(ValueError, "multiple named Expr values matched"):
+            _ = get_named_expr_value(runtime, name="x_k")
+
+    def test_get_traj_var_expr_bspline_inferrs_q_dim_from_var(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 1,
+                "num_ctrl_points": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [1.0, 2.0, 3.0, 4.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_traj_var", "name": "q_traj", "var": "p"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        traj = TrajectoryMap.from_dsl(
+            dsl["trajectory"],
+            default_steps=3,
+            default_q_dim=2,
+        )
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        self.assertTrue(np.allclose(r, traj.A @ p + traj.b))
+        self.assertTrue(np.allclose(J, traj.A))
+
+    def test_get_traj_var_regularization_term_against_previous_trajectory(self) -> None:
+        prev_q = np.array(
+            [0.5, 1.5, 1.0, 2.0, 1.5, 2.5],
+            dtype=float,
+        )
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 1,
+                "num_ctrl_points": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [1.0, 2.0, 3.0, 4.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "traj_prev_diff",
+                        "a": {"type": "get_traj_var", "name": "q_traj", "var": "p"},
+                        "b": {"type": "const", "name": "q_prev", "var": "p", "value": prev_q.tolist()},
+                    },
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        traj = TrajectoryMap.from_dsl(
+            dsl["trajectory"],
+            default_steps=3,
+            default_q_dim=2,
+        )
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        q = traj.A @ p + traj.b
+        self.assertTrue(np.allclose(r, 2.0 * (q - prev_q)))
+        self.assertTrue(np.allclose(J, 2.0 * traj.A))
+
+    def test_time_diff_expr_on_traj_var(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 1,
+                "num_ctrl_points": 2,
+                "q_dim": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [1.0, 2.0, 3.0, 4.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "time_diff",
+                        "name": "traj_smooth",
+                        "segment_dim": 2,
+                        "base": {"type": "get_traj_var", "name": "q_traj", "var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        traj = TrajectoryMap.from_dsl(
+            dsl["trajectory"],
+            default_steps=3,
+            default_q_dim=2,
+        )
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        q = (traj.A @ p + traj.b).reshape(3, 2)
+        r_ref = (q[1:, :] - q[:-1, :]).reshape(-1)
+
+        D = np.zeros((4, 6), dtype=float)
+        D[0:2, 0:2] = -np.eye(2, dtype=float)
+        D[0:2, 2:4] = np.eye(2, dtype=float)
+        D[2:4, 2:4] = -np.eye(2, dtype=float)
+        D[2:4, 4:6] = np.eye(2, dtype=float)
+        J_ref = D @ traj.A
+
+        self.assertTrue(np.allclose(r, r_ref))
+        self.assertTrue(np.allclose(J, J_ref))
 
     def test_trajectory_map_q_and_jac(self) -> None:
         A = np.array(
