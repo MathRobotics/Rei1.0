@@ -3,6 +3,6 @@ from __future__ import annotations
 from .state_cache import OwnerKey, StateKey, StateCache
 from . import state_schema
 from .time_grid import TimeGrid
-from .trajectory import LinearTrajectoryMap
+from .trajectory import TrajectoryMap
 
-__all__ = ["OwnerKey", "StateKey", "StateCache", "TimeGrid", "LinearTrajectoryMap", "state_schema"]
+__all__ = ["OwnerKey", "StateKey", "StateCache", "TimeGrid", "TrajectoryMap", "state_schema"]
