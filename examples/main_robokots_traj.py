@@ -36,7 +36,8 @@ def _plot_trajectory(*, ee_opt: np.ndarray, ee_target: np.ndarray, target_ks: np
     fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.5))
 
     ax_xy = axes[0]
-    ax_xy.plot(ee_target[:, 0], ee_target[:, 1], "x--", label="target waypoints")
+    if ee_target.shape[0] > 0:
+        ax_xy.plot(ee_target[:, 0], ee_target[:, 1], "x--", label="target waypoints")
     ax_xy.plot(ee_opt[:, 0], ee_opt[:, 1], "o-", label="optimized")
     for k in range(ee_opt.shape[0]):
         ax_xy.text(float(ee_opt[k, 0]), float(ee_opt[k, 1]), f"k={k}", fontsize=8)
@@ -116,7 +117,7 @@ def _collect_target_waypoints(dsl: dict) -> tuple[np.ndarray, np.ndarray]:
         waypoints.append((int(k), v))
 
     if not waypoints:
-        raise ValueError("No EE position target waypoints found in DSL terms.")
+        return np.zeros((0,), dtype=int), np.zeros((0, 3), dtype=float)
 
     waypoints.sort(key=lambda kv: kv[0])
     target_ks = np.asarray([k for k, _v in waypoints], dtype=int)
