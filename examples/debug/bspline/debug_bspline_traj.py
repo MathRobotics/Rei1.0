@@ -16,10 +16,16 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 from eiopt import load_problem_toml
-from eiopt.core.bspline import bspline_basis_matrix, default_clamped_uniform_knots
+from eiopt.core.bspline import (
+    bspline_basis_derivative_matrix,
+    bspline_basis_matrix,
+    default_clamped_uniform_knots,
+)
 from eiopt.core.trajectory import TrajectoryMap
 from eiopt.dsl.trajectory import (
     build_trajectory_map,
+    build_trajectory_map_with_derivative,
+    default_dt_from_time,
     default_steps_from_time,
     infer_bspline_q_dim_from_var,
     pick_trajectory_value,
@@ -43,6 +49,16 @@ def _resolve_nonnegative_int(value: object, *, name: str) -> int:
         raise ValueError(f"{name} must be an integer, got {value!r}.") from e
     if out < 0:
         raise ValueError(f"{name} must be >= 0, got {out}.")
+    return out
+
+
+def _resolve_positive_float(value: object, *, name: str) -> float:
+    try:
+        out = float(value)
+    except Exception as e:  # pragma: no cover
+        raise ValueError(f"{name} must be a float, got {value!r}.") from e
+    if out <= 0.0:
+        raise ValueError(f"{name} must be > 0, got {out}.")
     return out
 
 
@@ -202,6 +218,100 @@ def _check_jacobian(traj: TrajectoryMap, p: np.ndarray, *, eps: float) -> float:
     return max_abs
 
 
+def _resolve_bspline_scale(
+    *,
+    derivative_order: int,
+    derivative_wrt: str,
+    degree: int,
+    num_ctrl_points: int,
+    knots: np.ndarray,
+    u_samples: np.ndarray,
+    steps: int,
+    dt: float | None,
+) -> float:
+    if derivative_order <= 0:
+        return 1.0
+    wrt = str(derivative_wrt).strip().lower()
+    if wrt in ("u", "param", "parameter"):
+        return 1.0
+    if wrt != "time":
+        raise ValueError(f"Unsupported derivative_wrt: {derivative_wrt!r}")
+
+    if dt is None:
+        raise ValueError("dt is required when derivative_wrt='time'.")
+    dt_val = _resolve_positive_float(dt, name="dt")
+    if int(steps) <= 1:
+        raise ValueError("steps must be >= 2 when derivative_wrt='time'.")
+
+    u_span = float(knots[int(num_ctrl_points)] - knots[int(degree)])
+    if u_samples.size >= 2:
+        du = np.diff(u_samples)
+        if np.allclose(du, du[0], atol=1e-10, rtol=1e-9):
+            u_span = float(u_samples[-1] - u_samples[0])
+
+    horizon = float((int(steps) - 1) * dt_val)
+    if horizon <= 0.0:
+        raise ValueError("invalid time horizon.")
+    scale = u_span / horizon
+    return float(scale**int(derivative_order))
+
+
+def _build_bspline_derivative_debug_data(
+    *,
+    root_dsl: Mapping[str, object],
+    traj_dsl: Mapping[str, object],
+    p: np.ndarray,
+    steps: int,
+    q_dim: int,
+    degree: int,
+    num_ctrl_points: int,
+    knots: np.ndarray,
+    u_samples: np.ndarray,
+    derivative_order: int,
+    derivative_wrt: str,
+    dt_override: float | None,
+) -> dict[str, np.ndarray | int | str | float]:
+    dt_default = default_dt_from_time(root_dsl)
+    dt = dt_default if dt_override is None else float(dt_override)
+
+    traj_d = build_trajectory_map_with_derivative(
+        traj_dsl,
+        derivative_order=derivative_order,
+        derivative_wrt=derivative_wrt,
+        default_steps=steps,
+        default_q_dim=q_dim,
+        default_dt=dt,
+    )
+    qd_traj = np.vstack([traj_d.q_at(p, k) for k in range(traj_d.steps)])
+    basis_d = bspline_basis_derivative_matrix(
+        u_vec=u_samples,
+        degree=degree,
+        knots=knots,
+        num_ctrl_points=num_ctrl_points,
+        derivative_order=derivative_order,
+    )
+    scale = _resolve_bspline_scale(
+        derivative_order=derivative_order,
+        derivative_wrt=derivative_wrt,
+        degree=degree,
+        num_ctrl_points=num_ctrl_points,
+        knots=knots,
+        u_samples=u_samples,
+        steps=steps,
+        dt=dt,
+    )
+    basis_d_scaled = scale * basis_d
+    return {
+        "traj_d": traj_d,
+        "q_d": qd_traj,
+        "basis_d": basis_d_scaled,
+        "row_sums_d": np.sum(basis_d_scaled, axis=1),
+        "dt": float(dt) if dt is not None else np.nan,
+        "derivative_order": int(derivative_order),
+        "derivative_wrt": str(derivative_wrt),
+    }
+
+
 def _plot_debug_figure(data: dict[str, np.ndarray | int | str], *, output: Path, show: bool) -> None:
     ctrl = np.asarray(data["ctrl"], dtype=float)
     q_traj = np.asarray(data["q_traj"], dtype=float)
@@ -283,6 +393,53 @@ def _plot_debug_figure(data: dict[str, np.ndarray | int | str], *, output: Path,
     )
 
 
+def _plot_derivative_debug_figure(
+    data: dict[str, np.ndarray | int | str | float], *, output: Path, show: bool
+) -> None:
+    q_d = np.asarray(data["q_d"], dtype=float)
+    basis_d = np.asarray(data["basis_d"], dtype=float)
+    row_sums_d = np.asarray(data["row_sums_d"], dtype=float)
+    order = int(data["derivative_order"])
+    wrt = str(data["derivative_wrt"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.0, 4.5))
+
+    ax0 = axes[0]
+    ks = np.arange(q_d.shape[0], dtype=int)
+    for j in range(q_d.shape[1]):
+        ax0.plot(ks, q_d[:, j], "o-", label=f"d^{order}q[{j}]/d{wrt}^{order}")
+    ax0.set_title("Derivative Trajectory")
+    ax0.set_xlabel("k")
+    ax0.set_ylabel("value")
+    ax0.grid(True, alpha=0.35)
+    ax0.legend()
+
+    ax1 = axes[1]
+    for i in range(basis_d.shape[1]):
+        ax1.plot(np.arange(basis_d.shape[0]), basis_d[:, i], label=f"dN{i}")
+    ax1.set_title("Derivative Basis (sample index)")
+    ax1.set_xlabel("k")
+    ax1.set_ylabel("weight")
+    ax1.grid(True, alpha=0.35)
+    ax1.legend(ncol=2, fontsize=8)
+
+    fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=140)
+    if show:
+        plt.show()
+    plt.close(fig)
+
+    print(f"[saved] {output}")
+    print(
+        "[basis-derivative-row-sum] min={:.12f}, max={:.12f}, mean={:.12f}".format(
+            float(np.min(row_sums_d)),
+            float(np.max(row_sums_d)),
+            float(np.mean(row_sums_d)),
+        )
+    )
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Debug plot utility for TrajectoryMap.from_bspline.")
     parser.add_argument(
@@ -310,6 +467,36 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=1e-7,
         help="Finite-difference epsilon for --check-jacobian.",
+    )
+    parser.add_argument(
+        "--check-derivative",
+        action="store_true",
+        help="Build derivative trajectory map and run finite-difference Jacobian check.",
+    )
+    parser.add_argument(
+        "--derivative-order",
+        type=int,
+        default=1,
+        help="Derivative order for --check-derivative (>=1).",
+    )
+    parser.add_argument(
+        "--derivative-wrt",
+        type=str,
+        choices=["u", "time"],
+        default="u",
+        help="Derivative axis for --check-derivative.",
+    )
+    parser.add_argument(
+        "--dt",
+        type=float,
+        default=None,
+        help="Override dt when --derivative-wrt=time (default: read [time].dt).",
+    )
+    parser.add_argument(
+        "--derivative-output",
+        type=Path,
+        default=None,
+        help="Output PNG path for derivative debug plot.",
     )
     return parser
 
@@ -350,6 +537,42 @@ def main() -> int:
         p = np.asarray(data["p"], dtype=float).reshape(-1)
         max_abs = _check_jacobian(traj, p, eps=float(args.fd_eps))
         print(f"[jacobian-check] max_abs_error={max_abs:.6e}, fd_eps={float(args.fd_eps):.1e}")
+
+    if args.check_derivative:
+        d_order = _resolve_positive_int(args.derivative_order, name="--derivative-order")
+        p = np.asarray(data["p"], dtype=float).reshape(-1)
+        deriv_data = _build_bspline_derivative_debug_data(
+            root_dsl=root_dsl,
+            traj_dsl=traj_dsl,
+            p=p,
+            steps=int(data["steps"]),
+            q_dim=int(data["q_dim"]),
+            degree=int(data["degree"]),
+            num_ctrl_points=int(data["num_ctrl_points"]),
+            knots=np.asarray(data["knots"], dtype=float).reshape(-1),
+            u_samples=np.asarray(data["u_samples"], dtype=float).reshape(-1),
+            derivative_order=d_order,
+            derivative_wrt=str(args.derivative_wrt),
+            dt_override=args.dt,
+        )
+        print(
+            "[derivative-config] order={order}, wrt={wrt}, dt={dt}".format(
+                order=int(deriv_data["derivative_order"]),
+                wrt=str(deriv_data["derivative_wrt"]),
+                dt=float(deriv_data["dt"]),
+            )
+        )
+
+        deriv_output = args.derivative_output
+        if deriv_output is None:
+            deriv_output = args.output.with_name(f"{args.output.stem}_d{d_order}_{args.derivative_wrt}.png")
+        _plot_derivative_debug_figure(deriv_data, output=deriv_output, show=bool(args.show))
+
+        traj_d = deriv_data["traj_d"]
+        if not isinstance(traj_d, TrajectoryMap):  # pragma: no cover
+            raise RuntimeError("Internal error: invalid derivative trajectory object.")
+        max_abs_d = _check_jacobian(traj_d, p, eps=float(args.fd_eps))
+        print(f"[derivative-jacobian-check] max_abs_error={max_abs_d:.6e}, fd_eps={float(args.fd_eps):.1e}")
 
     return 0
 

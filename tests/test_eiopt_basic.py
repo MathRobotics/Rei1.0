@@ -4,11 +4,20 @@ import unittest
 
 import numpy as np
 
+from eiopt.core.bspline import (
+    bspline_basis_derivative_matrices,
+    bspline_basis_derivative_matrix,
+    default_clamped_uniform_knots,
+)
 from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt.core.trajectory import TrajectoryMap
-from eiopt.dsl.trajectory import build_trajectory_map
+from eiopt.dsl.trajectory import (
+    build_trajectory_map,
+    build_trajectory_map_with_derivative,
+    build_trajectory_maps_with_derivatives,
+)
 from eiopt import compile_problem, format_solve_report, get_named_expr_value
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
@@ -250,6 +259,270 @@ class TestEiOptBasic(unittest.TestCase):
         q = traj.A @ p + traj.b
         self.assertTrue(np.allclose(r, 2.0 * (q - prev_q)))
         self.assertTrue(np.allclose(J, 2.0 * traj.A))
+
+    def test_get_traj_var_expr_bspline_first_derivative_wrt_time(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.2},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 1,
+                "num_ctrl_points": 2,
+                "q_dim": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [1.0, 2.0, 3.0, 4.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_traj_var",
+                        "name": "qdot_traj",
+                        "var": "p",
+                        "derivative_order": 1,
+                        "derivative_wrt": "time",
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        traj_d1 = build_trajectory_map_with_derivative(
+            dsl["trajectory"],
+            derivative_order=1,
+            derivative_wrt="time",
+            default_steps=3,
+            default_q_dim=2,
+            default_dt=0.2,
+        )
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        self.assertTrue(np.allclose(r, traj_d1.A @ p + traj_d1.b))
+        self.assertTrue(np.allclose(J, traj_d1.A))
+
+        qdot = r.reshape(3, 2)
+        self.assertTrue(np.allclose(qdot, np.array([[5.0, 5.0], [5.0, 5.0], [5.0, 5.0]], dtype=float)))
+
+    def test_get_traj_var_expr_bspline_derivatives_0_to_n(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.2},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 1,
+                "num_ctrl_points": 2,
+                "q_dim": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [1.0, 2.0, 3.0, 4.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_traj_var",
+                        "name": "q_and_qdot",
+                        "var": "p",
+                        "max_derivative_order": 1,
+                        "derivative_wrt": "time",
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        maps = build_trajectory_maps_with_derivatives(
+            dsl["trajectory"],
+            max_derivative_order=1,
+            derivative_wrt="time",
+            default_steps=3,
+            default_q_dim=2,
+            default_dt=0.2,
+        )
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+        r_ref = np.concatenate([m.A @ p + m.b for m in maps], axis=0)
+        J_ref = np.vstack([m.A for m in maps])
+
+        self.assertEqual(r.size, 12)
+        self.assertEqual(J.shape, (12, 4))
+        self.assertTrue(np.allclose(r, r_ref))
+        self.assertTrue(np.allclose(J, J_ref))
+
+    def test_get_traj_var_expr_bspline_derivatives_0_to_n_with_k_slice(self) -> None:
+        dsl = {
+            "time": {"N": 4, "dt": 0.1},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 2,
+                "num_ctrl_points": 4,
+                "q_dim": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 8, "init": [0.2, -0.1, 0.4, 0.7, 1.0, -0.3, 0.1, 0.6]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_traj_var",
+                        "name": "q_and_dq_and_ddq_k2",
+                        "var": "p",
+                        "max_derivative_order": 2,
+                        "derivative_wrt": "u",
+                        "k": 2,
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        maps = build_trajectory_maps_with_derivatives(
+            dsl["trajectory"],
+            max_derivative_order=2,
+            derivative_wrt="u",
+            default_steps=5,
+            default_q_dim=2,
+            default_dt=0.1,
+        )
+        p = np.array([0.2, -0.1, 0.4, 0.7, 1.0, -0.3, 0.1, 0.6], dtype=float)
+        r_ref = np.concatenate([m.q_at(p, 2) for m in maps], axis=0)
+        J_ref = np.vstack([m.dqdp_at(2) for m in maps])
+
+        self.assertEqual(r.size, 6)
+        self.assertEqual(J.shape, (6, 8))
+        self.assertTrue(np.allclose(r, r_ref))
+        self.assertTrue(np.allclose(J, J_ref))
+
+    def test_bspline_basis_derivative_matrices_matches_single_order(self) -> None:
+        degree = 4
+        num_ctrl_points = 8
+        knots = default_clamped_uniform_knots(
+            num_ctrl_points=num_ctrl_points,
+            degree=degree,
+        )
+        u_vec = np.linspace(float(knots[degree]), float(knots[num_ctrl_points]), 11, dtype=float)
+
+        max_order = 6
+        mats = bspline_basis_derivative_matrices(
+            u_vec=u_vec,
+            degree=degree,
+            knots=knots,
+            num_ctrl_points=num_ctrl_points,
+            max_derivative_order=max_order,
+        )
+        self.assertEqual(mats.shape, (max_order + 1, u_vec.size, num_ctrl_points))
+
+        for order in range(max_order + 1):
+            mat_single = bspline_basis_derivative_matrix(
+                u_vec=u_vec,
+                degree=degree,
+                knots=knots,
+                num_ctrl_points=num_ctrl_points,
+                derivative_order=order,
+            )
+            self.assertTrue(np.allclose(mats[order, :, :], mat_single, atol=1e-10, rtol=1e-10))
+
+        self.assertTrue(np.allclose(mats[degree + 1 :, :, :], 0.0))
+
+    def test_trajectory_map_from_bspline_derivatives_matches_single_order(self) -> None:
+        steps = 7
+        q_dim = 2
+        degree = 3
+        num_ctrl_points = 6
+        parameter_scale = 1.7
+        max_order = 5
+
+        maps = TrajectoryMap.from_bspline_derivatives(
+            steps=steps,
+            q_dim=q_dim,
+            degree=degree,
+            num_ctrl_points=num_ctrl_points,
+            max_derivative_order=max_order,
+            parameter_scale=parameter_scale,
+        )
+        self.assertEqual(len(maps), max_order + 1)
+
+        p = np.arange(num_ctrl_points * q_dim, dtype=float) * 0.1
+        for order in range(max_order + 1):
+            map_single = TrajectoryMap.from_bspline_derivative(
+                steps=steps,
+                q_dim=q_dim,
+                degree=degree,
+                num_ctrl_points=num_ctrl_points,
+                derivative_order=order,
+                parameter_scale=parameter_scale,
+            )
+            self.assertTrue(np.allclose(maps[order].A, map_single.A))
+            self.assertTrue(np.allclose(maps[order].b, map_single.b))
+            for k in range(steps):
+                self.assertTrue(np.allclose(maps[order].q_at(p, k), map_single.q_at(p, k)))
+
+    def test_build_trajectory_maps_with_derivatives_time_matches_single(self) -> None:
+        traj_dsl = {
+            "type": "bspline",
+            "var": "p",
+            "degree": 3,
+            "num_ctrl_points": 6,
+            "q_dim": 2,
+            "steps": 8,
+        }
+        maps = build_trajectory_maps_with_derivatives(
+            traj_dsl,
+            max_derivative_order=4,
+            derivative_wrt="time",
+            default_dt=0.2,
+        )
+        self.assertEqual(len(maps), 5)
+
+        map_d2 = build_trajectory_map_with_derivative(
+            traj_dsl,
+            derivative_order=2,
+            derivative_wrt="time",
+            default_dt=0.2,
+        )
+        self.assertTrue(np.allclose(maps[2].A, map_d2.A))
+        self.assertTrue(np.allclose(maps[2].b, map_d2.b))
+
+    def test_get_traj_var_expr_slices_by_k(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 1,
+                "num_ctrl_points": 2,
+                "q_dim": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [1.0, 2.0, 3.0, 4.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_traj_var", "name": "q_traj_k1", "var": "p", "k": 1},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        traj = build_trajectory_map(
+            dsl["trajectory"],
+            default_steps=3,
+            default_q_dim=2,
+        )
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+
+        self.assertTrue(np.allclose(r, traj.q_at(p, 1)))
+        self.assertTrue(np.allclose(J, traj.dqdp_at(1)))
 
     def test_time_diff_expr_on_traj_var(self) -> None:
         dsl = {
