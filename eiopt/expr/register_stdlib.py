@@ -3,10 +3,27 @@ from __future__ import annotations
 import numpy as np
 
 from .expr_register import ExprRegister
-from .nodes import ConstantExpr, GetStateExpr, GetVarExpr, SubExpr, StackExpr, HingeExpr, TrajectoryVarExpr, TimeDiffExpr
+from .nodes import (
+    ConstantExpr,
+    GetStateExpr,
+    GetVarExpr,
+    SubExpr,
+    StackExpr,
+    HingeExpr,
+    TrajectoryVarExpr,
+    TrajectoryVarDerivativesExpr,
+    TimeDiffExpr,
+)
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, jac_field
-from ..dsl.trajectory import build_trajectory_map, default_steps_from_time, infer_bspline_q_dim_from_var
+from ..dsl.trajectory import (
+    build_trajectory_map,
+    build_trajectory_map_with_derivative,
+    build_trajectory_maps_with_derivatives,
+    default_dt_from_time,
+    default_steps_from_time,
+    infer_bspline_q_dim_from_var,
+)
 
 
 def register_stdlib(expr_register: ExprRegister) -> None:
@@ -135,26 +152,106 @@ def build_get_traj_var(ctx, dsl):
     if str(traj_dsl.get("type", "")).strip().lower() == "bspline":
         default_q_dim = infer_bspline_q_dim_from_var(traj_dsl, var_dim=v.dim())
 
-    resolve_traj = getattr(ctx, "resolve_trajectory_map", None)
-    if callable(resolve_traj):
-        traj = resolve_traj(traj_dsl, default_q_dim=default_q_dim)
-    else:
-        traj = build_trajectory_map(
-            traj_dsl,
-            default_steps=default_steps_from_time(getattr(ctx, "time", None)),
-            default_q_dim=default_q_dim,
-        )
-    if traj.p_dim != v.dim():
+    deriv_order_raw = dsl.get("derivative_order", dsl.get("deriv_order", 0))
+    try:
+        deriv_order = int(deriv_order_raw)
+    except Exception as e:
         raise ValueError(
-            "get_traj_var: variable dimension mismatch with trajectory parameter dimension. "
-            f"var {var_name!r} dim={v.dim()}, trajectory p_dim={traj.p_dim}."
+            "get_traj_var: derivative_order must be an integer, "
+            f"got {deriv_order_raw!r}."
+        ) from e
+    if deriv_order < 0:
+        raise ValueError(f"get_traj_var: derivative_order must be >= 0, got {deriv_order}.")
+
+    deriv_wrt = str(dsl.get("derivative_wrt", dsl.get("wrt", "u"))).strip().lower()
+    if deriv_wrt == "":
+        deriv_wrt = "u"
+
+    max_deriv_order_raw = dsl.get(
+        "max_derivative_order",
+        dsl.get("derivative_order_max", dsl.get("max_deriv_order", None)),
+    )
+    if max_deriv_order_raw is None:
+        max_deriv_order = None
+    else:
+        try:
+            max_deriv_order = int(max_deriv_order_raw)
+        except Exception as e:
+            raise ValueError(
+                "get_traj_var: max_derivative_order must be an integer, "
+                f"got {max_deriv_order_raw!r}."
+            ) from e
+        if max_deriv_order < 0:
+            raise ValueError(
+                "get_traj_var: max_derivative_order must be >= 0, "
+                f"got {max_deriv_order}."
+            )
+
+    resolve_traj = getattr(ctx, "resolve_trajectory_map", None)
+
+    if max_deriv_order is not None:
+        if deriv_order != 0:
+            raise ValueError(
+                "get_traj_var: derivative_order and max_derivative_order cannot be used together. "
+                "Use either derivative_order=<r> or max_derivative_order=<N>."
+            )
+        if max_deriv_order == 0 and callable(resolve_traj):
+            trajectories = [resolve_traj(traj_dsl, default_q_dim=default_q_dim)]
+        else:
+            trajectories = build_trajectory_maps_with_derivatives(
+                traj_dsl,
+                max_derivative_order=max_deriv_order,
+                derivative_wrt=deriv_wrt,
+                default_steps=default_steps_from_time(getattr(ctx, "time", None)),
+                default_q_dim=default_q_dim,
+                default_dt=default_dt_from_time(getattr(ctx, "time", None)),
+            )
+        if any(traj.p_dim != v.dim() for traj in trajectories):
+            got = [traj.p_dim for traj in trajectories]
+            raise ValueError(
+                "get_traj_var: variable dimension mismatch with trajectory parameter dimension. "
+                f"var {var_name!r} dim={v.dim()}, trajectory p_dim(s)={got}."
+            )
+    else:
+        if deriv_order == 0 and callable(resolve_traj):
+            traj = resolve_traj(traj_dsl, default_q_dim=default_q_dim)
+        elif deriv_order == 0:
+            traj = build_trajectory_map(
+                traj_dsl,
+                default_steps=default_steps_from_time(getattr(ctx, "time", None)),
+                default_q_dim=default_q_dim,
+            )
+        else:
+            traj = build_trajectory_map_with_derivative(
+                traj_dsl,
+                derivative_order=deriv_order,
+                derivative_wrt=deriv_wrt,
+                default_steps=default_steps_from_time(getattr(ctx, "time", None)),
+                default_q_dim=default_q_dim,
+                default_dt=default_dt_from_time(getattr(ctx, "time", None)),
+            )
+        if traj.p_dim != v.dim():
+            raise ValueError(
+                "get_traj_var: variable dimension mismatch with trajectory parameter dimension. "
+                f"var {var_name!r} dim={v.dim()}, trajectory p_dim={traj.p_dim}."
+            )
+
+    k = dsl.get("k", None)
+    if k is None:
+        key = dsl.get("key", None)
+        if isinstance(key, dict) and "k" in key:
+            k = key.get("k", None)
+    k_i = None if k is None else int(k)
+
+    if max_deriv_order is not None:
+        return TrajectoryVarDerivativesExpr(
+            name=dsl.get("name", "get_traj_var"),
+            vars=[v],
+            trajectories=trajectories,
+            k=k_i,
         )
 
-    return TrajectoryVarExpr(
-        name=dsl.get("name", "get_traj_var"),
-        vars=[v],
-        trajectory=traj,
-    )
+    return TrajectoryVarExpr(name=dsl.get("name", "get_traj_var"), vars=[v], trajectory=traj, k=k_i)
 
 
 def build_sub(ctx, dsl):

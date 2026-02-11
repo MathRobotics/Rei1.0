@@ -89,6 +89,7 @@ class TrajectoryVarExpr:
     name: str
     vars: Sequence[Variable]
     trajectory: TrajectoryMap
+    k: int | None = None
 
     def deps(self):
         return []
@@ -101,8 +102,82 @@ class TrajectoryVarExpr:
                 f"{self.name}: parameter size mismatch. "
                 f"Expected {self.trajectory.p_dim}, got {p.size}."
             )
-        q_stack = (self.trajectory.A @ p + self.trajectory.b).reshape(-1)
-        return q_stack, [self.trajectory.A.copy()]
+        y_all = (self.trajectory.A @ p + self.trajectory.b).reshape(-1)
+
+        if self.k is None:
+            return y_all, [self.trajectory.A.copy()]
+
+        k = int(self.k)
+        steps = int(self.trajectory.steps)
+        if k < 0 or k >= steps:
+            raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+
+        seg = int(self.trajectory.q_dim)
+        start = int(k * seg)
+        stop = int(start + seg)
+        return y_all[start:stop].copy(), [self.trajectory.A[start:stop, :].copy()]
+
+
+@dataclass
+class TrajectoryVarDerivativesExpr:
+    """Map trajectory parameter variable to stacked derivatives ``[q, dq, ..., d^Nq]``."""
+
+    name: str
+    vars: Sequence[Variable]
+    trajectories: Sequence[TrajectoryMap]
+    k: int | None = None
+
+    def deps(self):
+        return []
+
+    def eval(self, ctx: RuntimeContext):
+        del ctx
+        if len(self.trajectories) == 0:
+            raise ValueError(f"{self.name}: trajectories must be non-empty.")
+
+        p = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
+        p_dim = int(self.trajectories[0].p_dim)
+        if p.size != p_dim:
+            raise ValueError(
+                f"{self.name}: parameter size mismatch. "
+                f"Expected {p_dim}, got {p.size}."
+            )
+
+        steps = int(self.trajectories[0].steps)
+        q_dim = int(self.trajectories[0].q_dim)
+        for i, traj in enumerate(self.trajectories):
+            if traj.p_dim != p_dim:
+                raise ValueError(
+                    f"{self.name}: trajectory[{i}] p_dim mismatch. "
+                    f"Expected {p_dim}, got {traj.p_dim}."
+                )
+            if traj.steps != steps or traj.q_dim != q_dim:
+                raise ValueError(
+                    f"{self.name}: trajectory[{i}] shape mismatch. "
+                    f"Expected steps={steps}, q_dim={q_dim}, got steps={traj.steps}, q_dim={traj.q_dim}."
+                )
+
+        if self.k is not None:
+            k = int(self.k)
+            if k < 0 or k >= steps:
+                raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+
+            start = int(k * q_dim)
+            stop = int(start + q_dim)
+            y_parts = []
+            j_parts = []
+            for traj in self.trajectories:
+                y_all = (traj.A @ p + traj.b).reshape(-1)
+                y_parts.append(y_all[start:stop].copy())
+                j_parts.append(traj.A[start:stop, :].copy())
+            return np.concatenate(y_parts, axis=0), [np.vstack(j_parts)]
+
+        y_parts = []
+        j_parts = []
+        for traj in self.trajectories:
+            y_parts.append((traj.A @ p + traj.b).reshape(-1))
+            j_parts.append(traj.A.copy())
+        return np.concatenate(y_parts, axis=0), [np.vstack(j_parts)]
 
 
 @dataclass

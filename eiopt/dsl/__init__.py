@@ -13,7 +13,14 @@ from .builder import (
 )
 from .io import load_problem_toml
 from .dsl_ops import find_const_expr, find_var_dsl, rewrite_get_state_owner_name
-from .trajectory import build_trajectory_map, default_steps_from_time, infer_bspline_q_dim_from_var
+from .trajectory import (
+    build_trajectory_map,
+    build_trajectory_map_with_derivative,
+    build_trajectory_maps_with_derivatives,
+    default_dt_from_time,
+    default_steps_from_time,
+    infer_bspline_q_dim_from_var,
+)
 
 __all__ = [
     "DslBuildEnv",
@@ -30,6 +37,9 @@ __all__ = [
     "find_var_dsl",
     "rewrite_get_state_owner_name",
     "build_trajectory_map",
+    "build_trajectory_map_with_derivative",
+    "build_trajectory_maps_with_derivatives",
+    "default_dt_from_time",
     "default_steps_from_time",
     "infer_bspline_q_dim_from_var",
 ]

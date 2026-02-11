@@ -102,3 +102,131 @@ def bspline_basis_matrix(
     if not np.allclose(row_sums, 1.0, atol=1e-9, rtol=1e-9):
         raise ValueError("bspline_basis_matrix: invalid basis; rows must sum to 1.")
     return basis
+
+
+def _bspline_derivative_transform(
+    *,
+    degree: int,
+    knots: Array,
+    num_ctrl_points: int,
+) -> Array:
+    """Linear map from control points to derivative control points.
+
+    For degree ``p`` spline control points ``P_i``, derivative control points are:
+
+      D_i = p / (U_{i+p+1} - U_{i+1}) * (P_{i+1} - P_i)
+    """
+
+    degree = int(degree)
+    num_ctrl_points = int(num_ctrl_points)
+    knots = np.asarray(knots, dtype=float).reshape(-1)
+
+    if degree <= 0 or num_ctrl_points <= 1:
+        return np.zeros((max(num_ctrl_points - 1, 0), num_ctrl_points), dtype=float)
+
+    out = np.zeros((num_ctrl_points - 1, num_ctrl_points), dtype=float)
+    for i in range(num_ctrl_points - 1):
+        denom = float(knots[i + degree + 1] - knots[i + 1])
+        if denom <= 0.0:
+            continue
+        c = float(degree) / denom
+        out[i, i] = -c
+        out[i, i + 1] = c
+    return out
+
+
+def bspline_basis_derivative_matrix(
+    *,
+    u_vec: Array,
+    degree: int,
+    knots: Array,
+    num_ctrl_points: int,
+    derivative_order: int = 1,
+) -> Array:
+    """Evaluate the ``derivative_order``-th derivative of B-spline basis."""
+
+    derivative_order = int(derivative_order)
+    if derivative_order < 0:
+        raise ValueError(
+            "bspline_basis_derivative_matrix: derivative_order must be >= 0, "
+            f"got {derivative_order}."
+        )
+    mats = bspline_basis_derivative_matrices(
+        u_vec=u_vec,
+        degree=degree,
+        knots=knots,
+        num_ctrl_points=num_ctrl_points,
+        max_derivative_order=derivative_order,
+    )
+    return mats[derivative_order, :, :]
+
+
+def bspline_basis_derivative_matrices(
+    *,
+    u_vec: Array,
+    degree: int,
+    knots: Array,
+    num_ctrl_points: int,
+    max_derivative_order: int,
+) -> Array:
+    """Evaluate derivatives of B-spline basis wrt parameter ``u``.
+
+    Returns tensor ``B_all`` with shape ``(max_derivative_order + 1, len(u_vec), num_ctrl_points)`` where:
+
+      B_all[r, k, i] = d^r N_i,p(u_k) / du^r
+
+    for ``r = 0..max_derivative_order``.
+    """
+
+    u_vec = np.asarray(u_vec, dtype=float).reshape(-1)
+    degree = int(degree)
+    num_ctrl_points = int(num_ctrl_points)
+    knots = np.asarray(knots, dtype=float).reshape(-1)
+    max_derivative_order = int(max_derivative_order)
+
+    if max_derivative_order < 0:
+        raise ValueError(
+            "bspline_basis_derivative_matrices: max_derivative_order must be >= 0, "
+            f"got {max_derivative_order}."
+        )
+
+    out = np.zeros((max_derivative_order + 1, u_vec.size, num_ctrl_points), dtype=float)
+    out[0, :, :] = bspline_basis_matrix(
+        u_vec=u_vec,
+        degree=degree,
+        knots=knots,
+        num_ctrl_points=num_ctrl_points,
+    )
+    if max_derivative_order == 0:
+        return out
+
+    current_knots = knots.copy()
+    current_degree = degree
+    current_num_ctrl = num_ctrl_points
+    transform = np.eye(num_ctrl_points, dtype=float)
+    max_supported_order = min(max_derivative_order, degree)
+
+    for order in range(1, max_supported_order + 1):
+        D = _bspline_derivative_transform(
+            degree=current_degree,
+            knots=current_knots,
+            num_ctrl_points=current_num_ctrl,
+        )
+        transform = D @ transform
+        current_knots = current_knots[1:-1]
+        current_degree -= 1
+        current_num_ctrl -= 1
+
+        if current_num_ctrl <= 0:
+            break
+
+        basis_low = bspline_basis_matrix(
+            u_vec=u_vec,
+            degree=current_degree,
+            knots=current_knots,
+            num_ctrl_points=current_num_ctrl,
+        )
+        out[order, :, :] = basis_low @ transform
+
+    out[np.abs(out) < 1e-14] = 0.0
+    return out
