@@ -100,6 +100,14 @@ x_star, *_ = solve_gauss_newton(runtime)
 print(format_solve_report(runtime, x0=x0, x_star=x_star))
 ```
 
+名前付き Expr の値をコード側で直接使う場合は `get_named_expr_value()` が使えます。
+
+```python
+from eiopt import get_named_expr_value
+
+ee_traj = get_named_expr_value(runtime, name="ee_pos_traj")
+```
+
 ### 最小テンプレート
 
 ```toml
@@ -157,6 +165,34 @@ var = "q" # 省略可（変数が1つなら自動）
 
 軌道最適化などで `q` を時系列にスタックしている場合は、`k` を指定すると `q(k)` を返し、ヤコビアンは選択行列になります。
 
+## 軌道スタックの直接取得（get_traj_var）
+
+軌道パラメータ `p` を最適化している場合は、`get_traj_var` で
+`TrajectoryMap` の `q_traj = A @ p + b`（`q(0),...,q(N)` のスタック）を
+直接 residual として使えます。
+
+- `expr.trajectory` を省略すると、トップレベルの `[trajectory]` を使います。
+- `type="bspline"` で `q_dim` 未指定の場合、`var.dim / num_ctrl_points` から推定します（割り切れる場合）。
+
+時刻差分（`q(k)-q(k-1)`）による平滑化の例:
+
+```toml
+[[terms]]
+[terms.expr]
+type = "time_diff"
+name = "traj_smooth"
+segment_dim = 2
+
+[terms.expr.base]
+type = "get_traj_var"
+name = "q_traj"
+var = "p"
+
+[terms.cost]
+type = "scalar_weight"
+w = 1e-3
+```
+
 ## RoboKots の軌道パラメータ最適化（TrajectoryMap / B-spline）
 
 RoboKots 向けには、決定変数を軌道パラメータ `p` とし、`TrajectoryMap` を介して
@@ -189,7 +225,7 @@ runtime = compile_problem(dsl, build_state=builder.build_state)
 DSL 側では `get_state.jac.var = "p"` を指定します。実例は
 `examples/dsl/kots_traj_pos.toml` と `examples/main_robokots_traj.py` を参照してください。
 `kots_traj_pos.toml` の `time.N` を増やすとステップ数を増やせます
-（この example では `stack.range` と `target_pos_traj` が自動でステップ数に同期されます）。
+（`stack.range` / `target_pos_traj` のサイズも TOML 側で合わせてください）。
 
 `type = "linear"` の場合は `trajectory.linear.A`（または `trajectory.A`）と
 必要に応じて `trajectory.linear.b` を指定します。

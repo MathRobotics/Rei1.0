@@ -74,7 +74,7 @@ def build_problem(dsl: dict[str, Any], *, expr_register: ExprRegister) -> tuple[
     time = TimeGrid.single_time() if time_dsl is None else TimeGrid.from_dsl(time_dsl)
 
     pack = build_variable_pack(dsl)
-    env = DslBuildEnv(pack=pack, time=time, expr_register=expr_register)
+    env = DslBuildEnv(pack=pack, time=time, expr_register=expr_register, root_dsl=dsl)
     terms = [build_term(env, term_dsl) for term_dsl in dsl.get("terms", [])]
 
     return Problem(variables=pack, terms=terms), time

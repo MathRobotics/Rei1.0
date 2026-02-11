@@ -6,6 +6,7 @@ from typing import Sequence
 import numpy as np
 
 from ..core.state_cache import StateKey
+from ..core.trajectory import TrajectoryMap
 from ..model.term import Variable, RuntimeContext, Expr
 
 
@@ -79,6 +80,80 @@ class GetVarExpr:
         J = np.zeros((n, n_total), dtype=float)
         J[:, start : start + n] = np.eye(n, dtype=float)
         return y, [J]
+
+
+@dataclass
+class TrajectoryVarExpr:
+    """Map trajectory parameter variable to stacked trajectory `A @ p + b`."""
+
+    name: str
+    vars: Sequence[Variable]
+    trajectory: TrajectoryMap
+
+    def deps(self):
+        return []
+
+    def eval(self, ctx: RuntimeContext):
+        del ctx
+        p = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
+        if p.size != self.trajectory.p_dim:
+            raise ValueError(
+                f"{self.name}: parameter size mismatch. "
+                f"Expected {self.trajectory.p_dim}, got {p.size}."
+            )
+        q_stack = (self.trajectory.A @ p + self.trajectory.b).reshape(-1)
+        return q_stack, [self.trajectory.A.copy()]
+
+
+@dataclass
+class TimeDiffExpr:
+    """First-order backward difference over time-stacked vectors.
+
+    For y = [y(0), y(1), ..., y(T-1)] with each y(k) in R^segment_dim,
+    returns [y(1)-y(0), ..., y(T-1)-y(T-2)].
+    """
+
+    name: str
+    base: Expr
+    segment_dim: int
+
+    @property
+    def vars(self):
+        return self.base.vars
+
+    def deps(self):
+        return self.base.deps()
+
+    def eval(self, ctx: RuntimeContext):
+        y, blocks = self.base.eval(ctx)
+        y = np.asarray(y, dtype=float).reshape(-1)
+
+        seg = int(self.segment_dim)
+        if seg <= 0:
+            raise ValueError(f"{self.name}: segment_dim must be > 0, got {seg}.")
+        if y.size % seg != 0:
+            raise ValueError(
+                f"{self.name}: base size {y.size} is not divisible by segment_dim={seg}."
+            )
+
+        steps = int(y.size // seg)
+        if steps < 2:
+            raise ValueError(f"{self.name}: need at least 2 steps, got {steps}.")
+
+        y2 = y.reshape(steps, seg)
+        r = (y2[1:, :] - y2[:-1, :]).reshape(-1)
+
+        blocks2 = []
+        for B in blocks:
+            Bm = np.asarray(B, dtype=float)
+            if Bm.ndim != 2 or Bm.shape[0] != y.size:
+                raise ValueError(
+                    f"{self.name}: block row mismatch. base size={y.size}, block shape={Bm.shape}."
+                )
+            B3 = Bm.reshape(steps, seg, Bm.shape[1])
+            Bd = (B3[1:, :, :] - B3[:-1, :, :]).reshape((steps - 1) * seg, Bm.shape[1])
+            blocks2.append(Bd)
+        return r, blocks2
 
 
 @dataclass

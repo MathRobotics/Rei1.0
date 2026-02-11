@@ -10,7 +10,7 @@ from . import core, dsl, expr, model, solvers
 from .solvers import nls, solve_gauss_newton
 from .dsl import compile_problem, load_problem_toml
 from .model import ProblemRuntime
-from .report import format_solve_report
+from .report import format_solve_report, collect_named_expr_values, get_named_expr_value
 
 __all__ = [
     "core",
@@ -24,4 +24,6 @@ __all__ = [
     "load_problem_toml",
     "ProblemRuntime",
     "format_solve_report",
+    "collect_named_expr_values",
+    "get_named_expr_value",
 ]

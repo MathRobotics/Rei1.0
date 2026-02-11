@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .expr_register import ExprRegister
-from .nodes import ConstantExpr, GetStateExpr, SubExpr, StackExpr, HingeExpr
+from .nodes import ConstantExpr, GetStateExpr, SubExpr, StackExpr, HingeExpr, TrajectoryVarExpr, TimeDiffExpr
 from .register_stdlib import register_stdlib
 
 __all__ = [
@@ -11,5 +11,7 @@ __all__ = [
     "SubExpr",
     "StackExpr",
     "HingeExpr",
+    "TrajectoryVarExpr",
+    "TimeDiffExpr",
     "register_stdlib",
 ]

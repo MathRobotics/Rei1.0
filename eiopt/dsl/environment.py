@@ -13,6 +13,7 @@ class DslBuildEnv:
     pack: VariablePack
     time: TimeGrid
     expr_register: ExprRegister
+    root_dsl: dict[str, Any] | None = None
 
     def build_expr(self, dsl: dict[str, Any]) -> Any:
         typ = str(dsl["type"])

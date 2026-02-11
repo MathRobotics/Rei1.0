@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -14,10 +15,21 @@ _DEFAULT_NAME_BLACKLIST = {
     "const",
     "get_state",
     "get_var",
+    "get_traj_var",
     "hinge",
     "stack",
     "sub",
+    "time_diff",
 }
+
+
+@dataclass(frozen=True)
+class NamedExprValue:
+    term_index: int
+    name: str
+    expr_type: str
+    value: Array
+
 
 def _format_vector(x: Array, *, max_elems: int, precision: int) -> str:
     x = np.asarray(x, dtype=float).reshape(-1)
@@ -63,6 +75,85 @@ def _walk_expr(expr: Any) -> Iterator[Any]:
         yield cur
         children = list(_iter_expr_children(cur))
         stack.extend(reversed(children))
+
+
+def collect_named_expr_values(
+    runtime: ProblemRuntime,
+    *,
+    required: Iterable[StateKey] | None = None,
+    name_blacklist: set[str] | None = None,
+    include_blacklisted: bool = False,
+) -> list[NamedExprValue]:
+    """Collect evaluated values for named Expr nodes from all objective terms."""
+
+    if name_blacklist is None:
+        name_blacklist = set(_DEFAULT_NAME_BLACKLIST)
+
+    problem = runtime.problem
+    ctx = runtime.ctx
+    required_list = runtime.required_list(required)
+    runtime.update_state_if_needed(required=required_list)
+
+    out: list[NamedExprValue] = []
+    for i, (expr, _cost) in enumerate(problem.terms):
+        for node in _walk_expr(expr):
+            name = getattr(node, "name", None)
+            if not isinstance(name, str) or not name:
+                continue
+            if (not include_blacklisted) and name in name_blacklist:
+                continue
+
+            y, _blocks = node.eval(ctx)
+            out.append(
+                NamedExprValue(
+                    term_index=i,
+                    name=name,
+                    expr_type=node.__class__.__name__,
+                    value=np.asarray(y, dtype=float).reshape(-1).copy(),
+                )
+            )
+    return out
+
+
+def get_named_expr_value(
+    runtime: ProblemRuntime,
+    *,
+    name: str,
+    term_index: int | None = None,
+    required: Iterable[StateKey] | None = None,
+    name_blacklist: set[str] | None = None,
+    include_blacklisted: bool = True,
+) -> Array:
+    """Get one named Expr value as a flat vector."""
+
+    name = str(name)
+    if name == "":
+        raise ValueError("get_named_expr_value: name must be non-empty.")
+
+    values = collect_named_expr_values(
+        runtime,
+        required=required,
+        name_blacklist=name_blacklist,
+        include_blacklisted=include_blacklisted,
+    )
+    matches = [v for v in values if v.name == name]
+    if term_index is not None:
+        matches = [v for v in matches if v.term_index == int(term_index)]
+
+    if len(matches) == 0:
+        where = f", term_index={int(term_index)}" if term_index is not None else ""
+        raise ValueError(f"get_named_expr_value: no named Expr found for name={name!r}{where}.")
+
+    if len(matches) > 1:
+        locs = ", ".join(f"(t{v.term_index}, {v.expr_type})" for v in matches[:8])
+        more = "" if len(matches) <= 8 else ", ..."
+        raise ValueError(
+            f"get_named_expr_value: multiple named Expr values matched name={name!r}. "
+            f"Matches: {locs}{more}. "
+            "Specify term_index to disambiguate."
+        )
+
+    return np.asarray(matches[0].value, dtype=float).reshape(-1).copy()
 
 
 def format_solve_report(
@@ -165,18 +256,14 @@ def format_solve_report(
     if include_named:
         lines.append("")
         lines.append("Named expr values:")
-
-        for i, (expr, _cost) in enumerate(problem.terms):
-            for node in _walk_expr(expr):
-                name = getattr(node, "name", None)
-                if not isinstance(name, str) or not name:
-                    continue
-                if name in name_blacklist:
-                    continue
-
-                y, _blocks = node.eval(ctx)
-                y = np.asarray(y, dtype=float).reshape(-1)
-                y_str = _format_vector(y, max_elems=max_elems, precision=precision)
-                lines.append(f"- [t{i}] {name} ({node.__class__.__name__}): {y_str}")
+        named_values = collect_named_expr_values(
+            runtime,
+            required=required_list,
+            name_blacklist=name_blacklist,
+            include_blacklisted=False,
+        )
+        for item in named_values:
+            y_str = _format_vector(item.value, max_elems=max_elems, precision=precision)
+            lines.append(f"- [t{item.term_index}] {item.name} ({item.expr_type}): {y_str}")
 
     return "\n".join(lines)

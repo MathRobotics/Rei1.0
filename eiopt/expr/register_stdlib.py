@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from .expr_register import ExprRegister
-from .nodes import ConstantExpr, GetStateExpr, GetVarExpr, SubExpr, StackExpr, HingeExpr
+from .nodes import ConstantExpr, GetStateExpr, GetVarExpr, SubExpr, StackExpr, HingeExpr, TrajectoryVarExpr, TimeDiffExpr
+from ..core.trajectory import TrajectoryMap
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, jac_field
 
@@ -12,9 +13,11 @@ def register_stdlib(expr_register: ExprRegister) -> None:
     expr_register.register_expr("const", build_const)
     expr_register.register_expr("get_state", build_get_state)
     expr_register.register_expr("get_var", build_get_var)
+    expr_register.register_expr("get_traj_var", build_get_traj_var)
     expr_register.register_expr("sub", build_sub)
     expr_register.register_expr("stack", build_stack)
     expr_register.register_expr("hinge", build_hinge)
+    expr_register.register_expr("time_diff", build_time_diff)
 
 
 def _default_var_name(ctx, *, preferred: str = "q") -> str:
@@ -105,6 +108,78 @@ def build_get_var(ctx, dsl):
     )
 
 
+def _resolve_default_steps_from_time(ctx) -> int | None:
+    time = getattr(ctx, "time", None)
+    if time is None or not hasattr(time, "N"):
+        return None
+    try:
+        return int(time.N) + 1
+    except Exception:
+        return None
+
+
+def _infer_bspline_q_dim_from_var(traj_dsl: dict, *, var_dim: int) -> int | None:
+    bspline = traj_dsl.get("bspline", None)
+    n_ctrl_raw = bspline.get("num_ctrl_points", None) if isinstance(bspline, dict) else None
+    if n_ctrl_raw is None:
+        n_ctrl_raw = traj_dsl.get("num_ctrl_points", None)
+    if n_ctrl_raw is None:
+        return None
+    try:
+        n_ctrl = int(n_ctrl_raw)
+    except Exception:
+        return None
+    if n_ctrl <= 0 or int(var_dim) <= 0 or int(var_dim) % n_ctrl != 0:
+        return None
+    q_dim = int(var_dim) // n_ctrl
+    return q_dim if q_dim > 0 else None
+
+
+def build_get_traj_var(ctx, dsl):
+    traj_dsl = dsl.get("trajectory", None)
+    if traj_dsl is None:
+        root_dsl = getattr(ctx, "root_dsl", None)
+        if isinstance(root_dsl, dict):
+            traj_dsl = root_dsl.get("trajectory", None)
+    if not isinstance(traj_dsl, dict):
+        raise ValueError(
+            "get_traj_var: trajectory config not found. "
+            "Set expr.trajectory or top-level [trajectory]."
+        )
+
+    var_name = dsl.get("var", traj_dsl.get("var", None))
+    if var_name is None:
+        var_name = _default_var_name(ctx, preferred="p")
+    var_name = str(var_name)
+    if var_name == "":
+        raise ValueError("get_traj_var: var must be non-empty.")
+
+    v = next((x for x in ctx.pack.vars if x.name == var_name), None)
+    if v is None:
+        raise ValueError(f"get_traj_var: unknown variable: {var_name!r}")
+
+    default_q_dim = None
+    if str(traj_dsl.get("type", "")).strip().lower() == "bspline":
+        default_q_dim = _infer_bspline_q_dim_from_var(traj_dsl, var_dim=v.dim())
+
+    traj = TrajectoryMap.from_dsl(
+        traj_dsl,
+        default_steps=_resolve_default_steps_from_time(ctx),
+        default_q_dim=default_q_dim,
+    )
+    if traj.p_dim != v.dim():
+        raise ValueError(
+            "get_traj_var: variable dimension mismatch with trajectory parameter dimension. "
+            f"var {var_name!r} dim={v.dim()}, trajectory p_dim={traj.p_dim}."
+        )
+
+    return TrajectoryVarExpr(
+        name=dsl.get("name", "get_traj_var"),
+        vars=[v],
+        trajectory=traj,
+    )
+
+
 def build_sub(ctx, dsl):
     a = ctx.build_expr(dsl["a"])
     b = ctx.build_expr(dsl["b"])
@@ -127,3 +202,21 @@ def build_stack(ctx, dsl):
 def build_hinge(ctx, dsl):
     base = ctx.build_expr(dsl["base"])
     return HingeExpr(name=dsl.get("name", "hinge"), base=base)
+
+
+def build_time_diff(ctx, dsl):
+    base = ctx.build_expr(dsl["base"])
+    segment_dim_raw = dsl.get("segment_dim", None)
+    if segment_dim_raw is None:
+        raise ValueError("time_diff: segment_dim is required.")
+    try:
+        segment_dim = int(segment_dim_raw)
+    except Exception as e:
+        raise ValueError(f"time_diff: segment_dim must be an integer, got {segment_dim_raw!r}.") from e
+    if segment_dim <= 0:
+        raise ValueError(f"time_diff: segment_dim must be > 0, got {segment_dim}.")
+    return TimeDiffExpr(
+        name=dsl.get("name", "time_diff"),
+        base=base,
+        segment_dim=segment_dim,
+    )
