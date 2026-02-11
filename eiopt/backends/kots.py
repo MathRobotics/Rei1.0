@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -218,85 +218,6 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
         del key, state_ref
         n = int(np.asarray(q, dtype=float).reshape(-1).size)
         return np.eye(n, dtype=float)
-
-    @classmethod
-    def from_dsl(
-        cls,
-        model: Any,
-        data: Any,
-        *,
-        dsl: Mapping[str, Any],
-        trajectory_key: str = "trajectory",
-        fields: Sequence[str] | None = None,
-        sync_var_dim: bool = True,
-    ) -> "KotsTrajectoryStateBuilder":
-        if not isinstance(dsl, Mapping):
-            raise TypeError("KotsTrajectoryStateBuilder.from_dsl: dsl must be a mapping.")
-        traj_dsl = dsl.get(trajectory_key, None)
-        if not isinstance(traj_dsl, Mapping):
-            raise ValueError(
-                "KotsTrajectoryStateBuilder.from_dsl: trajectory section is required. "
-                f"Expected mapping at dsl[{trajectory_key!r}]."
-            )
-
-        p_var = str(traj_dsl.get("var", "p"))
-        if p_var == "":
-            raise ValueError("KotsTrajectoryStateBuilder.from_dsl: trajectory.var must be non-empty.")
-
-        default_steps = None
-        time_dsl = dsl.get("time", None)
-        if isinstance(time_dsl, Mapping) and "N" in time_dsl:
-            default_steps = int(time_dsl["N"]) + 1
-
-        default_q_dim = cls._infer_model_dof(model)
-        trajectory_map = TrajectoryMap.from_dsl(
-            traj_dsl,
-            default_steps=default_steps,
-            default_q_dim=default_q_dim,
-        )
-        if sync_var_dim:
-            cls._sync_var_dim_from_dsl(dsl, var_name=p_var, dim=trajectory_map.p_dim)
-        return cls(
-            model,
-            data,
-            trajectory_map=trajectory_map,
-            p_var=p_var,
-            fields=fields,
-        )
-
-    @staticmethod
-    def _infer_model_dof(model: Any) -> int | None:
-        dof_fn = getattr(model, "dof", None)
-        if callable(dof_fn):
-            try:
-                return int(dof_fn())
-            except Exception:
-                return None
-        robot = getattr(model, "robot_", None)
-        if robot is not None and hasattr(robot, "dof"):
-            try:
-                return int(getattr(robot, "dof"))
-            except Exception:
-                return None
-        return None
-
-    @staticmethod
-    def _sync_var_dim_from_dsl(dsl: Mapping[str, Any], *, var_name: str, dim: int) -> None:
-        if not isinstance(dsl, dict):
-            return
-        variables = dsl.get("variables", None)
-        if not isinstance(variables, list):
-            return
-        for v in variables:
-            if not isinstance(v, dict):
-                continue
-            if v.get("name", None) != var_name:
-                continue
-            v["dim"] = int(dim)
-            init = np.asarray(v.get("init", []), dtype=float).reshape(-1)
-            if init.size != int(dim):
-                v["init"] = np.zeros((int(dim),), dtype=float).tolist()
-            return
 
     def _expected_steps(self, *, time: Any = None) -> int:
         steps = int(self.trajectory_map.steps)

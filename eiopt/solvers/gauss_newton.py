@@ -61,7 +61,6 @@ def solve_gauss_newton(
             return x_star, cost, k, rnorm, dxnorm, converged
 
         variables.apply_dx(dx)
-        variables.revision += 1
 
     # max_iters exhausted: report residual at final x (after last update)
     r_all, _J_all = runtime.linearize(required=required)

@@ -4,9 +4,9 @@ import numpy as np
 
 from .expr_register import ExprRegister
 from .nodes import ConstantExpr, GetStateExpr, GetVarExpr, SubExpr, StackExpr, HingeExpr, TrajectoryVarExpr, TimeDiffExpr
-from ..core.trajectory import TrajectoryMap
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, jac_field
+from ..dsl.trajectory import build_trajectory_map, default_steps_from_time, infer_bspline_q_dim_from_var
 
 
 def register_stdlib(expr_register: ExprRegister) -> None:
@@ -108,33 +108,6 @@ def build_get_var(ctx, dsl):
     )
 
 
-def _resolve_default_steps_from_time(ctx) -> int | None:
-    time = getattr(ctx, "time", None)
-    if time is None or not hasattr(time, "N"):
-        return None
-    try:
-        return int(time.N) + 1
-    except Exception:
-        return None
-
-
-def _infer_bspline_q_dim_from_var(traj_dsl: dict, *, var_dim: int) -> int | None:
-    bspline = traj_dsl.get("bspline", None)
-    n_ctrl_raw = bspline.get("num_ctrl_points", None) if isinstance(bspline, dict) else None
-    if n_ctrl_raw is None:
-        n_ctrl_raw = traj_dsl.get("num_ctrl_points", None)
-    if n_ctrl_raw is None:
-        return None
-    try:
-        n_ctrl = int(n_ctrl_raw)
-    except Exception:
-        return None
-    if n_ctrl <= 0 or int(var_dim) <= 0 or int(var_dim) % n_ctrl != 0:
-        return None
-    q_dim = int(var_dim) // n_ctrl
-    return q_dim if q_dim > 0 else None
-
-
 def build_get_traj_var(ctx, dsl):
     traj_dsl = dsl.get("trajectory", None)
     if traj_dsl is None:
@@ -160,13 +133,17 @@ def build_get_traj_var(ctx, dsl):
 
     default_q_dim = None
     if str(traj_dsl.get("type", "")).strip().lower() == "bspline":
-        default_q_dim = _infer_bspline_q_dim_from_var(traj_dsl, var_dim=v.dim())
+        default_q_dim = infer_bspline_q_dim_from_var(traj_dsl, var_dim=v.dim())
 
-    traj = TrajectoryMap.from_dsl(
-        traj_dsl,
-        default_steps=_resolve_default_steps_from_time(ctx),
-        default_q_dim=default_q_dim,
-    )
+    resolve_traj = getattr(ctx, "resolve_trajectory_map", None)
+    if callable(resolve_traj):
+        traj = resolve_traj(traj_dsl, default_q_dim=default_q_dim)
+    else:
+        traj = build_trajectory_map(
+            traj_dsl,
+            default_steps=default_steps_from_time(getattr(ctx, "time", None)),
+            default_q_dim=default_q_dim,
+        )
     if traj.p_dim != v.dim():
         raise ValueError(
             "get_traj_var: variable dimension mismatch with trajectory parameter dimension. "

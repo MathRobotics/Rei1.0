@@ -9,7 +9,7 @@ from ..core.time_grid import TimeGrid
 from ..expr.register_stdlib import register_stdlib
 from ..expr.expr_register import ExprRegister
 from ..model.problem import Problem
-from ..model.runtime import ProblemRuntime
+from ..model.runtime import ProblemRuntime, collect_required as collect_required_from_problem
 from ..model.term import (
     DiagonalWeightCost,
     HuberCost,
@@ -81,13 +81,7 @@ def build_problem(dsl: dict[str, Any], *, expr_register: ExprRegister) -> tuple[
 
 
 def collect_required(problem: Problem) -> list[StateKey]:
-    required: list[StateKey] = []
-    for expr, _cost in problem.terms:
-        deps = getattr(expr, "deps", None)
-        if callable(deps):
-            required.extend(list(deps()))
-
-    return list(dict.fromkeys(required))
+    return collect_required_from_problem(problem)
 
 
 def compile_problem(

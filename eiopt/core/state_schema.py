@@ -34,55 +34,13 @@ DEFAULT_ROBOT_NAME: str = "robot"
 FRAME_FIELDS: Tuple[str, str, str] = ("pos", "rot", "frame")
 JOINT_FIELDS: Tuple[str, ...] = ("q",)
 
-# Kinematics-like fields (subset; backends may extend)
-KIN_FIELDS: Tuple[str, ...] = (
-    "pos",
-    "rot",
-    "frame",
-    "vel",
-    "acc",
-    "jerk",
-    "snap",
-    "crackle",
-    "pop",
-    "lock",
-    "drop",
-    "shot",
-    "put",
-)
+# Kinematics-like fields (minimal set; backends may extend)
+KIN_FIELDS: Tuple[str, ...] = FRAME_FIELDS
 
-# Dynamics-like fields (subset; backends may extend)
-MOMENTUM_FIELDS: Tuple[str, ...] = (
-    "momentum",
-    "momentum_diff1",
-    "momentum_diff2",
-    "momentum_diff3",
-    "momentum_diff4",
-    "momentum_diff5",
-    "momentum_diff6",
-    "momentum_diff7",
-    "momentum_diff8",
-)
-FORCE_FIELDS: Tuple[str, ...] = (
-    "force",
-    "force_diff1",
-    "force_diff2",
-    "force_diff3",
-    "force_diff4",
-    "force_diff5",
-    "force_diff6",
-    "force_diff7",
-)
-TORQUE_FIELDS: Tuple[str, ...] = (
-    "torque",
-    "torque_diff1",
-    "torque_diff2",
-    "torque_diff3",
-    "torque_diff4",
-    "torque_diff5",
-    "torque_diff6",
-    "torque_diff7",
-)
+# Dynamics-like fields (minimal set; backends may extend)
+MOMENTUM_FIELDS: Tuple[str, ...] = ("momentum",)
+FORCE_FIELDS: Tuple[str, ...] = ("force",)
+TORQUE_FIELDS: Tuple[str, ...] = ("torque",)
 
 DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
 

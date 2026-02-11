@@ -24,7 +24,7 @@ def _dedupe_required(keys: Iterable[StateKey]) -> list[StateKey]:
     return out
 
 
-def _collect_required(problem: Problem) -> list[StateKey]:
+def collect_required(problem: Problem) -> list[StateKey]:
     req: list[StateKey] = []
     for expr, _cost in problem.terms:
         deps = getattr(expr, "deps", None)
@@ -80,7 +80,7 @@ class ProblemRuntime:
     def required_list(self, required: Iterable[StateKey] | None = None) -> list[StateKey]:
         if required is None:
             if not self.required:
-                self.required = _collect_required(self.problem)
+                self.required = collect_required(self.problem)
             return list(self.required)
         return _dedupe_required(required)
 

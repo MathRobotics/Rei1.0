@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
+
+from .bspline import bspline_basis_matrix, default_clamped_uniform_knots
 
 Array = np.ndarray
 
@@ -159,7 +160,7 @@ class TrajectoryMap:
             )
 
         if knot_vector is None:
-            knots = cls._default_clamped_uniform_knots(
+            knots = default_clamped_uniform_knots(
                 num_ctrl_points=num_ctrl_points,
                 degree=degree,
             )
@@ -211,7 +212,7 @@ class TrajectoryMap:
             )
         u_vec = np.clip(u_vec, u_min, u_max)
 
-        basis = cls._bspline_basis_matrix(
+        basis = bspline_basis_matrix(
             u_vec=u_vec,
             degree=degree,
             knots=knots,
@@ -225,268 +226,3 @@ class TrajectoryMap:
 
         b = np.zeros((steps * q_dim,), dtype=float)
         return cls(A=A, b=b, steps=steps, q_dim=q_dim)
-
-    @classmethod
-    def from_dsl(
-        cls,
-        dsl: Mapping[str, Any],
-        *,
-        default_steps: int | None = None,
-        default_q_dim: int | None = None,
-    ) -> "TrajectoryMap":
-        """Build a trajectory map from DSL `trajectory` section.
-
-        Supported forms:
-          - `type = "bspline"` with keys:
-              degree, num_ctrl_points, [knot_vector], [u_samples], [steps], [q_dim]
-          - `type = "linear"` with keys:
-              A, [b], [steps], [q_dim]
-
-        `steps` / `q_dim` can be omitted when defaults are supplied.
-        """
-
-        if not isinstance(dsl, Mapping):
-            raise TypeError("TrajectoryMap.from_dsl: dsl must be a mapping.")
-
-        typ = str(dsl.get("type", "")).strip().lower()
-        if typ == "":
-            raise ValueError("TrajectoryMap.from_dsl: trajectory.type is required.")
-
-        steps = cls._resolve_optional_positive_int(
-            cls._pick_dsl_value(dsl, section=typ, key="steps"),
-            name="steps",
-            fallback=default_steps,
-        )
-        q_dim = cls._resolve_optional_positive_int(
-            cls._pick_dsl_value(dsl, section=typ, key="q_dim"),
-            name="q_dim",
-            fallback=default_q_dim,
-        )
-
-        if typ == "bspline":
-            if steps is None:
-                raise ValueError(
-                    "TrajectoryMap.from_dsl: steps is required for bspline trajectory "
-                    "(set trajectory.steps or pass default_steps)."
-                )
-            if q_dim is None:
-                raise ValueError(
-                    "TrajectoryMap.from_dsl: q_dim is required for bspline trajectory "
-                    "(set trajectory.q_dim or pass default_q_dim)."
-                )
-
-            degree = cls._resolve_required_nonnegative_int(
-                cls._pick_dsl_value(dsl, section="bspline", key="degree"),
-                name="degree",
-            )
-            num_ctrl_points = cls._resolve_required_positive_int(
-                cls._pick_dsl_value(dsl, section="bspline", key="num_ctrl_points"),
-                name="num_ctrl_points",
-            )
-            knot_vector_raw = cls._pick_dsl_value(dsl, section="bspline", key="knot_vector")
-            u_samples_raw = cls._pick_dsl_value(dsl, section="bspline", key="u_samples")
-            knot_vector = None if knot_vector_raw is None else np.asarray(knot_vector_raw, dtype=float).reshape(-1)
-            u_samples = None if u_samples_raw is None else np.asarray(u_samples_raw, dtype=float).reshape(-1)
-            return cls.from_bspline(
-                steps=steps,
-                q_dim=q_dim,
-                degree=degree,
-                num_ctrl_points=num_ctrl_points,
-                knot_vector=knot_vector,
-                u_samples=u_samples,
-            )
-
-        if typ == "linear":
-            A_raw = cls._pick_dsl_value(dsl, section="linear", key="A")
-            if A_raw is None:
-                raise ValueError("TrajectoryMap.from_dsl: trajectory.linear.A is required for type='linear'.")
-            try:
-                A_arr = np.asarray(A_raw, dtype=float)
-            except Exception as e:
-                raise ValueError("TrajectoryMap.from_dsl: failed to parse linear A as numeric array.") from e
-
-            if A_arr.ndim == 1:
-                if steps is None or q_dim is None:
-                    raise ValueError(
-                        "TrajectoryMap.from_dsl: steps and q_dim are required when linear A is 1D "
-                        "(flattened array)."
-                    )
-                rows = int(steps * q_dim)
-                if rows <= 0:
-                    raise ValueError("TrajectoryMap.from_dsl: invalid steps*q_dim for linear A reshape.")
-                if A_arr.size % rows != 0:
-                    raise ValueError(
-                        "TrajectoryMap.from_dsl: linear A size mismatch. "
-                        f"Expected multiple of {rows} (=steps*q_dim), got {A_arr.size}."
-                    )
-                A_mat = A_arr.reshape(rows, -1)
-            elif A_arr.ndim == 2:
-                A_mat = A_arr
-            else:
-                raise ValueError(
-                    "TrajectoryMap.from_dsl: linear A must be 1D(flat) or 2D(matrix), "
-                    f"got ndim={A_arr.ndim}."
-                )
-
-            rows = int(A_mat.shape[0])
-            if steps is None and q_dim is None:
-                raise ValueError(
-                    "TrajectoryMap.from_dsl: cannot infer both steps and q_dim from linear A only. "
-                    "Provide trajectory.steps or trajectory.q_dim (or defaults)."
-                )
-            if steps is None:
-                if q_dim is None or rows % q_dim != 0:
-                    raise ValueError(
-                        "TrajectoryMap.from_dsl: failed to infer steps from linear A rows and q_dim. "
-                        f"rows={rows}, q_dim={q_dim}."
-                    )
-                steps = int(rows // q_dim)
-            if q_dim is None:
-                if steps <= 0 or rows % steps != 0:
-                    raise ValueError(
-                        "TrajectoryMap.from_dsl: failed to infer q_dim from linear A rows and steps. "
-                        f"rows={rows}, steps={steps}."
-                    )
-                q_dim = int(rows // steps)
-            if int(steps * q_dim) != rows:
-                raise ValueError(
-                    "TrajectoryMap.from_dsl: linear A row mismatch against steps and q_dim. "
-                    f"rows={rows}, steps*q_dim={steps * q_dim}."
-                )
-
-            b_raw = cls._pick_dsl_value(dsl, section="linear", key="b")
-            if b_raw is None:
-                b_vec = np.zeros((rows,), dtype=float)
-            else:
-                b_vec = np.asarray(b_raw, dtype=float).reshape(-1)
-                if b_vec.size != rows:
-                    raise ValueError(
-                        "TrajectoryMap.from_dsl: linear b size mismatch. "
-                        f"Expected {rows}, got {b_vec.size}."
-                    )
-            return cls(A=A_mat, b=b_vec, steps=steps, q_dim=q_dim)
-
-        raise ValueError(
-            f"TrajectoryMap.from_dsl: unsupported trajectory type {typ!r}. "
-            "Supported types: 'bspline', 'linear'."
-        )
-
-    @staticmethod
-    def _default_clamped_uniform_knots(*, num_ctrl_points: int, degree: int) -> Array:
-        knot_count = int(num_ctrl_points + degree + 1)
-        knots = np.zeros((knot_count,), dtype=float)
-        knots[-(degree + 1) :] = 1.0
-
-        interior = int(num_ctrl_points - degree - 1)
-        if interior > 0:
-            knots[degree + 1 : degree + 1 + interior] = np.linspace(
-                0.0,
-                1.0,
-                interior + 2,
-                dtype=float,
-            )[1:-1]
-        return knots
-
-    @classmethod
-    def _bspline_basis_matrix(
-        cls,
-        *,
-        u_vec: Array,
-        degree: int,
-        knots: Array,
-        num_ctrl_points: int,
-    ) -> Array:
-        basis = np.zeros((u_vec.size, num_ctrl_points), dtype=float)
-        for r, u in enumerate(u_vec):
-            basis[r, :] = cls._bspline_basis_row(
-                u=float(u),
-                degree=degree,
-                knots=knots,
-                num_ctrl_points=num_ctrl_points,
-            )
-
-        basis[np.abs(basis) < 1e-14] = 0.0
-        row_sums = np.sum(basis, axis=1)
-        if not np.allclose(row_sums, 1.0, atol=1e-9, rtol=1e-9):
-            raise ValueError("TrajectoryMap.from_bspline: invalid basis; rows must sum to 1.")
-        return basis
-
-    @staticmethod
-    def _bspline_basis_row(
-        *,
-        u: float,
-        degree: int,
-        knots: Array,
-        num_ctrl_points: int,
-    ) -> Array:
-        # Cox-de Boor recursion over all control indices.
-        N = np.zeros((num_ctrl_points, degree + 1), dtype=float)
-        for i in range(num_ctrl_points):
-            left = float(knots[i])
-            right = float(knots[i + 1])
-            in_span = (left <= u < right) or (u == float(knots[-1]) and i == (num_ctrl_points - 1))
-            if in_span:
-                N[i, 0] = 1.0
-
-        for p in range(1, degree + 1):
-            for i in range(num_ctrl_points):
-                left = 0.0
-                left_den = float(knots[i + p] - knots[i])
-                if left_den > 0.0:
-                    left = (u - float(knots[i])) / left_den * N[i, p - 1]
-
-                right = 0.0
-                if i + 1 < num_ctrl_points:
-                    right_den = float(knots[i + p + 1] - knots[i + 1])
-                    if right_den > 0.0:
-                        right = (float(knots[i + p + 1]) - u) / right_den * N[i + 1, p - 1]
-
-                N[i, p] = left + right
-
-        return N[:, degree]
-
-    @staticmethod
-    def _pick_dsl_value(dsl: Mapping[str, Any], *, section: str, key: str) -> Any:
-        if key in dsl:
-            return dsl[key]
-        section_obj = dsl.get(section, None)
-        if isinstance(section_obj, Mapping) and key in section_obj:
-            return section_obj[key]
-        return None
-
-    @staticmethod
-    def _resolve_optional_positive_int(value: Any, *, name: str, fallback: int | None = None) -> int | None:
-        v = fallback if value is None else value
-        if v is None:
-            return None
-        try:
-            out = int(v)
-        except Exception as e:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} must be an integer, got {v!r}.") from e
-        if out <= 0:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} must be > 0, got {out}.")
-        return out
-
-    @staticmethod
-    def _resolve_required_positive_int(value: Any, *, name: str) -> int:
-        if value is None:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} is required.")
-        try:
-            out = int(value)
-        except Exception as e:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} must be an integer, got {value!r}.") from e
-        if out <= 0:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} must be > 0, got {out}.")
-        return out
-
-    @staticmethod
-    def _resolve_required_nonnegative_int(value: Any, *, name: str) -> int:
-        if value is None:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} is required.")
-        try:
-            out = int(value)
-        except Exception as e:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} must be an integer, got {value!r}.") from e
-        if out < 0:
-            raise ValueError(f"TrajectoryMap.from_dsl: {name} must be >= 0, got {out}.")
-        return out

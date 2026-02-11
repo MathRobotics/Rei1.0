@@ -60,6 +60,7 @@ class VariablePack:
         for v in self.vars:
             s, e = self.slices[v.name]
             v.x = np.asarray(v.x, dtype=float).reshape(-1) + dx[s:e]
+        self.revision += 1
 
 
 @dataclass(frozen=True)
