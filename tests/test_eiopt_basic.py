@@ -8,6 +8,7 @@ from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt.core.trajectory import TrajectoryMap
+from eiopt.dsl.trajectory import build_trajectory_map
 from eiopt import compile_problem, format_solve_report, get_named_expr_value
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
@@ -199,7 +200,7 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
-        traj = TrajectoryMap.from_dsl(
+        traj = build_trajectory_map(
             dsl["trajectory"],
             default_steps=3,
             default_q_dim=2,
@@ -240,7 +241,7 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
-        traj = TrajectoryMap.from_dsl(
+        traj = build_trajectory_map(
             dsl["trajectory"],
             default_steps=3,
             default_q_dim=2,
@@ -279,7 +280,7 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
-        traj = TrajectoryMap.from_dsl(
+        traj = build_trajectory_map(
             dsl["trajectory"],
             default_steps=3,
             default_q_dim=2,
@@ -402,14 +403,14 @@ class TestEiOptBasic(unittest.TestCase):
                 J_fd[:, j] = (q1 - q0) / eps
             self.assertTrue(np.allclose(J, J_fd, atol=1e-6, rtol=1e-6))
 
-    def test_trajectory_map_from_dsl_bspline(self) -> None:
+    def test_build_trajectory_map_bspline(self) -> None:
         dsl = {
             "type": "bspline",
             "var": "p",
             "degree": 1,
             "num_ctrl_points": 2,
         }
-        traj = TrajectoryMap.from_dsl(dsl, default_steps=4, default_q_dim=2)
+        traj = build_trajectory_map(dsl, default_steps=4, default_q_dim=2)
 
         self.assertEqual(traj.steps, 4)
         self.assertEqual(traj.q_dim, 2)
@@ -419,7 +420,7 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([0.0, 1.0], dtype=float)))
         self.assertTrue(np.allclose(traj.q_at(p, traj.steps - 1), np.array([2.0, 3.0], dtype=float)))
 
-    def test_trajectory_map_from_dsl_linear(self) -> None:
+    def test_build_trajectory_map_linear(self) -> None:
         dsl = {
             "type": "linear",
             "steps": 2,
@@ -438,7 +439,7 @@ class TestEiOptBasic(unittest.TestCase):
                 "b": [0.0, 0.0, 1.0, -1.0],
             },
         }
-        traj = TrajectoryMap.from_dsl(dsl)
+        traj = build_trajectory_map(dsl)
         p = np.array([2.0, 4.0], dtype=float)
 
         self.assertEqual(traj.steps, 2)
