@@ -220,8 +220,14 @@ num_ctrl_points = 6
 ```python
 from eiopt import compile_problem
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
+from eiopt.dsl import build_trajectory_map, default_steps_from_time
 
-builder = KotsTrajectoryStateBuilder.from_dsl(kots, data, dsl=dsl)
+traj = build_trajectory_map(
+    dsl["trajectory"],
+    default_steps=default_steps_from_time(dsl),
+    default_q_dim=int(kots.dof()),
+)
+builder = KotsTrajectoryStateBuilder(kots, data, trajectory_map=traj, p_var="p")
 runtime = compile_problem(dsl, build_state=builder.build_state)
 ```
 

@@ -2,3 +2,4 @@
 */__pycache__
 /eiopt.egg-info/
 *.pyc
+*.png
