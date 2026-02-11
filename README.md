@@ -157,24 +157,32 @@ var = "q" # 省略可（変数が1つなら自動）
 
 軌道最適化などで `q` を時系列にスタックしている場合は、`k` を指定すると `q(k)` を返し、ヤコビアンは選択行列になります。
 
-## RoboKots の軌道パラメータ最適化（線形マップ）
+## RoboKots の軌道パラメータ最適化（TrajectoryMap / B-spline）
 
-RoboKots 向けには、決定変数を軌道パラメータ `p` とし、`q(k) = A_k p + b_k` を仮定する
-`KotsTrajectoryStateBuilder` が使えます。
+RoboKots 向けには、決定変数を軌道パラメータ `p` とし、`TrajectoryMap` を介して
+`q(k)` と `dq/dp` を与える `KotsTrajectoryStateBuilder` が使えます。
 
 - `StateKey.field="pos_J_p"` のようなヤコビアン要求に対して、内部で
   `J_state_p = J_state_q @ (dq/dp)` を適用します。
 - `StateKey.k`（時刻インデックス）ごとに `q(k)` を構成して kinematics を更新します。
 
-最小コード例:
+軌道近似は DSL の `[trajectory]` で指定できます。
+
+```toml
+[trajectory]
+type = "bspline" # or "linear"
+var = "p"
+degree = 3
+num_ctrl_points = 6
+```
+
+最小コード例（DSL から生成）:
 
 ```python
 from eiopt import compile_problem
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
-from eiopt.core.trajectory import LinearTrajectoryMap
 
-traj = LinearTrajectoryMap(A=A, b=b, steps=N + 1, q_dim=nq)
-builder = KotsTrajectoryStateBuilder(kots, data, trajectory_map=traj, p_var="p")
+builder = KotsTrajectoryStateBuilder.from_dsl(kots, data, dsl=dsl)
 runtime = compile_problem(dsl, build_state=builder.build_state)
 ```
 
@@ -182,6 +190,9 @@ DSL 側では `get_state.jac.var = "p"` を指定します。実例は
 `examples/dsl/kots_traj_pos.toml` と `examples/main_robokots_traj.py` を参照してください。
 `kots_traj_pos.toml` の `time.N` を増やすとステップ数を増やせます
 （この example では `stack.range` と `target_pos_traj` が自動でステップ数に同期されます）。
+
+`type = "linear"` の場合は `trajectory.linear.A`（または `trajectory.A`）と
+必要に応じて `trajectory.linear.b` を指定します。
 
 ## 最小標準セット（pos/rot/frame + (optional) q）
 
