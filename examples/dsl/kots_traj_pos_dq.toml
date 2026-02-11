@@ -37,10 +37,11 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   type = "const"
   var = "p"
   name = "target_q_init"
-  value = [-2.0, 0.0]
+  value = [1.57, 0.0]
 
   [terms.cost]
-  type = "l2"
+  type = "scalar_weight"
+  w = 1.0
 
 [[terms]]
   [terms.expr]
@@ -65,10 +66,11 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   type = "const"
   var = "p"
   name = "target_q_terminal"
-  value = [2.0, 0.0]
+  value = [-1.57, 0.0]
 
   [terms.cost]
-  type = "l2"
+  type = "scalar_weight"
+  w = 1.0
 
 [[terms]]
   [terms.expr]
@@ -103,7 +105,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
   [terms.cost]
   type = "scalar_weight"
-  w = 1e2
+  w = 1e-2
 
 [[terms]]
   [terms.expr]
@@ -138,81 +140,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
   [terms.cost]
   type = "scalar_weight"
-  w = 1e2
-
-[[terms]]
-  [terms.expr]
-  type = "hinge"
-  name = "dq_upper_limit_hinge"
-
-  [terms.expr.base]
-  type = "sub"
-
-  [terms.expr.base.a]
-  type = "get_traj_var"
-  name = "qdot_traj_for_upper"
-  var = "p"
-  derivative_order = 1
-  derivative_wrt = "time"
-
-  [terms.expr.base.b]
-  type = "const"
-  var = "p"
-  name = "qdot_max"
-  value = [
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0,
-    4.0, 4.0
-  ]
-
-  [terms.cost]
-  type = "scalar_weight"
-  w = 1e2
-
-[[terms]]
-  [terms.expr]
-  type = "hinge"
-  name = "dq_lower_limit_hinge"
-
-  [terms.expr.base]
-  type = "sub"
-
-  [terms.expr.base.a]
-  type = "const"
-  var = "p"
-  name = "qdot_min"
-  value = [
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0,
-    -4.0, -4.0
-  ]
-
-  [terms.expr.base.b]
-  type = "get_traj_var"
-  name = "qdot_traj_for_lower"
-  var = "p"
-  derivative_order = 1
-  derivative_wrt = "time"
-
-  [terms.cost]
-  type = "scalar_weight"
-  w = 1e2
+  w = 1e-2
 
 [[terms]]
   [terms.expr]
@@ -268,4 +196,4 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
   [terms.cost]
   type = "scalar_weight"
-  w = 5e-2
+  w = 1e-3

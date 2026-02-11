@@ -23,7 +23,7 @@ except ImportError as e:  # pragma: no cover
         "  PYTHONPATH=. python examples/main_robokots_traj_dq.py"
     ) from e
 
-from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
+from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_runtime
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
 from eiopt.core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, make_key
 from eiopt.dsl.dsl_ops import find_var_dsl
@@ -37,6 +37,12 @@ _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 _ORDER = 3
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos_dq.toml"
+
+# Solver selection (edit these in code)
+_SOLVER = "cyipopt"  # "gauss_newton" | "scipy_minimize" | "cyipopt"
+_SCIPY_METHOD = "L-BFGS-B"
+_SCIPY_OPTIONS = {"maxiter": 1000}
+_IPOPT_OPTIONS = {"max_iter": 1000}
 
 
 def _plot_trajectory(
@@ -199,7 +205,14 @@ def _analytic_joint_velocity(
     return (traj_d1.A @ p + traj_d1.b).reshape(traj_d1.steps, traj_d1.q_dim)
 
 
-def main() -> int:
+def run_trajectory_dq_demo(
+    *,
+    solver: str = _SOLVER,
+    max_iters: int = 1000,
+    scipy_method: str = _SCIPY_METHOD,
+    scipy_options: dict | None = None,
+    ipopt_options: dict | None = None,
+) -> int:
     if not _MODEL_PATH.is_file():
         raise SystemExit(
             f"Model file not found: {_MODEL_PATH}\n"
@@ -241,8 +254,16 @@ def main() -> int:
     runtime = compile_problem(dsl, build_state=builder.build_state)
 
     x0 = runtime.pack.get().copy()
-    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(runtime, max_iters=1000)
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_runtime(
+        runtime,
+        solver=solver,
+        max_iters=max_iters,
+        scipy_method=scipy_method,
+        scipy_options=_SCIPY_OPTIONS if scipy_options is None else scipy_options,
+        ipopt_options=_IPOPT_OPTIONS if ipopt_options is None else ipopt_options,
+    )
     print("Optimization completed.")
+    print("\tSolver:", solver)
     print("\tIterations:", _iters)
     print("\tFinal cost:", _cost)
     print("\tFinal residual norm:", _rnorm)
@@ -278,6 +299,16 @@ def main() -> int:
         dt=dt,
     )
     return 0
+
+
+def main() -> int:
+    return run_trajectory_dq_demo(
+        solver=_SOLVER,
+        max_iters=1000,
+        scipy_method=_SCIPY_METHOD,
+        scipy_options=_SCIPY_OPTIONS,
+        ipopt_options=_IPOPT_OPTIONS,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

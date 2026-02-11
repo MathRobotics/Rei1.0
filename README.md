@@ -77,6 +77,12 @@ RoboKots 軌道最適化例（線形な `p -> q(k)` マップ）:
 PYTHONPATH=. python examples/main_robokots_traj.py
 ```
 
+`main_kots_traj.py` でも同じ実行ができます（ソルバ選択用の薄いラッパーです）:
+
+```bash
+PYTHONPATH=. python examples/main_kots_traj.py
+```
+
 ※ この例は `matplotlib` を使って軌道を描画します。
 
 ### solve_gauss_newton の返り値
@@ -85,6 +91,21 @@ PYTHONPATH=. python examples/main_robokots_traj.py
 
 ```python
 x_star, cost, iters, rnorm, dxnorm, converged = solve_gauss_newton(runtime)
+```
+
+### ソルバ切替（gauss_newton / scipy / cyipopt）
+
+`solve_runtime()` でソルバを切り替えられます。`scipy` と `cyipopt` は optional dependency です。
+
+```python
+from eiopt import solve_runtime
+
+x_star, cost, iters, rnorm, dxnorm, converged = solve_runtime(
+    runtime,
+    solver="scipy_minimize",  # "gauss_newton" | "scipy_minimize" | "cyipopt"
+    max_iters=1000,
+    scipy_method="L-BFGS-B",
+)
 ```
 
 ### 最適化後の Expr 値レポート

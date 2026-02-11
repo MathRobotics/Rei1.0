@@ -21,7 +21,7 @@ from eiopt.dsl.trajectory import (
 from eiopt import compile_problem, format_solve_report, get_named_expr_value
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
-from eiopt.solvers import solve_gauss_newton
+from eiopt.solvers import solve_gauss_newton, solve_runtime
 from eiopt.model import Problem, ProblemRuntime, DirectVectorExpr, RuntimeContext, L2Cost, Variable, VariablePack
 
 
@@ -51,6 +51,49 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertIn("x_minus_3", report)
         self.assertIn("Variables:", report)
         self.assertIn("x0=", report)
+
+    def test_solve_runtime_dispatches_gauss_newton(self) -> None:
+        x_var = Variable(name="x", x=np.array([0.0], dtype=float))
+        pack = VariablePack([x_var])
+
+        def value(ctx: RuntimeContext) -> np.ndarray:
+            x = float(ctx.pack.vars[0].x[0])
+            return np.array([x - 2.5], dtype=float)
+
+        def blocks(ctx: RuntimeContext):
+            return [np.array([[1.0]], dtype=float)]
+
+        expr = DirectVectorExpr(name="x_minus_2_5", vars=[x_var], fn_value=value, fn_blocks=blocks)
+        problem = Problem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+
+        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_runtime(
+            runtime,
+            solver="gauss_newton",
+            max_iters=5,
+            tol_r=1e-14,
+            tol_dx=1e-14,
+        )
+        self.assertTrue(converged)
+        self.assertLess(cost, 1e-20)
+        self.assertAlmostEqual(float(x_star[0]), 2.5, places=10)
+
+    def test_solve_runtime_raises_for_unknown_solver(self) -> None:
+        x_var = Variable(name="x", x=np.array([0.0], dtype=float))
+        pack = VariablePack([x_var])
+
+        def value(ctx: RuntimeContext) -> np.ndarray:
+            return np.array([float(ctx.pack.vars[0].x[0])], dtype=float)
+
+        def blocks(ctx: RuntimeContext):
+            return [np.array([[1.0]], dtype=float)]
+
+        expr = DirectVectorExpr(name="x_identity", vars=[x_var], fn_value=value, fn_blocks=blocks)
+        problem = Problem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+
+        with self.assertRaisesRegex(ValueError, "Unknown solver"):
+            _ = solve_runtime(runtime, solver="unknown_solver")
 
     def test_get_state_expr_reads_cache(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
