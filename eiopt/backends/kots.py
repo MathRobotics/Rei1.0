@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..core.state_cache import StateKey
-from ..core.state_schema import DTYPE_KINEMATICS, split_jac_field
+from ..core.state_schema import DTYPE_JOINT, DTYPE_KINEMATICS, split_jac_field
 from ..core.trajectory import TrajectoryMap
 from ._template import BackendDispatchStateBuilder
 
@@ -144,12 +144,22 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         owner = getattr(key, "owner", None)
         owner_type = getattr(owner, "owner_type", None)
         owner_name = getattr(owner, "owner_name", None)
-        if owner_type != self.owner_type or not isinstance(owner_name, str) or owner_name == "":
+        if owner_type == self.owner_type and isinstance(owner_name, str) and owner_name != "":
+            frame_name = getattr(key, "frame", None) or "world"
+            return StateType(self.owner_type, owner_name, key.field, str(frame_name))
+
+        if owner_type == "total_joint" and getattr(key, "dtype", None) == DTYPE_JOINT and key.field == "q":
+            # Joint-q terms are computed directly from optimization variables; no backend state query is required.
+            return ("total_joint", owner_name, "q")
+
+        if not isinstance(owner_name, str) or owner_name == "":
             raise ValueError(
-                f"Kots backend expects owner_type={self.owner_type!r} in key, got: {key!r}"
+                f"Kots backend expects owner_type={self.owner_type!r} or total_joint/q in key, got: {key!r}"
             )
-        frame_name = getattr(key, "frame", None) or "world"
-        return StateType(self.owner_type, owner_name, key.field, str(frame_name))
+
+        raise ValueError(
+            f"Kots backend expects owner_type={self.owner_type!r} or total_joint/q in key, got: {key!r}"
+        )
 
     def _value_from_state_ref(self, state_ref: Any) -> Array:
         return np.asarray(self.model.state_info(state_ref), dtype=float).reshape(-1)
@@ -192,6 +202,22 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
     ) -> None:
         self.trajectory_map = trajectory_map
         super().__init__(model, data, q_var=p_var, fields=fields)
+        self.register_value_and_jac(
+            dtype=DTYPE_JOINT,
+            owner_type="total_joint",
+            field="q",
+            value_handler=self._handle_joint_q_value,
+            jac_handler=self._handle_joint_q_jac,
+        )
+
+    def _handle_joint_q_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
+        del key, state_ref
+        return np.asarray(q, dtype=float).reshape(-1).copy()
+
+    def _handle_joint_q_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
+        del key, state_ref
+        n = int(np.asarray(q, dtype=float).reshape(-1).size)
+        return np.eye(n, dtype=float)
 
     @classmethod
     def from_dsl(
