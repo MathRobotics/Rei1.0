@@ -190,8 +190,11 @@ var = "p"
 
 [terms.cost]
 type = "scalar_weight"
-w = 1e-3
+w = 1e-2
 ```
+
+この項は関節軌道 `q` を滑らかにしますが、`ee_pos` の軌道を直接滑らかにしたい場合は
+`get_state(pos)` を `stack` して `time_diff`（必要なら2回）をかけた項も追加してください。
 
 ## RoboKots の軌道パラメータ最適化（TrajectoryMap / B-spline）
 
@@ -225,7 +228,7 @@ runtime = compile_problem(dsl, build_state=builder.build_state)
 DSL 側では `get_state.jac.var = "p"` を指定します。実例は
 `examples/dsl/kots_traj_pos.toml` と `examples/main_robokots_traj.py` を参照してください。
 `kots_traj_pos.toml` の `time.N` を増やすとステップ数を増やせます
-（`stack.range` / `target_pos_traj` のサイズも TOML 側で合わせてください）。
+（始端・終端タスクを使う場合は、`get_state.key.k` の終端インデックスも合わせて更新してください）。
 
 `type = "linear"` の場合は `trajectory.linear.A`（または `trajectory.A`）と
 必要に応じて `trajectory.linear.b` を指定します。
