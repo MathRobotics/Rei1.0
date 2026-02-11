@@ -7,7 +7,7 @@ import numpy as np
 from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
 from eiopt.core.time_grid import TimeGrid
-from eiopt.core.trajectory import LinearTrajectoryMap
+from eiopt.core.trajectory import TrajectoryMap
 from eiopt import compile_problem, format_solve_report
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
@@ -137,7 +137,7 @@ class TestEiOptBasic(unittest.TestCase):
         expected_J[:, 2:4] = np.eye(2, dtype=float)
         self.assertTrue(np.allclose(J1, expected_J))
 
-    def test_linear_trajectory_map_q_and_jac(self) -> None:
+    def test_trajectory_map_q_and_jac(self) -> None:
         A = np.array(
             [
                 [1.0, 0.0, 0.0, 0.0],
@@ -150,7 +150,7 @@ class TestEiOptBasic(unittest.TestCase):
             dtype=float,
         )
         b = np.array([0.1, -0.2, 0.0, 0.0, -0.3, 0.4], dtype=float)
-        traj = LinearTrajectoryMap(A=A, b=b, steps=3, q_dim=2)
+        traj = TrajectoryMap(A=A, b=b, steps=3, q_dim=2)
         p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
 
         q0 = traj.q_at(p, 0)
@@ -164,7 +164,7 @@ class TestEiOptBasic(unittest.TestCase):
         J1 = traj.dqdp_at(1)
         self.assertTrue(np.allclose(J1, np.array([[0.5, 0.0, 0.5, 0.0], [0.0, 0.5, 0.0, 0.5]], dtype=float)))
 
-    def test_linear_trajectory_map_from_blocks(self) -> None:
+    def test_trajectory_map_from_blocks(self) -> None:
         A_blocks = [
             np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float),
             np.array([[0.25, 0.0], [0.0, 0.25]], dtype=float),
@@ -173,13 +173,117 @@ class TestEiOptBasic(unittest.TestCase):
             np.array([0.0, 0.0], dtype=float),
             np.array([1.0, -1.0], dtype=float),
         ]
-        traj = LinearTrajectoryMap.from_blocks(A_blocks, b_blocks=b_blocks)
+        traj = TrajectoryMap.from_blocks(A_blocks, b_blocks=b_blocks)
         p = np.array([4.0, 8.0], dtype=float)
 
         self.assertEqual(traj.steps, 2)
         self.assertEqual(traj.q_dim, 2)
         self.assertEqual(traj.p_dim, 2)
         self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([4.0, 8.0], dtype=float)))
+        self.assertTrue(np.allclose(traj.q_at(p, 1), np.array([2.0, 1.0], dtype=float)))
+
+    def test_bspline_trajectory_map_degree1_equals_linear_interp(self) -> None:
+        steps = 5
+        q_dim = 2
+        traj = TrajectoryMap.from_bspline(
+            steps=steps,
+            q_dim=q_dim,
+            degree=1,
+            num_ctrl_points=2,
+        )
+        q_start = np.array([1.2, -0.3], dtype=float)
+        q_goal = np.array([4.2, 2.7], dtype=float)
+        p = np.concatenate([q_start, q_goal], axis=0)
+
+        for k in range(steps):
+            alpha = float(k) / float(steps - 1)
+            q_ref = (1.0 - alpha) * q_start + alpha * q_goal
+            self.assertTrue(np.allclose(traj.q_at(p, k), q_ref))
+
+    def test_bspline_trajectory_map_jacobian_matches_finite_difference(self) -> None:
+        traj = TrajectoryMap.from_bspline(
+            steps=4,
+            q_dim=3,
+            degree=3,
+            num_ctrl_points=5,
+        )
+        p = np.array(
+            [
+                -0.5,
+                0.1,
+                0.4,
+                0.2,
+                -0.3,
+                0.7,
+                1.0,
+                -0.2,
+                0.6,
+                0.3,
+                0.8,
+                -0.4,
+                -0.1,
+                0.2,
+                -0.6,
+            ],
+            dtype=float,
+        )
+        eps = 1e-7
+
+        for k in range(traj.steps):
+            J = traj.dqdp_at(k)
+            self.assertEqual(J.shape, (traj.q_dim, traj.p_dim))
+            q0 = traj.q_at(p, k)
+            J_fd = np.zeros_like(J)
+            for j in range(traj.p_dim):
+                dp = np.zeros((traj.p_dim,), dtype=float)
+                dp[j] = eps
+                q1 = traj.q_at(p + dp, k)
+                J_fd[:, j] = (q1 - q0) / eps
+            self.assertTrue(np.allclose(J, J_fd, atol=1e-6, rtol=1e-6))
+
+    def test_trajectory_map_from_dsl_bspline(self) -> None:
+        dsl = {
+            "type": "bspline",
+            "var": "p",
+            "degree": 1,
+            "num_ctrl_points": 2,
+        }
+        traj = TrajectoryMap.from_dsl(dsl, default_steps=4, default_q_dim=2)
+
+        self.assertEqual(traj.steps, 4)
+        self.assertEqual(traj.q_dim, 2)
+        self.assertEqual(traj.p_dim, 4)
+
+        p = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
+        self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([0.0, 1.0], dtype=float)))
+        self.assertTrue(np.allclose(traj.q_at(p, traj.steps - 1), np.array([2.0, 3.0], dtype=float)))
+
+    def test_trajectory_map_from_dsl_linear(self) -> None:
+        dsl = {
+            "type": "linear",
+            "steps": 2,
+            "q_dim": 2,
+            "linear": {
+                "A": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.5,
+                    0.0,
+                    0.0,
+                    0.5,
+                ],
+                "b": [0.0, 0.0, 1.0, -1.0],
+            },
+        }
+        traj = TrajectoryMap.from_dsl(dsl)
+        p = np.array([2.0, 4.0], dtype=float)
+
+        self.assertEqual(traj.steps, 2)
+        self.assertEqual(traj.q_dim, 2)
+        self.assertEqual(traj.p_dim, 2)
+        self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([2.0, 4.0], dtype=float)))
         self.assertTrue(np.allclose(traj.q_at(p, 1), np.array([2.0, 1.0], dtype=float)))
 
     def test_state_cache_unions_required(self) -> None:

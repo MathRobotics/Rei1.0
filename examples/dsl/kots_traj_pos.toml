@@ -2,60 +2,66 @@
 N = 10
 dt = 0.1
 
+[trajectory]
+   type = "bspline"
+   var = "p"
+   degree = 3
+   num_ctrl_points = 4
+
 [[variables]]
 name = "p"
-dim = 4
-init = [0.0, 0.0, 0.0, 0.0]
+dim = 12
+init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 [[terms]]
-[terms.expr]
-type = "sub"
+    [terms.expr]
+    type = "sub"
 
-[terms.expr.a]
-type = "stack"
-name = "ee_pos_traj"
+    [terms.expr.a]
+    type = "stack"
+    name = "ee_pos_traj"
 
-[terms.expr.a.range]
-k0 = 0
-k1 = 10
+    [terms.expr.a.range]
+    k0 = 0
+    k1 = 10
 
-[terms.expr.a.inner]
-type = "get_state"
-name = "ee_pos"
+    [terms.expr.a.inner]
+    type = "get_state"
+    name = "ee_pos"
 
-[terms.expr.a.inner.key]
-owner_type = "link"
-owner_name = "ee"
-dtype = "kinematics"
-field = "pos"
+    [terms.expr.a.inner.key]
+    owner_type = "link"
+    owner_name = "ee"
+    dtype = "kinematics"
+    field = "pos"
 
-[terms.expr.a.inner.jac]
-var = "p"
+    [terms.expr.a.inner.jac]
+    var = "p"
 
-[terms.expr.b]
-type = "const"
-var = "p"
-name = "target_pos_traj"
-value = [2.0, 0.0, 0.0, 1.4, 0.8, 0.0, 0.8, 1.2, 0.0]
+    [terms.expr.b]
+    type = "const"
+    var = "p"
+    name = "target_pos_traj"
+    value = [2.0, 0.0, 0.0, 1.4, 0.8, 0.0, 0.8, 1.2, 0.0]
 
-[terms.cost]
-type = "l2"
+    [terms.cost]
+    type = "l2"
 
 [[terms]]
-[terms.expr]
-type = "sub"
+    [terms.expr]
+    type = "sub"
 
-[terms.expr.a]
-type = "get_var"
-name = "traj_params"
-var = "p"
+    [terms.expr.a]
+    type = "get_var"
+    name = "traj_params"
+    var = "p"
 
-[terms.expr.b]
-type = "const"
-var = "p"
-name = "p_nom"
-value = [0.0, 0.0, 0.0, 0.0]
+    [terms.expr.b]
+    type = "const"
+    var = "p"
+    name = "p_nom"
+    value = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
-[terms.cost]
-type = "scalar_weight"
-w = 1e-6
+    [terms.cost]
+    type = "scalar_weight"
+    w = 1e-6
