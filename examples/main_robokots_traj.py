@@ -24,40 +24,12 @@ except ImportError as e:  # pragma: no cover
 
 from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_gauss_newton
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
-from eiopt.core.trajectory import LinearTrajectoryMap
-from eiopt.dsl.dsl_ops import find_const_expr
+from eiopt.dsl.dsl_ops import find_const_expr, find_var_dsl
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 _ORDER = 3
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos.toml"
-
-
-def _build_linear_interp_map(*, steps: int, nq: int) -> LinearTrajectoryMap:
-    # Endpoint-parameterized linear trajectory:
-    #   p = [q_start; q_goal] in R^(2*nq)
-    #   q(k) = (1 - alpha_k) q_start + alpha_k q_goal
-    #   alpha_k = k / (steps - 1),  k = 0, ..., steps-1
-    #
-    # In stacked form:
-    #   q_traj = A p + b
-    #   A_k = [ (1-alpha_k) I_nq   alpha_k I_nq ]  (row block for step k)
-    #   b = 0
-    if steps < 2:
-        raise ValueError(f"steps must be >= 2 for interpolation, got {steps}.")
-
-    p_dim = 2 * int(nq)
-    A = np.zeros((steps * nq, p_dim), dtype=float)
-    b = np.zeros((steps * nq,), dtype=float)
-
-    eye = np.eye(nq, dtype=float)
-    for k in range(steps):
-        alpha = float(k) / float(steps - 1)
-        row = slice(k * nq, (k + 1) * nq)
-        A[row, :nq] = (1.0 - alpha) * eye
-        A[row, nq:] = alpha * eye
-
-    return LinearTrajectoryMap(A=A, b=b, steps=steps, q_dim=nq)
 
 
 def _collect_ee_pos_traj(runtime, *, steps: int, owner_name: str = "ee") -> np.ndarray:
@@ -159,6 +131,25 @@ def _sync_stack_range(dsl: dict, *, stack_name: str, steps: int) -> None:
     raise ValueError(f"Could not find stack expr with name={stack_name!r} in DSL.")
 
 
+def _sync_variable_dim(dsl: dict, *, var_name: str, dim: int) -> None:
+    var_dsl = find_var_dsl(dsl, name=var_name)
+    if var_dsl is None:
+        raise ValueError(f"Could not find variable entry for name={var_name!r}.")
+    var_dsl["dim"] = int(dim)
+    init = np.asarray(var_dsl.get("init", []), dtype=float).reshape(-1)
+    if init.size != int(dim):
+        var_dsl["init"] = np.zeros((int(dim),), dtype=float).tolist()
+
+
+def _sync_const_vector_size(dsl: dict, *, const_name: str, dim: int) -> None:
+    const_expr = find_const_expr(dsl, name=const_name)
+    if const_expr is None:
+        raise ValueError(f"Could not find const expr name={const_name!r}.")
+    value = np.asarray(const_expr.get("value", []), dtype=float).reshape(-1)
+    if value.size != int(dim):
+        const_expr["value"] = np.zeros((int(dim),), dtype=float).tolist()
+
+
 def _plot_trajectory(*, ee_opt: np.ndarray, ee_target: np.ndarray, q_opt: np.ndarray) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.5))
 
@@ -201,18 +192,13 @@ def main() -> int:
 
     time_dsl = dsl.get("time", {})
     steps = int(time_dsl.get("N", 0)) + 1
-    nq = int(kots.dof())
     _sync_stack_range(dsl, stack_name="ee_pos_traj", steps=steps)
     ee_target = _load_target_pos_traj(dsl, steps=steps, resample_to_steps=True)
 
-    traj_map = _build_linear_interp_map(steps=steps, nq=nq)
-
-    builder = KotsTrajectoryStateBuilder(
-        kots,
-        data,
-        trajectory_map=traj_map,
-        p_var="p",
-    )
+    builder = KotsTrajectoryStateBuilder.from_dsl(kots, data, dsl=dsl)
+    traj_map = builder.trajectory_map
+    _sync_variable_dim(dsl, var_name=builder.q_var, dim=traj_map.p_dim)
+    _sync_const_vector_size(dsl, const_name=f"{builder.q_var}_nom", dim=traj_map.p_dim)
     runtime = compile_problem(dsl, build_state=builder.build_state)
 
     x0 = runtime.pack.get().copy()
