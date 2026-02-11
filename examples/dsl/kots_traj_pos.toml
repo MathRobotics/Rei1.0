@@ -17,45 +17,55 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 [[terms]]
     [terms.expr]
     type = "sub"
+    name = "task_init_pos"
 
     [terms.expr.a]
-    type = "stack"
-    name = "ee_pos_traj"
-
-    [terms.expr.a.range]
-    k0 = 0
-    k1 = 10
-
-    [terms.expr.a.inner]
     type = "get_state"
-    name = "ee_pos"
+    name = "ee_pos_init"
 
-    [terms.expr.a.inner.key]
+    [terms.expr.a.key]
+    k = 0
     owner_type = "link"
     owner_name = "ee"
     dtype = "kinematics"
     field = "pos"
 
-    [terms.expr.a.inner.jac]
+    [terms.expr.a.jac]
     var = "p"
 
     [terms.expr.b]
     type = "const"
     var = "p"
-    name = "target_pos_traj"
-    value = [
-      2.0, 0.0, 0.0,
-      1.88, 0.16, 0.0,
-      1.76, 0.32, 0.0,
-      1.64, 0.48, 0.0,
-      1.52, 0.64, 0.0,
-      1.40, 0.80, 0.0,
-      1.28, 0.88, 0.0,
-      1.16, 0.96, 0.0,
-      1.04, 1.04, 0.0,
-      0.92, 1.12, 0.0,
-      0.80, 1.20, 0.0
-    ]
+    name = "target_pos_init"
+    value = [2.0, 0.0, 0.0]
+
+    [terms.cost]
+    type = "l2"
+
+[[terms]]
+    [terms.expr]
+    type = "sub"
+    name = "task_terminal_pos"
+
+    [terms.expr.a]
+    type = "get_state"
+    name = "ee_pos_terminal"
+
+    [terms.expr.a.key]
+    k = 10
+    owner_type = "link"
+    owner_name = "ee"
+    dtype = "kinematics"
+    field = "pos"
+
+    [terms.expr.a.jac]
+    var = "p"
+
+    [terms.expr.b]
+    type = "const"
+    var = "p"
+    name = "target_pos_terminal"
+    value = [0.0, 2.0, 0.0]
 
     [terms.cost]
     type = "l2"
@@ -74,3 +84,13 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     [terms.cost]
     type = "scalar_weight"
     w = 1e-3
+
+[[terms]]
+    [terms.expr]
+    type = "get_traj_var"
+    name = "q_traj_reg"
+    var = "p"
+
+    [terms.cost]
+    type = "scalar_weight"
+    w = 5.0e-1

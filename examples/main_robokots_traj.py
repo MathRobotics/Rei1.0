@@ -24,6 +24,7 @@ except ImportError as e:  # pragma: no cover
 
 from eiopt import compile_problem, format_solve_report, get_named_expr_value, load_problem_toml, solve_gauss_newton
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
+from eiopt.core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, make_key
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
@@ -60,6 +61,28 @@ def _plot_trajectory(*, ee_opt: np.ndarray, ee_target: np.ndarray, q_opt: np.nda
     plt.show()
 
 
+def _collect_ee_pos_traj(runtime, *, steps: int) -> np.ndarray:
+    required = [
+        make_key(
+            k=k,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+            frame=DEFAULT_FRAME,
+        )
+        for k in range(int(steps))
+    ]
+    runtime.update_state_if_needed(required=required)
+    ee_list: list[np.ndarray] = []
+    for key in required:
+        v = np.asarray(runtime.state.get(key), dtype=float).reshape(-1)
+        if v.size != 3:
+            raise ValueError(f"ee pos size mismatch at k={key.k}. Expected 3, got {v.size}.")
+        ee_list.append(v)
+    return np.vstack(ee_list)
+
+
 def main() -> int:
     if not _MODEL_PATH.is_file():
         raise SystemExit(
@@ -76,19 +99,24 @@ def main() -> int:
     runtime = compile_problem(dsl, build_state=builder.build_state)
 
     x0 = runtime.pack.get().copy()
-    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(runtime, max_iters=20)
+    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_gauss_newton(runtime, max_iters=3000)
+    print("Optimization completed.")
+    print("\tIterations:", _iters)
+    print("\tFinal cost:", _cost)
+    print("\tFinal residual norm:", _rnorm)
+    print("\tFinal step norm:", _dxnorm)
+    print("\tConverged:", _converged)
+
     steps = int(traj_map.steps)
     q_opt = np.vstack([traj_map.q_at(x_star, k) for k in range(steps)])
-    ee_opt = np.asarray(get_named_expr_value(runtime, name="ee_pos_traj"), dtype=float).reshape(-1)
-    ee_target = np.asarray(get_named_expr_value(runtime, name="target_pos_traj"), dtype=float).reshape(-1)
-    if ee_opt.size % 3 != 0:
-        raise ValueError(f"ee_pos_traj size mismatch. Expected multiple of 3, got {ee_opt.size}.")
-    if ee_target.size % 3 != 0:
-        raise ValueError(f"target_pos_traj size mismatch. Expected multiple of 3, got {ee_target.size}.")
-    ee_opt = ee_opt.reshape(-1, 3)
-    ee_target = ee_target.reshape(-1, 3)
-    if ee_opt.shape != ee_target.shape:
-        raise ValueError(f"trajectory size mismatch: ee_opt={ee_opt.shape}, target={ee_target.shape}.")
+    ee_opt = _collect_ee_pos_traj(runtime, steps=steps)
+    target_init = np.asarray(get_named_expr_value(runtime, name="target_pos_init"), dtype=float).reshape(-1)
+    target_terminal = np.asarray(get_named_expr_value(runtime, name="target_pos_terminal"), dtype=float).reshape(-1)
+    if target_init.size != 3:
+        raise ValueError(f"target_pos_init size mismatch. Expected 3, got {target_init.size}.")
+    if target_terminal.size != 3:
+        raise ValueError(f"target_pos_terminal size mismatch. Expected 3, got {target_terminal.size}.")
+    ee_target = np.vstack([target_init, target_terminal])
 
     print("p*:", x_star)
     for k in range(steps):
