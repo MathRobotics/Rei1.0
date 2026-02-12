@@ -12,13 +12,6 @@ from eiopt.core.trajectory import TrajectoryMap
 
 
 def _ensure_robokots_state_stub() -> None:
-    try:
-        from robokots.core.state import StateType  # noqa: F401
-
-        return
-    except Exception:
-        pass
-
     robokots_mod = types.ModuleType("robokots")
     core_mod = types.ModuleType("robokots.core")
     state_mod = types.ModuleType("robokots.core.state")
@@ -94,9 +87,9 @@ class _FakeKotsModel:
 
         if field == "torque":
             return q + 2.0 * dq + 3.0 * ddq
-        if field in ("torque_d1", "torque_diff1"):
+        if field == "torque_d1":
             return dq + 4.0 * ddq
-        if field in ("torque_d2", "torque_diff2"):
+        if field == "torque_d2":
             return ddq
         raise ValueError(f"Unsupported field: {field!r}")
 
@@ -111,7 +104,7 @@ class _FakeKotsModel:
                 ],
                 dtype=float,
             )
-        if field in ("torque_d1", "torque_diff1"):
+        if field == "torque_d1":
             return np.array(
                 [
                     [0.0, 1.0, 4.0, 0.0, 0.0, 0.0],
@@ -119,7 +112,7 @@ class _FakeKotsModel:
                 ],
                 dtype=float,
             )
-        if field in ("torque_d2", "torque_diff2"):
+        if field == "torque_d2":
             return np.array(
                 [
                     [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
@@ -192,11 +185,42 @@ def _traj_map_from_rows(rows: list[list[float]]) -> TrajectoryMap:
 
 
 class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
-    def test_kots_state_field_name_maps_torque_derivative_orders(self) -> None:
-        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_diff1")
-        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_diff2")
+    def test_kots_state_field_name_keeps_canonical_torque_derivative_orders(self) -> None:
+        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_d1")
+        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_d2")
         with self.assertRaisesRegex(ValueError, "deprecated field alias"):
             _ = _kots_mod.KotsStateBuilder._state_field_name("tau_diff2")
+
+    def test_kots_state_ref_backend_fallback_uses_torque_diff_for_derivative(self) -> None:
+        original_state_type = _kots_mod.StateType
+
+        class _StrictStateType:
+            def __init__(self, owner_type: str, owner_name: str, field: str, frame: str | None) -> None:
+                if field == "torque_d1":
+                    raise KeyError(field)
+                self.owner_type = owner_type
+                self.owner_name = owner_name
+                self.field = field
+                self.frame = frame
+
+        _kots_mod.StateType = _StrictStateType
+        try:
+            builder = _kots_mod.KotsStateBuilder(
+                _FakeKotsModel(),
+                data={},
+                dynamics_fields=("torque_d1",),
+            )
+            key = make_key(
+                k=0,
+                owner_type="total_joint",
+                owner_name="robot",
+                dtype=DTYPE_DYNAMICS,
+                field="torque_d1",
+            )
+            state_ref = builder._resolve_state_ref(key)
+            self.assertEqual(getattr(state_ref, "field", None), "torque_diff1")
+        finally:
+            _kots_mod.StateType = original_state_type
 
     def test_compile_kots_trajectory_problem_builds_runtime_bundle(self) -> None:
         model = _FakeKotsModel()

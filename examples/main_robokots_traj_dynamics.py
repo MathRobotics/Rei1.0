@@ -25,7 +25,6 @@ except ImportError as e:  # pragma: no cover
 
 from eiopt import format_solve_report, load_problem_toml, solve_runtime
 from eiopt.backends.kots import compile_kots_trajectory_problem
-from eiopt.core.state_schema import torque_derivative_order
 from _kots_traj_common import (
     analytic_joint_velocity,
     collect_ee_pos_traj,
@@ -58,16 +57,6 @@ _TERM_ATTR_WEIGHT_OVERRIDES: list[tuple[str, object, float]] = [
 _TERM_CONSTRAINT_KIND_WEIGHT_OVERRIDES: dict[str, float] = {
     # "ineq": 1e-2,
 }
-
-def _display_dynamics_field_name(field: str) -> str:
-    if field == "torque":
-        return "tau"
-    order = torque_derivative_order(field)
-    if order == 1:
-        return "tau_diff"
-    if isinstance(order, int) and order > 1:
-        return f"tau_diff{order}"
-    return field
 
 
 def _plot_trajectory(
@@ -218,7 +207,7 @@ def run_trajectory_dynamics_demo(
     ee_opt = collect_ee_pos_traj(runtime, steps=steps)
     target_ks, ee_target = collect_target_waypoints(dsl)
     plot_dyn_field = "torque" if "torque" in dynamics_traj else next(iter(dynamics_traj.keys()))
-    plot_dyn_label = _display_dynamics_field_name(plot_dyn_field)
+    plot_dyn_label = plot_dyn_field
     plot_dyn_title = "Joint Torque" if plot_dyn_field == "torque" else f"Joint Dynamics ({plot_dyn_label})"
     plot_dyn = dynamics_traj[plot_dyn_field]
 
@@ -228,7 +217,7 @@ def run_trajectory_dynamics_demo(
     for k in range(qdot_opt.shape[0]):
         print(f"qdot[{k}] =", qdot_opt[k])
     for field, values in dynamics_traj.items():
-        field_name = _display_dynamics_field_name(field)
+        field_name = field
         for k in range(values.shape[0]):
             print(f"{field_name}[{k}] =", values[k])
     print("ee* (xyz):\n", ee_opt)
