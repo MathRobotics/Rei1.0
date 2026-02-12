@@ -245,7 +245,12 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             raise ValueError(f"Kots backend has no handler route for key: {key!r}")
 
         frame_name = getattr(key, "frame", None) or "world"
-        return StateType(str(owner_type), owner_name, state_field, str(frame_name))
+        return self._make_state_type(
+            owner_type=str(owner_type),
+            owner_name=owner_name,
+            state_field=state_field,
+            frame_name=str(frame_name),
+        )
 
     def _resolve_total_joint_dynamics_refs(self, *, state_field: str, key: StateKey) -> tuple[Any, ...] | None:
         joints = self._dof_sorted_joints()
@@ -262,18 +267,55 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             joint_name = str(getattr(joint, "name", ""))
             if joint_name == "":
                 raise ValueError("KotsStateBuilder: joint.name must be non-empty for dynamics expansion.")
-            refs.append(StateType("joint", joint_name, state_field, frame_name))
+            refs.append(
+                self._make_state_type(
+                    owner_type="joint",
+                    owner_name=joint_name,
+                    state_field=state_field,
+                    frame_name=frame_name,
+                )
+            )
         return tuple(refs)
 
     @staticmethod
     def _state_field_name(field: Any) -> str:
-        field_name = canonical_field_name(str(field))
-        order = torque_derivative_order(field_name)
-        if order is None:
-            return field_name
-        if order == 0:
-            return field_name
-        return f"torque_diff{order}"
+        return canonical_field_name(str(field))
+
+    @staticmethod
+    def _fallback_backend_field_name(state_field: str) -> str:
+        deriv_order = torque_derivative_order(state_field)
+        if isinstance(deriv_order, int) and deriv_order > 0:
+            return f"torque_diff{deriv_order}"
+        return state_field
+
+    def _make_state_type(
+        self,
+        *,
+        owner_type: str,
+        owner_name: str,
+        state_field: str,
+        frame_name: str | None,
+    ) -> Any:
+        try:
+            return StateType(owner_type, owner_name, state_field, frame_name)
+        except KeyError:
+            fallback_field = self._fallback_backend_field_name(state_field)
+            if fallback_field == state_field:
+                raise
+            return StateType(owner_type, owner_name, fallback_field, frame_name)
+
+    @staticmethod
+    def _torque_derivative_order_from_state_data_type(data_type: str) -> int | None:
+        try:
+            deriv_order = torque_derivative_order(data_type)
+        except ValueError:
+            deriv_order = None
+        if isinstance(deriv_order, int):
+            return deriv_order
+        m = _ROBOKOTS_TORQUE_DIFF_PATTERN.fullmatch(data_type)
+        if m is None:
+            return None
+        return int(m.group(1))
 
     def _dof_sorted_joints(self) -> list[Any] | None:
         robot = getattr(self.model, "robot_", None)
@@ -304,14 +346,13 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
 
     def _raise_missing_state_key(self, *, state_ref: Any, cause: KeyError) -> None:
         data_type = self._state_ref_data_type(state_ref)
-        m = None if data_type is None else _ROBOKOTS_TORQUE_DIFF_PATTERN.fullmatch(data_type)
-        if m is not None:
-            diff_order = int(m.group(1))
-            eiopt_field = torque_derivative_field(diff_order)
-            required_model_order = diff_order + 3
+        deriv_order = None if data_type is None else self._torque_derivative_order_from_state_data_type(data_type)
+        if isinstance(deriv_order, int) and deriv_order > 0:
+            field = torque_derivative_field(deriv_order)
+            required_model_order = deriv_order + 3
             raise ValueError(
                 "KotsStateBuilder: dynamics field "
-                f"{eiopt_field!r} requires RoboKots model order >= {required_model_order}. "
+                f"{field!r} requires RoboKots model order >= {required_model_order}. "
                 f"Current model order is {self._model_order()}."
             ) from cause
         raise cause

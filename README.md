@@ -361,7 +361,6 @@ RoboKots 向けには、決定変数を軌道パラメータ `p` とし、`Traje
   Kots 側は `state_info/jacobian` が返せる field をそのまま登録できます。
   `compile_kots_trajectory_problem(...)` は DSL が要求する dynamics field と
   `dynamics_fields` 登録の不一致を検出し、線形化前に `ValueError` を返します。
-  （RoboKots への問い合わせ時は `torque_dN -> torque_diffN` へ自動変換します）
   `torque_dN` を使う場合は RoboKots モデル次数が `order >= N+3` 必須です（例: `torque_d1` は `order >= 4`）。
   Pinocchio 側は標準で `torque`, `momentum`, `force` をサポートし、追加分は
   `dynamics_custom_handlers` で登録できます。

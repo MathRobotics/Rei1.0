@@ -45,8 +45,6 @@ TORQUE_FIELDS: Tuple[str, ...] = ("torque", "torque_d1")
 
 DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
 
-FIELD_ALIASES: dict[str, str] = {}
-
 _TORQUE_D_PATTERN = re.compile(r"^torque_d([0-9]+)$")
 _DEPRECATED_TORQUE_ALIAS_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^tau$"),
@@ -123,8 +121,7 @@ def canonical_field_name(field: str) -> str:
             "canonical_field_name: deprecated field alias "
             f"{f!r}. Use canonical field names (e.g. 'torque', 'momentum', 'force', 'torque_d1')."
         )
-    alias = FIELD_ALIASES.get(f, f)
-    return _canonicalize_torque_field(alias)
+    return _canonicalize_torque_field(f)
 
 
 def canonical_dtype_name(dtype: str) -> str:
