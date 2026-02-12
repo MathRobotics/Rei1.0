@@ -47,7 +47,9 @@ DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELD
 FIELD_ALIASES: dict[str, str] = {
     "tau": "torque",
     "dtau": "torque_rate",
+    "tau_diff": "torque_rate",
     "torque_dot": "torque_rate",
+    "torque_diff1": "torque_rate",
     "h": "momentum",
     "wrench": "force",
 }

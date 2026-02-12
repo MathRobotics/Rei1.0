@@ -1,10 +1,46 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Protocol, Iterable
 import numpy as np
 
 Array = np.ndarray
+
+
+def _format_missing_state_keys(keys: Iterable["StateKey"], *, max_groups: int = 8) -> str:
+    grouped: dict[tuple[str, str, str, str, str | None, str | None], set[int]] = defaultdict(set)
+    for key in keys:
+        owner = getattr(key, "owner", None)
+        grouped[
+            (
+                str(getattr(key, "dtype", "")),
+                str(getattr(owner, "owner_type", "")),
+                str(getattr(owner, "owner_name", "")),
+                str(getattr(key, "field", "")),
+                getattr(key, "frame", None),
+                getattr(key, "rel_frame", None),
+            )
+        ].add(int(getattr(key, "k", 0)))
+
+    items = sorted(grouped.items(), key=lambda item: item[0])
+    lines: list[str] = []
+    for idx, (sig, ks) in enumerate(items):
+        if idx >= int(max_groups):
+            lines.append(f"... and {len(items) - max_groups} more group(s)")
+            break
+        dtype, owner_type, owner_name, field, frame, rel_frame = sig
+        ks_sorted = sorted(ks)
+        frame_info = []
+        if frame is not None:
+            frame_info.append(f"frame={frame!r}")
+        if rel_frame is not None:
+            frame_info.append(f"rel_frame={rel_frame!r}")
+        frame_suffix = "" if len(frame_info) == 0 else f" ({', '.join(frame_info)})"
+        lines.append(
+            f"- dtype={dtype!r}, owner={owner_type!r}:{owner_name!r}, field={field!r}, ks={ks_sorted}{frame_suffix}"
+        )
+    return "\n".join(lines)
 
 
 class PackLike(Protocol):
@@ -106,7 +142,12 @@ class StateCache:
             missing = missing or set()
             missing_after = missing - set(st.keys())
             if missing_after:
-                raise KeyError(f"StateCache.build_state missing keys: {missing_after}")
+                summary = _format_missing_state_keys(missing_after)
+                raise KeyError(
+                    "StateCache.build_state missing required keys.\n"
+                    f"{summary}\n"
+                    "Ensure build_state returns every requested StateKey for the selected backend/settings."
+                )
             if not self.state:
                 self.state = {}
             self.state.update(st)

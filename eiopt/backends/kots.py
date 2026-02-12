@@ -299,7 +299,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         data_type = self._state_ref_data_type(state_ref)
         if data_type == "torque_diff1":
             raise ValueError(
-                "KotsStateBuilder: dynamics field 'torque_rate' (dtau) requires RoboKots model order >= 4. "
+                "KotsStateBuilder: dynamics field 'torque_rate' (dtau/tau_diff) requires RoboKots model order >= 4. "
                 f"Current model order is {self._model_order()}."
             ) from cause
         raise cause
@@ -697,6 +697,86 @@ def _resolve_p_var_name(*, dsl: Mapping[str, Any], trajectory_dsl: Mapping[str, 
     return name
 
 
+def _base_field_name(field: str) -> str:
+    field_name = canonical_field_name(str(field))
+    try:
+        base, _var = split_jac_field(field_name)
+    except ValueError:
+        return field_name
+    return base
+
+
+def _registered_dynamics_base_fields(
+    *,
+    builder: KotsTrajectoryStateBuilder,
+    owner_type: str,
+) -> set[str]:
+    fields: set[str] = set()
+    for dtype, route_owner_type, field in builder._dispatch.keys():
+        if dtype != DTYPE_DYNAMICS or route_owner_type != owner_type:
+            continue
+        fields.add(_base_field_name(field))
+    return fields
+
+
+def _required_dynamics_base_fields(
+    *,
+    runtime: ProblemRuntime,
+    owner_type: str,
+) -> tuple[set[str], set[str]]:
+    requested_fields: set[str] = set()
+    unsupported_owner_types: set[str] = set()
+    for key in runtime.required:
+        if getattr(key, "dtype", None) != DTYPE_DYNAMICS:
+            continue
+        owner = getattr(key, "owner", None)
+        key_owner_type = getattr(owner, "owner_type", None)
+        if key_owner_type != owner_type:
+            unsupported_owner_types.add(str(key_owner_type))
+            continue
+        requested_fields.add(_base_field_name(str(getattr(key, "field", ""))))
+    return requested_fields, unsupported_owner_types
+
+
+def _validate_kots_runtime_dynamics_coverage(
+    *,
+    runtime: ProblemRuntime,
+    builder: KotsTrajectoryStateBuilder,
+    dynamics_owner_type: str,
+) -> None:
+    requested_fields, unsupported_owner_types = _required_dynamics_base_fields(
+        runtime=runtime,
+        owner_type=dynamics_owner_type,
+    )
+    if unsupported_owner_types:
+        unsupported = ", ".join(sorted(unsupported_owner_types))
+        raise ValueError(
+            "compile_kots_trajectory_problem: DSL contains dynamics keys with unsupported owner_type(s): "
+            f"{unsupported}. Supported owner_type is {dynamics_owner_type!r}."
+        )
+    if len(requested_fields) == 0:
+        return
+
+    registered_fields = _registered_dynamics_base_fields(
+        builder=builder,
+        owner_type=dynamics_owner_type,
+    )
+    missing_fields = sorted(requested_fields - registered_fields)
+    if len(missing_fields) == 0:
+        return
+
+    requested_str = ", ".join(sorted(requested_fields))
+    registered_str = ", ".join(sorted(registered_fields)) if len(registered_fields) > 0 else "<none>"
+    missing_str = ", ".join(missing_fields)
+    raise ValueError(
+        "compile_kots_trajectory_problem: DSL requests dynamics field(s) that are not registered in "
+        "KotsTrajectoryStateBuilder. "
+        f"Missing: {missing_str}. Requested: {requested_str}. Registered: {registered_str}. "
+        "Add missing entries to `dynamics_fields` (e.g. include 'tau_diff'/'dtau' for torque_rate), "
+        "or remove corresponding get_state dynamics terms."
+    )
+
+
 def compile_kots_trajectory_problem(
     dsl: Mapping[str, Any],
     *,
@@ -782,6 +862,11 @@ def compile_kots_trajectory_problem(
         dynamics_owner_type=dynamics_owner_type,
     )
     runtime = compile_problem(dsl_dict, build_state=builder.build_state)
+    _validate_kots_runtime_dynamics_coverage(
+        runtime=runtime,
+        builder=builder,
+        dynamics_owner_type=dynamics_owner_type,
+    )
 
     return KotsTrajectoryCompiledProblem(
         runtime=runtime,

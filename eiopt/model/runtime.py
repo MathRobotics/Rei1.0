@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..core.state_cache import OwnerKey, StateKey
+from ..core.state_schema import canonical_field_name
 from .problem import Problem
 from .term import RuntimeContext, VariablePack
 
@@ -268,7 +269,7 @@ class ProblemRuntime:
         owner_type = str(owner_type).strip()
         owner_name = str(owner_name).strip()
         dtype = str(dtype).strip()
-        field = str(field).strip()
+        field = canonical_field_name(str(field).strip())
         if owner_type == "" or owner_name == "" or dtype == "" or field == "":
             raise ValueError("collect_state_traj: owner_type/owner_name/dtype/field must be non-empty.")
 
