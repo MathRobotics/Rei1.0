@@ -154,6 +154,148 @@ class TestEiOptBasic(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "does not support runtime weight updates"):
             runtime.set_cost_weight("plain", 3.0)
 
+    def test_runtime_collects_term_attrs_and_finds_indices(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
+            "terms": [
+                {
+                    "is_constraint": True,
+                    "expr": {"type": "get_var", "name": "constraint_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "attrs": {"group": "constraint", "phase": "path"},
+                    "expr": {"type": "get_var", "name": "grouped_constraint_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "plain_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        self.assertEqual(runtime.find_term_indices(attr="is_constraint", value=True), [0])
+        self.assertEqual(runtime.find_term_indices(attr="group", value="constraint"), [1])
+        self.assertEqual(runtime.term_attrs("constraint_term").get("is_constraint"), True)
+        self.assertEqual(runtime.term_attrs("grouped_constraint_term").get("phase"), "path")
+        self.assertEqual(runtime.term_attrs("plain_term"), {})
+
+    def test_runtime_set_cost_weight_by_attr_updates_all_matches(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
+            "terms": [
+                {
+                    "attrs": {"group": "constraint"},
+                    "expr": {"type": "get_var", "name": "constraint_a", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "attrs": {"group": "constraint"},
+                    "expr": {"type": "get_var", "name": "constraint_b", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+                {
+                    "attrs": {"group": "objective"},
+                    "expr": {"type": "get_var", "name": "objective", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r0, _J0 = runtime.linearize()
+        self.assertTrue(np.allclose(r0, np.array([2.0, 4.0, 2.0], dtype=float)))
+
+        idxs = runtime.set_cost_weight_by_attr(attr="group", value="constraint", w=9.0)
+        self.assertEqual(idxs, [0, 1])
+
+        r1, _J1 = runtime.linearize()
+        self.assertTrue(np.allclose(r1, np.array([6.0, 6.0, 2.0], dtype=float)))
+
+    def test_runtime_set_cost_weight_by_attr_rejects_no_match(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [1.0]}],
+            "terms": [
+                {
+                    "attrs": {"group": "objective"},
+                    "expr": {"type": "get_var", "name": "plain", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(ValueError, "no term matched"):
+            runtime.set_cost_weight_by_attr(attr="group", value="constraint", w=3.0)
+
+    def test_runtime_constraint_kind_helpers(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {"type": "get_var", "name": "eq_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "constraint": {"type": "ineq"},
+                    "expr": {"type": "get_var", "name": "ineq_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "objective", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        self.assertEqual(runtime.find_constraint_term_indices(), [0, 1])
+        self.assertEqual(runtime.find_constraint_term_indices(kind="eq"), [0])
+        self.assertEqual(runtime.find_constraint_term_indices(kind="ineq"), [1])
+        self.assertEqual(runtime.term_attrs("eq_term").get("constraint_kind"), "eq")
+        self.assertEqual(runtime.term_attrs("ineq_term").get("constraint_kind"), "ineq")
+
+    def test_runtime_set_cost_weight_by_constraint(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
+            "terms": [
+                {
+                    "constraint": "eq",
+                    "expr": {"type": "get_var", "name": "eq_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "constraint": "ineq",
+                    "expr": {"type": "get_var", "name": "ineq_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        idxs = runtime.set_cost_weight_by_constraint(kind="ineq", w=9.0)
+        self.assertEqual(idxs, [1])
+
+        r1, _J1 = runtime.linearize()
+        self.assertTrue(np.allclose(r1, np.array([2.0, 6.0], dtype=float)))
+
+    def test_constraint_kind_validation(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [1.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "not_supported"},
+                    "expr": {"type": "get_var", "name": "bad", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "must be 'eq' or 'ineq'"):
+            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
     def test_get_state_expr_reads_cache(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
         pack = VariablePack([q_var])

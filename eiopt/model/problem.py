@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Any
 
 import numpy as np
@@ -16,12 +16,38 @@ class Problem:
 
     variables: VariablePack
     terms: List[Tuple[Expr, Cost]]
+    term_attrs: List[dict[str, Any]] = field(default_factory=list)
 
     _last_rev: int = -1
     _last_time_rev: int = -1
     _last_req_sig: int = 0
     _last_r: Optional[Array] = None
     _last_J: Optional[Array] = None
+
+    def __post_init__(self) -> None:
+        if len(self.term_attrs) == 0:
+            self.term_attrs = [{} for _ in self.terms]
+            return
+
+        if len(self.term_attrs) != len(self.terms):
+            raise ValueError(
+                f"Problem: len(term_attrs) mismatch. term_attrs={len(self.term_attrs)}, terms={len(self.terms)}."
+            )
+        self.term_attrs = [dict(attrs) for attrs in self.term_attrs]
+
+    def find_terms_by_attr(self, attr: str, value: Any = True) -> list[int]:
+        key = str(attr).strip()
+        if key == "":
+            raise ValueError("Problem.find_terms_by_attr: attr must be non-empty.")
+        return [i for i, attrs in enumerate(self.term_attrs) if attrs.get(key, None) == value]
+
+    def term_attrs_at(self, index: int) -> dict[str, Any]:
+        i = int(index)
+        if i < 0 or i >= len(self.term_attrs):
+            raise IndexError(
+                f"Problem.term_attrs_at: term index out of range: {i}. Expected 0..{len(self.term_attrs) - 1}."
+            )
+        return dict(self.term_attrs[i])
 
     def invalidate_cache(self) -> None:
         self._last_rev = -1

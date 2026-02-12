@@ -13,6 +13,17 @@ from .term import RuntimeContext, VariablePack
 Array = np.ndarray
 
 
+def _canonical_constraint_kind(kind: Any) -> str:
+    value = str(kind).strip().lower()
+    if value in ("eq", "equality"):
+        return "eq"
+    if value in ("ineq", "inequality"):
+        return "ineq"
+    raise ValueError(
+        f"constraint kind must be 'eq' or 'ineq'. Got {kind!r}."
+    )
+
+
 def _dedupe_required(keys: Iterable[StateKey]) -> list[StateKey]:
     out: list[StateKey] = []
     seen: set[StateKey] = set()
@@ -106,6 +117,30 @@ class ProblemRuntime:
             return name
         return expr.__class__.__name__
 
+    def term_attrs(self, term: int | str) -> dict[str, Any]:
+        idx = self._resolve_term_index(term)
+        return self.problem.term_attrs_at(idx)
+
+    def find_term_indices(self, *, attr: str, value: Any = True) -> list[int]:
+        return self.problem.find_terms_by_attr(attr, value=value)
+
+    def find_constraint_term_indices(self, *, kind: str | None = None) -> list[int]:
+        kind_norm = None if kind is None else _canonical_constraint_kind(kind)
+        idxs: list[int] = []
+
+        for i, attrs in enumerate(self.problem.term_attrs):
+            is_constraint = bool(attrs.get("is_constraint", False))
+            term_kind_raw = attrs.get("constraint_kind", attrs.get("constraint_type", None))
+            term_kind = None if term_kind_raw is None else _canonical_constraint_kind(term_kind_raw)
+
+            if not is_constraint and term_kind is None:
+                continue
+            if kind_norm is not None and term_kind != kind_norm:
+                continue
+            idxs.append(i)
+
+        return idxs
+
     def _resolve_term_index(self, term: int | str) -> int:
         if isinstance(term, int):
             idx = int(term)
@@ -154,3 +189,73 @@ class ProblemRuntime:
         set_weight(w)
         self.problem.invalidate_cache()
         return idx
+
+    def set_cost_weight_by_attr(
+        self,
+        *,
+        attr: str,
+        value: Any = True,
+        w: Any,
+        require_match: bool = True,
+    ) -> list[int]:
+        """Update all term weights matching one term attribute.
+
+        Returns the updated term indices.
+        """
+
+        idxs = self.find_term_indices(attr=attr, value=value)
+        if len(idxs) == 0:
+            if require_match:
+                raise ValueError(
+                    f"set_cost_weight_by_attr: no term matched attr={attr!r}, value={value!r}."
+                )
+            return []
+
+        set_weight_fns: list[tuple[int, Any]] = []
+        for idx in idxs:
+            _expr, cost = self.problem.terms[idx]
+            set_weight = getattr(cost, "set_weight", None)
+            if not callable(set_weight):
+                raise TypeError(
+                    f"set_cost_weight_by_attr: term[{idx}] '{self._term_display_name(idx)}' "
+                    f"uses cost type '{type(cost).__name__}' which does not support runtime weight updates."
+                )
+            set_weight_fns.append((idx, set_weight))
+
+        for _idx, set_weight in set_weight_fns:
+            set_weight(w)
+
+        self.problem.invalidate_cache()
+        return idxs
+
+    def set_cost_weight_by_constraint(
+        self,
+        *,
+        kind: str | None = None,
+        w: Any,
+        require_match: bool = True,
+    ) -> list[int]:
+        idxs = self.find_constraint_term_indices(kind=kind)
+        if len(idxs) == 0:
+            if require_match:
+                raise ValueError(
+                    f"set_cost_weight_by_constraint: no term matched kind={kind!r}."
+                )
+            return []
+
+        set_weight_fns: list[tuple[int, Any]] = []
+        for idx in idxs:
+            _expr, cost = self.problem.terms[idx]
+            set_weight = getattr(cost, "set_weight", None)
+            if not callable(set_weight):
+                raise TypeError(
+                    f"set_cost_weight_by_constraint: term[{idx}] '{self._term_display_name(idx)}' "
+                    f"uses cost type '{type(cost).__name__}' which does not support runtime weight updates."
+                )
+            set_weight_fns.append((idx, set_weight))
+
+        for _idx, set_weight in set_weight_fns:
+            set_weight(w)
+
+        self.problem.invalidate_cache()
+        return idxs

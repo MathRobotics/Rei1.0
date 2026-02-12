@@ -51,6 +51,14 @@ _IPOPT_OPTIONS = {"max_iter": 1000,
 _TERM_WEIGHT_OVERRIDES: dict[str, float] = {
     # "tau_traj_regularization": 1e-4,
 }
+# Optional per-attribute runtime overrides.
+_TERM_ATTR_WEIGHT_OVERRIDES: list[tuple[str, object, float]] = [
+    # ("is_constraint", True, 1e-2),
+]
+# Optional per-constraint-kind overrides ("eq" or "ineq").
+_TERM_CONSTRAINT_KIND_WEIGHT_OVERRIDES: dict[str, float] = {
+    # "ineq": 1e-2,
+}
 
 
 def _plot_trajectory(
@@ -325,6 +333,18 @@ def run_trajectory_dynamics_demo(
     for term_name, weight in _TERM_WEIGHT_OVERRIDES.items():
         idx = runtime.set_cost_weight(term_name, weight)
         print(f"Updated cost weight: term[{idx}] '{term_name}' -> {weight:g}")
+    for attr, value, weight in _TERM_ATTR_WEIGHT_OVERRIDES:
+        idxs = runtime.set_cost_weight_by_attr(attr=attr, value=value, w=weight, require_match=False)
+        if len(idxs) == 0:
+            continue
+        idx_str = ", ".join(str(i) for i in idxs)
+        print(f"Updated cost weight by attr: attr={attr!r}, value={value!r}, terms=[{idx_str}] -> {weight:g}")
+    for kind, weight in _TERM_CONSTRAINT_KIND_WEIGHT_OVERRIDES.items():
+        idxs = runtime.set_cost_weight_by_constraint(kind=kind, w=weight, require_match=False)
+        if len(idxs) == 0:
+            continue
+        idx_str = ", ".join(str(i) for i in idxs)
+        print(f"Updated cost weight by constraint kind: kind={kind!r}, terms=[{idx_str}] -> {weight:g}")
 
     x0 = runtime.pack.get().copy()
     x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_runtime(

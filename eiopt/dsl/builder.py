@@ -23,6 +23,46 @@ from .environment import DslBuildEnv
 Array = np.ndarray
 
 
+def _canonical_constraint_kind(kind: Any) -> str:
+    value = str(kind).strip().lower()
+    if value in ("eq", "equality"):
+        return "eq"
+    if value in ("ineq", "inequality"):
+        return "ineq"
+    raise ValueError(
+        f"term constraint kind/type must be 'eq' or 'ineq'. Got {kind!r}."
+    )
+
+
+def _normalize_constraint_attrs(term_dsl: dict[str, Any], attrs: dict[str, Any]) -> dict[str, Any]:
+    constraint_dsl = term_dsl.get("constraint", None)
+    if constraint_dsl is not None:
+        if isinstance(constraint_dsl, str):
+            attrs["constraint_kind"] = _canonical_constraint_kind(constraint_dsl)
+            attrs.setdefault("is_constraint", True)
+        elif isinstance(constraint_dsl, dict):
+            kind_raw = constraint_dsl.get("kind", constraint_dsl.get("type", None))
+            if kind_raw is not None:
+                attrs["constraint_kind"] = _canonical_constraint_kind(kind_raw)
+                attrs.setdefault("is_constraint", True)
+
+            is_constraint_raw = constraint_dsl.get("is_constraint", constraint_dsl.get("enabled", None))
+            if is_constraint_raw is not None:
+                attrs["is_constraint"] = bool(is_constraint_raw)
+        else:
+            raise ValueError("term.constraint must be a string or dict.")
+
+    if "constraint_type" in attrs and "constraint_kind" not in attrs:
+        attrs["constraint_kind"] = attrs["constraint_type"]
+
+    if "constraint_kind" in attrs:
+        attrs["constraint_kind"] = _canonical_constraint_kind(attrs["constraint_kind"])
+        attrs["constraint_type"] = attrs["constraint_kind"]
+        attrs.setdefault("is_constraint", True)
+
+    return attrs
+
+
 def register_default_costs(expr_register: ExprRegister) -> None:
     expr_register.register_cost("l2", lambda dsl: L2Cost())
     expr_register.register_cost("diag_weight", lambda dsl: DiagonalWeightCost(w=np.asarray(dsl["w"], float)))
@@ -55,7 +95,7 @@ def build_variable_pack(dsl: dict[str, Any]) -> VariablePack:
     return VariablePack([build_variable(dsl) for dsl in dsl.get("variables", [])])
 
 
-def build_term(env: DslBuildEnv, dsl: dict[str, Any]) -> tuple[Any, Any]:
+def build_term(env: DslBuildEnv, dsl: dict[str, Any]) -> tuple[Any, Any, dict[str, Any]]:
     expr_dsl = dsl.get("expr", None)
     if not isinstance(expr_dsl, dict):
         raise ValueError("term.expr must be a dict.")
@@ -64,9 +104,24 @@ def build_term(env: DslBuildEnv, dsl: dict[str, Any]) -> tuple[Any, Any]:
     if not isinstance(cost_dsl, dict):
         raise ValueError("term.cost must be a dict.")
 
+    attrs_dsl = dsl.get("attrs", None)
+    if attrs_dsl is None:
+        attrs: dict[str, Any] = {}
+    elif isinstance(attrs_dsl, dict):
+        attrs = dict(attrs_dsl)
+    else:
+        raise ValueError("term.attrs must be a dict.")
+
+    for key, value in dsl.items():
+        if key in ("expr", "cost", "attrs", "constraint"):
+            continue
+        attrs[key] = value
+
+    attrs = _normalize_constraint_attrs(dsl, attrs)
+
     expr = env.build_expr(expr_dsl)
     cost = env.build_cost(cost_dsl)
-    return expr, cost
+    return expr, cost, attrs
 
 
 def build_problem(dsl: dict[str, Any], *, expr_register: ExprRegister) -> tuple[Problem, TimeGrid]:
@@ -75,9 +130,11 @@ def build_problem(dsl: dict[str, Any], *, expr_register: ExprRegister) -> tuple[
 
     pack = build_variable_pack(dsl)
     env = DslBuildEnv(pack=pack, time=time, expr_register=expr_register, root_dsl=dsl)
-    terms = [build_term(env, term_dsl) for term_dsl in dsl.get("terms", [])]
+    built_terms = [build_term(env, term_dsl) for term_dsl in dsl.get("terms", [])]
+    terms = [(expr, cost) for expr, cost, _attrs in built_terms]
+    term_attrs = [attrs for _expr, _cost, attrs in built_terms]
 
-    return Problem(variables=pack, terms=terms), time
+    return Problem(variables=pack, terms=terms, term_attrs=term_attrs), time
 
 
 def collect_required(problem: Problem) -> list[StateKey]:

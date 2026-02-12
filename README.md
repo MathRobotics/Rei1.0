@@ -118,6 +118,35 @@ runtime.set_cost_weight("tau_traj_regularization", 1e-4)  # expr.name で指定
 # runtime.set_cost_weight(7, 1e-4)  # index 指定も可
 ```
 
+### term 属性でフィルタ（拘束条件の識別など）
+
+`[[terms]]` には `expr` / `cost` 以外の項目を属性として持たせられます。
+`[terms.attrs]` も併用でき、どちらも `runtime.find_term_indices()` で検索できます。
+等式/不等式の区別には `constraint.kind = "eq" | "ineq"` が使えます。
+
+```toml
+[[terms]]
+is_constraint = true
+
+[terms.attrs]
+group = "joint_limit"
+
+[terms.constraint]
+kind = "ineq" # "eq" | "ineq"
+
+[terms.expr]
+type = "hinge"
+```
+
+```python
+constraint_idxs = runtime.find_term_indices(attr="is_constraint", value=True)
+runtime.set_cost_weight_by_attr(attr="group", value="joint_limit", w=1e-1)
+
+eq_constraint_idxs = runtime.find_constraint_term_indices(kind="eq")
+ineq_constraint_idxs = runtime.find_constraint_term_indices(kind="ineq")
+runtime.set_cost_weight_by_constraint(kind="ineq", w=1e-1)
+```
+
 ### 最適化後の Expr 値レポート
 
 最適化後に、目的関数(terms)に含まれる residual と、DSLで名前が付いた Expr（例: `ee_pos`, `target_pos`）の値を
