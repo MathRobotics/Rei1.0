@@ -6,16 +6,18 @@ This repository is a standalone extraction/re-implementation of the
 
 from __future__ import annotations
 
-from . import core, dsl, expr, model, solvers
+from . import core, dsl, expr, ioc, model, solvers
 from .solvers import nls, solve_cyipopt_minimize, solve_gauss_newton, solve_runtime, solve_scipy_minimize
 from .dsl import compile_problem, load_problem_toml
 from .model import ProblemRuntime
 from .report import format_solve_report, collect_named_expr_values, get_named_expr_value
+from .ioc import build_term_gradient_matrix, build_term_gradient_matrix_from_terms, estimate_weights_simplex
 
 __all__ = [
     "core",
     "expr",
     "model",
+    "ioc",
     "solvers",
     "dsl",
     "nls",
@@ -29,4 +31,7 @@ __all__ = [
     "format_solve_report",
     "collect_named_expr_values",
     "get_named_expr_value",
+    "build_term_gradient_matrix",
+    "build_term_gradient_matrix_from_terms",
+    "estimate_weights_simplex",
 ]

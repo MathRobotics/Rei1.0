@@ -44,6 +44,7 @@ def _ensure_robokots_state_stub() -> None:
 _ensure_robokots_state_stub()
 _kots_mod = importlib.import_module("eiopt.backends.kots")
 KotsTrajectoryStateBuilder = _kots_mod.KotsTrajectoryStateBuilder
+compile_kots_trajectory_problem = _kots_mod.compile_kots_trajectory_problem
 
 
 class _FakeKotsModel:
@@ -181,6 +182,87 @@ def _traj_map_from_rows(rows: list[list[float]]) -> TrajectoryMap:
 
 
 class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
+    def test_compile_kots_trajectory_problem_builds_runtime_bundle(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data={},
+            dynamics_fields=("tau",),
+        )
+
+        self.assertEqual(compiled.p_var, "p")
+        self.assertAlmostEqual(compiled.dt, 0.2)
+        self.assertEqual(compiled.model_order, 3)
+        self.assertEqual(compiled.trajectory_map.steps, 2)
+        self.assertEqual(compiled.trajectory_map.q_dim, 2)
+        self.assertEqual(compiled.trajectory_map.p_dim, 2)
+        self.assertEqual(sorted(compiled.trajectory_derivative_maps.keys()), [0, 1, 2])
+        self.assertEqual(compiled.runtime.pack.n_total, 2)
+
+        r, J = compiled.runtime.linearize()
+        self.assertTrue(np.allclose(r, np.array([0.0, 0.0], dtype=float)))
+        self.assertTrue(np.allclose(J, np.eye(2, dtype=float)))
+
+    def test_compile_kots_trajectory_problem_validates_p_dim(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 3, "init": [0.0, 0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "dim mismatch"):
+            _ = compile_kots_trajectory_problem(
+                dsl,
+                model=model,
+                data={},
+            )
+
     def test_dynamics_value_and_param_jac_chain(self) -> None:
         model = _FakeKotsModel()
         traj0 = _traj_map_from_rows(

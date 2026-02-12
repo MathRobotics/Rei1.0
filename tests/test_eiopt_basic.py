@@ -18,7 +18,13 @@ from eiopt.dsl.trajectory import (
     build_trajectory_map_with_derivative,
     build_trajectory_maps_with_derivatives,
 )
-from eiopt import compile_problem, format_solve_report, get_named_expr_value
+from eiopt import (
+    build_term_gradient_matrix,
+    compile_problem,
+    estimate_weights_simplex,
+    format_solve_report,
+    get_named_expr_value,
+)
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton, solve_runtime
@@ -281,6 +287,160 @@ class TestEiOptBasic(unittest.TestCase):
 
         r1, _J1 = runtime.linearize()
         self.assertTrue(np.allclose(r1, np.array([2.0, 6.0], dtype=float)))
+
+    def test_runtime_linearize_terms_weighted_and_unweighted(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
+            "terms": [
+                {
+                    "attrs": {"group": "objective"},
+                    "expr": {"type": "get_var", "name": "term_a", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "attrs": {"group": "constraint"},
+                    "expr": {"type": "get_var", "name": "term_b", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 9.0},
+                },
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        terms_raw = runtime.linearize_terms(weighted=False)
+        terms_w = runtime.linearize_terms(weighted=True)
+
+        self.assertEqual([t.term_index for t in terms_raw], [0, 1])
+        self.assertEqual([t.name for t in terms_raw], ["term_a", "term_b"])
+        self.assertEqual(terms_raw[1].attrs.get("group"), "constraint")
+
+        self.assertTrue(np.allclose(terms_raw[0].residual, np.array([2.0], dtype=float)))
+        self.assertTrue(np.allclose(terms_raw[1].residual, np.array([2.0], dtype=float)))
+        self.assertTrue(np.allclose(terms_raw[0].jacobian, np.array([[1.0]], dtype=float)))
+        self.assertTrue(np.allclose(terms_raw[1].jacobian, np.array([[1.0]], dtype=float)))
+
+        self.assertTrue(np.allclose(terms_w[0].residual, np.array([2.0], dtype=float)))
+        self.assertTrue(np.allclose(terms_w[1].residual, np.array([6.0], dtype=float)))
+        self.assertTrue(np.allclose(terms_w[0].jacobian, np.array([[1.0]], dtype=float)))
+        self.assertTrue(np.allclose(terms_w[1].jacobian, np.array([[3.0]], dtype=float)))
+
+    def test_runtime_linearize_constraint_terms(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
+            "terms": [
+                {
+                    "constraint": "eq",
+                    "expr": {"type": "get_var", "name": "eq_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "constraint": "ineq",
+                    "expr": {"type": "get_var", "name": "ineq_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "objective_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+        eq_terms = runtime.linearize_constraint_terms(kind="eq", weighted=False)
+        ineq_terms = runtime.linearize_constraint_terms(kind="ineq", weighted=False)
+        self.assertEqual([t.name for t in eq_terms], ["eq_term"])
+        self.assertEqual([t.name for t in ineq_terms], ["ineq_term"])
+        self.assertTrue(np.allclose(eq_terms[0].residual, np.array([2.0], dtype=float)))
+        self.assertTrue(np.allclose(ineq_terms[0].residual, np.array([2.0], dtype=float)))
+
+    def test_runtime_collect_state_traj_helper(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "identity", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        owner = OwnerKey(owner_type="demo", owner_name="thing")
+
+        def build_state(_x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            req = [] if required is None else list(required)
+            out: dict[StateKey, object] = {}
+            for key in req:
+                if key.owner != owner or key.dtype != "vec" or key.field != "y":
+                    continue
+                out[key] = np.array([float(key.k), float(key.k) + 10.0], dtype=float)
+            return out
+
+        runtime = compile_problem(dsl, build_state=build_state)
+        traj = runtime.collect_state_traj(
+            owner_type="demo",
+            owner_name="thing",
+            dtype="vec",
+            field="y",
+            ks=[0, 1, 2],
+            expected_dim=2,
+        )
+        self.assertEqual(traj.shape, (3, 2))
+        self.assertTrue(np.allclose(traj[0], np.array([0.0, 10.0], dtype=float)))
+        self.assertTrue(np.allclose(traj[2], np.array([2.0, 12.0], dtype=float)))
+
+    def test_ioc_matrix_and_simplex_weight_estimation(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "t1",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [1.0]},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "t2",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [-1.0]},
+                    },
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+        A, term_indices = build_term_gradient_matrix(runtime, weighted=False)
+        self.assertEqual(A.shape, (1, 2))
+        self.assertEqual(term_indices, [0, 1])
+        self.assertTrue(np.allclose(A, np.array([[-1.0, 1.0]], dtype=float)))
+
+        w, info = estimate_weights_simplex(A, return_info=True)
+        self.assertTrue(np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6))
+        self.assertAlmostEqual(float(np.sum(w)), 1.0, places=8)
+        self.assertTrue(bool(info["converged"]))
+        self.assertLess(float(info["objective"]), 1e-12)
+
+    def test_format_solve_report_includes_diagnostics(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [1.5]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "term_x", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        report = format_solve_report(runtime)
+        self.assertIn("Diagnostics:", report)
+        self.assertIn("||J^T r||", report)
+        self.assertIn("rank(J)", report)
+        self.assertIn("svd(J)", report)
+        self.assertIn("active terms", report)
 
     def test_constraint_kind_validation(self) -> None:
         dsl = {

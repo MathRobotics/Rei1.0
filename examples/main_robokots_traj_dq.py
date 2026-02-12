@@ -23,16 +23,9 @@ except ImportError as e:  # pragma: no cover
         "  PYTHONPATH=. python examples/main_robokots_traj_dq.py"
     ) from e
 
-from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_runtime
-from eiopt.backends.kots import KotsTrajectoryStateBuilder
-from eiopt.core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, make_key
-from eiopt.dsl.dsl_ops import find_var_dsl
-from eiopt.dsl.trajectory import (
-    build_trajectory_map,
-    build_trajectory_map_with_derivative,
-    build_trajectory_maps_with_derivatives,
-    default_steps_from_time,
-)
+from eiopt import format_solve_report, load_problem_toml, solve_runtime
+from eiopt.backends.kots import compile_kots_trajectory_problem
+from _kots_traj_common import analytic_joint_velocity, collect_ee_pos_traj, collect_target_waypoints
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
@@ -98,132 +91,6 @@ def _plot_trajectory(
     plt.show()
 
 
-def _collect_ee_pos_traj(runtime, *, steps: int) -> np.ndarray:
-    required = [
-        make_key(
-            k=k,
-            owner_type="link",
-            owner_name="ee",
-            dtype=DTYPE_KINEMATICS,
-            field="pos",
-            frame=DEFAULT_FRAME,
-        )
-        for k in range(int(steps))
-    ]
-    runtime.update_state_if_needed(required=required)
-    ee_list: list[np.ndarray] = []
-    for key in required:
-        v = np.asarray(runtime.state.get(key), dtype=float).reshape(-1)
-        if v.size != 3:
-            raise ValueError(f"ee pos size mismatch at k={key.k}. Expected 3, got {v.size}.")
-        ee_list.append(v)
-    return np.vstack(ee_list)
-
-
-def _collect_target_waypoints(dsl: dict) -> tuple[np.ndarray, np.ndarray]:
-    waypoints: list[tuple[int, np.ndarray]] = []
-
-    for term in dsl.get("terms", []):
-        expr = term.get("expr", {}) if isinstance(term, dict) else {}
-        if not isinstance(expr, dict) or expr.get("type") != "sub":
-            continue
-
-        a = expr.get("a", {})
-        b = expr.get("b", {})
-        if not isinstance(a, dict) or not isinstance(b, dict):
-            continue
-        if a.get("type") != "get_state" or b.get("type") != "const":
-            continue
-
-        key = a.get("key", {})
-        if not isinstance(key, dict):
-            continue
-        if key.get("owner_name") != "ee" or key.get("dtype") != "kinematics" or key.get("field") != "pos":
-            continue
-
-        k = key.get("k")
-        if k is None:
-            continue
-
-        v = np.asarray(b.get("value"), dtype=float).reshape(-1)
-        if v.size != 3:
-            raise ValueError(f"target waypoint size mismatch at k={k}. Expected 3, got {v.size}.")
-        waypoints.append((int(k), v))
-
-    if not waypoints:
-        return np.zeros((0,), dtype=int), np.zeros((0, 3), dtype=float)
-
-    waypoints.sort(key=lambda kv: kv[0])
-    target_ks = np.asarray([k for k, _v in waypoints], dtype=int)
-    target_pos = np.vstack([v for _k, v in waypoints])
-    return target_ks, target_pos
-
-
-def _infer_model_dof(model) -> int | None:
-    dof_fn = getattr(model, "dof", None)
-    if callable(dof_fn):
-        try:
-            return int(dof_fn())
-        except Exception:
-            return None
-    robot = getattr(model, "robot_", None)
-    if robot is not None and hasattr(robot, "dof"):
-        try:
-            return int(getattr(robot, "dof"))
-        except Exception:
-            return None
-    return None
-
-
-def _infer_model_order(model) -> int:
-    order_fn = getattr(model, "order", None)
-    if callable(order_fn):
-        try:
-            return max(1, int(order_fn()))
-        except Exception:
-            pass
-    order_attr = getattr(model, "order_", None)
-    if order_attr is None:
-        return 1
-    try:
-        return max(1, int(order_attr))
-    except Exception:
-        return 1
-
-
-def _resolve_dt(dsl: dict) -> float:
-    time_dsl = dsl.get("time", {})
-    if isinstance(time_dsl, dict) and "dt" in time_dsl:
-        dt = float(time_dsl.get("dt"))
-    else:
-        dt = 1.0
-    if dt <= 0.0:
-        raise ValueError(f"time.dt must be > 0. Got {dt}.")
-    return dt
-
-
-def _analytic_joint_velocity(
-    p_opt: np.ndarray,
-    *,
-    traj_dsl: dict,
-    steps: int,
-    q_dim: int,
-    dt: float,
-) -> np.ndarray:
-    traj_d1 = build_trajectory_map_with_derivative(
-        traj_dsl,
-        derivative_order=1,
-        derivative_wrt="time",
-        default_steps=steps,
-        default_q_dim=q_dim,
-        default_dt=dt,
-    )
-    p = np.asarray(p_opt, dtype=float).reshape(-1)
-    if p.size != traj_d1.p_dim:
-        raise ValueError(f"parameter size mismatch: expected {traj_d1.p_dim}, got {p.size}.")
-    return (traj_d1.A @ p + traj_d1.b).reshape(traj_d1.steps, traj_d1.q_dim)
-
-
 def run_trajectory_dq_demo(
     *,
     solver: str = _SOLVER,
@@ -242,48 +109,18 @@ def run_trajectory_dq_demo(
     data = kots.state_dict_
     dsl = load_problem_toml(_DSL_PATH)
 
+    compiled = compile_kots_trajectory_problem(
+        dsl,
+        model=kots,
+        data=data,
+        dynamics_fields=None,
+    )
+    runtime = compiled.runtime
+    traj_map = compiled.trajectory_map
+    dt = float(compiled.dt)
     traj_dsl = dsl.get("trajectory", None)
     if not isinstance(traj_dsl, dict):
         raise SystemExit("DSL must contain [trajectory] section.")
-    p_var = str(traj_dsl.get("var", "p")).strip()
-    if p_var == "":
-        raise SystemExit("trajectory.var must be non-empty.")
-
-    traj_map = build_trajectory_map(
-        traj_dsl,
-        default_steps=default_steps_from_time(dsl),
-        default_q_dim=_infer_model_dof(kots),
-    )
-    dt = _resolve_dt(dsl)
-    model_order = _infer_model_order(kots)
-    traj_maps = build_trajectory_maps_with_derivatives(
-        traj_dsl,
-        max_derivative_order=max(0, model_order - 1),
-        derivative_wrt="time",
-        default_steps=traj_map.steps,
-        default_q_dim=traj_map.q_dim,
-        default_dt=dt,
-    )
-    traj_maps_by_order = {i: m for i, m in enumerate(traj_maps)}
-
-    p_var_dsl = find_var_dsl(dsl, name=p_var)
-    if p_var_dsl is None:
-        raise SystemExit(f"DSL must declare variable {p_var!r}.")
-    p_dim_dsl = int(p_var_dsl.get("dim", -1))
-    if p_dim_dsl != traj_map.p_dim:
-        raise SystemExit(
-            f"variable {p_var!r} dim mismatch: dsl={p_dim_dsl}, trajectory p_dim={traj_map.p_dim}."
-        )
-
-    builder = KotsTrajectoryStateBuilder(
-        kots,
-        data,
-        trajectory_map=traj_map,
-        trajectory_derivative_maps=traj_maps_by_order,
-        p_var=p_var,
-        dynamics_fields=None,
-    )
-    runtime = compile_problem(dsl, build_state=builder.build_state)
 
     x0 = runtime.pack.get().copy()
     x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_runtime(
@@ -304,15 +141,15 @@ def run_trajectory_dq_demo(
 
     steps = int(traj_map.steps)
     q_opt = np.vstack([traj_map.q_at(x_star, k) for k in range(steps)])
-    qdot_opt = _analytic_joint_velocity(
+    qdot_opt = analytic_joint_velocity(
         x_star,
         traj_dsl=traj_dsl,
         steps=steps,
         q_dim=traj_map.q_dim,
         dt=dt,
     )
-    ee_opt = _collect_ee_pos_traj(runtime, steps=steps)
-    target_ks, ee_target = _collect_target_waypoints(dsl)
+    ee_opt = collect_ee_pos_traj(runtime, steps=steps)
+    target_ks, ee_target = collect_target_waypoints(dsl)
 
     print("p*:", x_star)
     for k in range(steps):

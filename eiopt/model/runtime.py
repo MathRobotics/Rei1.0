@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.state_cache import StateKey
+from ..core.state_cache import OwnerKey, StateKey
 from .problem import Problem
 from .term import RuntimeContext, VariablePack
 
@@ -42,6 +42,15 @@ def collect_required(problem: Problem) -> list[StateKey]:
         if callable(deps):
             req.extend(list(deps()))
     return _dedupe_required(req)
+
+
+@dataclass(frozen=True)
+class LinearizedTerm:
+    term_index: int
+    name: str
+    attrs: dict[str, Any]
+    residual: Array
+    jacobian: Array
 
 
 @dataclass
@@ -105,6 +114,226 @@ class ProblemRuntime:
         req = self.required_list(required)
         self.update_state_if_needed(required=req)
         return self.problem.linearize(ctx=self.ctx, time=self.time, required=req)
+
+    def _normalize_term_indices(self, term_indices: Iterable[int] | None = None) -> list[int]:
+        if term_indices is None:
+            return list(range(len(self.problem.terms)))
+
+        out: list[int] = []
+        seen: set[int] = set()
+        n_terms = len(self.problem.terms)
+        for idx_raw in term_indices:
+            idx = int(idx_raw)
+            if idx < 0 or idx >= n_terms:
+                raise IndexError(
+                    "linearize_terms: term index out of range. "
+                    f"Got {idx}, expected 0..{n_terms - 1}."
+                )
+            if idx in seen:
+                continue
+            out.append(idx)
+            seen.add(idx)
+        return out
+
+    def _assemble_global_jacobian(self, *, term_name: str, expr_vars: Any, residual: Array, blocks: Any) -> Array:
+        r = np.asarray(residual, dtype=float).reshape(-1)
+        m = int(r.size)
+        blocks_list = [np.asarray(B, dtype=float) for B in blocks]
+        n_total = int(self.pack.n_total)
+        slices = self.pack.slices
+
+        if len(blocks_list) != len(expr_vars):
+            raise ValueError(
+                "linearize_terms: len(blocks) mismatch in term "
+                f"{term_name!r}. blocks={len(blocks_list)}, vars={len(expr_vars)}."
+            )
+
+        Jg = np.zeros((m, n_total), dtype=float)
+        for v, B in zip(expr_vars, blocks_list):
+            if B.ndim != 2 or B.shape[0] != m:
+                raise ValueError(
+                    "linearize_terms: row mismatch in term "
+                    f"{term_name!r}, var={getattr(v, 'name', '<unknown>')!r}. "
+                    f"Expected ({m}, n), got {B.shape}."
+                )
+            var_name = getattr(v, "name", None)
+            if not isinstance(var_name, str) or var_name == "":
+                raise ValueError(
+                    f"linearize_terms: invalid variable name in term {term_name!r}: {var_name!r}."
+                )
+            if var_name not in slices:
+                raise ValueError(
+                    f"linearize_terms: var {var_name!r} not found in VariablePack "
+                    f"(term {term_name!r})."
+                )
+            s, e = slices[var_name]
+            nv = int(e - s)
+            if B.shape[1] != nv:
+                raise ValueError(
+                    "linearize_terms: col mismatch in term "
+                    f"{term_name!r}, var={var_name!r}. Expected ({m}, {nv}), got {B.shape}."
+                )
+            Jg[:, s:e] = B
+        return Jg
+
+    def linearize_terms(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        weighted: bool = True,
+        term_indices: Iterable[int] | None = None,
+    ) -> list[LinearizedTerm]:
+        """Linearize each selected term separately.
+
+        Returns a list of `LinearizedTerm` entries preserving requested term order.
+        """
+
+        req = self.required_list(required)
+        self.update_state_if_needed(required=req)
+        idxs = self._normalize_term_indices(term_indices)
+
+        out: list[LinearizedTerm] = []
+        for idx in idxs:
+            expr, cost = self.problem.terms[idx]
+            term_name = self._term_display_name(idx)
+            attrs = self.problem.term_attrs_at(idx)
+
+            r_raw, blocks_raw = expr.eval(self.ctx)
+            r_raw = np.asarray(r_raw, dtype=float).reshape(-1)
+            blocks_raw = [np.asarray(B, dtype=float) for B in blocks_raw]
+
+            if weighted:
+                apply_cost = getattr(cost, "apply", None)
+                if not callable(apply_cost):
+                    raise TypeError(
+                        f"linearize_terms: Cost object for term[{idx}] has no callable apply(r, blocks)."
+                    )
+                r_use, blocks_use = apply_cost(r_raw, blocks_raw)
+                r_use = np.asarray(r_use, dtype=float).reshape(-1)
+                J_use = self._assemble_global_jacobian(
+                    term_name=term_name,
+                    expr_vars=expr.vars,
+                    residual=r_use,
+                    blocks=blocks_use,
+                )
+            else:
+                r_use = r_raw
+                J_use = self._assemble_global_jacobian(
+                    term_name=term_name,
+                    expr_vars=expr.vars,
+                    residual=r_use,
+                    blocks=blocks_raw,
+                )
+
+            out.append(
+                LinearizedTerm(
+                    term_index=idx,
+                    name=term_name,
+                    attrs=attrs,
+                    residual=r_use.copy(),
+                    jacobian=J_use.copy(),
+                )
+            )
+        return out
+
+    def linearize_constraint_terms(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        kind: str | None = None,
+        weighted: bool = False,
+    ) -> list[LinearizedTerm]:
+        idxs = self.find_constraint_term_indices(kind=kind)
+        return self.linearize_terms(required=required, weighted=weighted, term_indices=idxs)
+
+    def collect_state_traj(
+        self,
+        *,
+        owner_type: str,
+        owner_name: str,
+        dtype: str,
+        field: str,
+        ks: Iterable[int] | None = None,
+        k0: int = 0,
+        k1: int | None = None,
+        frame: str | None = None,
+        rel_frame: str | None = None,
+        expected_dim: int | None = None,
+    ) -> Array:
+        """Collect a stacked state trajectory for one `StateKey` family.
+
+        Returns an array with shape `(len(ks), dim)`.
+        """
+
+        owner_type = str(owner_type).strip()
+        owner_name = str(owner_name).strip()
+        dtype = str(dtype).strip()
+        field = str(field).strip()
+        if owner_type == "" or owner_name == "" or dtype == "" or field == "":
+            raise ValueError("collect_state_traj: owner_type/owner_name/dtype/field must be non-empty.")
+
+        if ks is not None and (int(k0) != 0 or k1 is not None):
+            raise ValueError("collect_state_traj: use either `ks` or (`k0`, `k1`), not both.")
+
+        if expected_dim is not None:
+            expected_dim = int(expected_dim)
+            if expected_dim < 0:
+                raise ValueError(f"collect_state_traj: expected_dim must be >= 0, got {expected_dim}.")
+
+        if ks is None:
+            start = int(k0)
+            if start < 0:
+                raise ValueError(f"collect_state_traj: k0 must be >= 0, got {start}.")
+            if k1 is None:
+                if self.time is not None and hasattr(self.time, "N"):
+                    stop = int(self.time.N) + 1
+                else:
+                    stop = start + 1
+            else:
+                stop = int(k1)
+            if stop < start:
+                raise ValueError(f"collect_state_traj: expected k1 >= k0, got k0={start}, k1={stop}.")
+            ks_list = list(range(start, stop))
+        else:
+            ks_list = [int(k) for k in ks]
+            if any(k < 0 for k in ks_list):
+                raise ValueError("collect_state_traj: all ks must be >= 0.")
+
+        owner = OwnerKey(owner_type=owner_type, owner_name=owner_name)
+        required = [
+            StateKey(
+                k=int(k),
+                owner=owner,
+                dtype=dtype,
+                field=field,
+                frame=frame,
+                rel_frame=rel_frame,
+            )
+            for k in ks_list
+        ]
+
+        if len(required) == 0:
+            cols = 0 if expected_dim is None else expected_dim
+            return np.zeros((0, cols), dtype=float)
+
+        self.update_state_if_needed(required=required)
+        rows: list[Array] = []
+        for key in required:
+            if self.state is None:
+                raise ValueError("collect_state_traj: runtime.state is None.")
+            v = np.asarray(self.state.get(key), dtype=float).reshape(-1)
+            rows.append(v)
+
+        dim = int(rows[0].size) if expected_dim is None else int(expected_dim)
+        for i, v in enumerate(rows):
+            if v.size != dim:
+                raise ValueError(
+                    "collect_state_traj: state vector size mismatch. "
+                    f"k={ks_list[i]}, expected {dim}, got {v.size}."
+                )
+        if len(rows) == 0:
+            return np.zeros((0, dim), dtype=float)
+        return np.vstack(rows)
 
     def cost_value(self, *, required: Iterable[StateKey] | None = None) -> float:
         r_all, _ = self.linearize(required=required)

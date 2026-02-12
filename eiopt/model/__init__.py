@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .problem import Problem
-from .runtime import ProblemRuntime
+from .runtime import LinearizedTerm, ProblemRuntime
 from .term import (
     Variable,
     pack,
@@ -20,6 +20,7 @@ from .term import (
 __all__ = [
     "Problem",
     "ProblemRuntime",
+    "LinearizedTerm",
     "Variable",
     "pack",
     "total_dim",

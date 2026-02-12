@@ -167,6 +167,8 @@ def format_solve_report(
     precision: int = 4,
     include_vars: bool = True,
     include_named: bool = True,
+    include_diagnostics: bool = True,
+    active_tol: float = 1e-10,
     name_blacklist: set[str] | None = None,
 ) -> str:
     """Format a concise post-solve report of objective terms and expression values.
@@ -174,6 +176,7 @@ def format_solve_report(
     The report has three sections:
       - Variables (x0 / x* if provided)
       - Term residuals and per-term cost contributions (after cost weighting)
+      - Diagnostics (`||J^T r||`, `rank(J)`, singular values, active terms)
       - Named expression values (skipping default/generic names by default)
     """
 
@@ -181,7 +184,6 @@ def format_solve_report(
         name_blacklist = set(_DEFAULT_NAME_BLACKLIST)
 
     problem = runtime.problem
-    ctx = runtime.ctx
     pack = runtime.pack
     required_list = runtime.required_list(required)
     runtime.update_state_if_needed(required=required_list)
@@ -225,26 +227,29 @@ def format_solve_report(
         lines.append("")
 
     # Term summary (objective contributions)
+    term_linear_raw = runtime.linearize_terms(required=required_list, weighted=False)
+    term_linear_weighted = runtime.linearize_terms(required=required_list, weighted=True)
+    if len(term_linear_raw) != len(term_linear_weighted):
+        raise RuntimeError(
+            "format_solve_report: internal term linearization mismatch between raw and weighted terms."
+        )
+
     lines.append("Terms:")
     total_cost = 0.0
-    for i, (expr, cost) in enumerate(problem.terms):
-        r, blocks = expr.eval(ctx)
-        r = np.asarray(r, dtype=float).reshape(-1)
-        blocks = [np.asarray(B, dtype=float) for B in blocks]
-
-        apply_cost = getattr(cost, "apply", None)
-        if not callable(apply_cost):
-            raise TypeError(f"Cost object for term {i} has no callable apply(r, blocks).")
-
-        r_w, _blocks_w = apply_cost(r, blocks)
-        r_w = np.asarray(r_w, dtype=float).reshape(-1)
-
+    active_terms: list[tuple[int, str, float]] = []
+    for term_raw, term_w in zip(term_linear_raw, term_linear_weighted):
+        i = int(term_raw.term_index)
+        expr, cost = problem.terms[i]
+        r = np.asarray(term_raw.residual, dtype=float).reshape(-1)
+        r_w = np.asarray(term_w.residual, dtype=float).reshape(-1)
         cost_i = float(r_w @ r_w)
         total_cost += cost_i
 
         cost_name = getattr(cost, "name", cost.__class__.__name__)
         rnorm = float(np.linalg.norm(r))
         rnorm_w = float(np.linalg.norm(r_w))
+        if rnorm_w > float(active_tol):
+            active_terms.append((i, str(getattr(expr, "name", expr.__class__.__name__)), rnorm_w))
 
         r_str = _format_vector(r, max_elems=max_elems, precision=precision)
         lines.append(
@@ -253,6 +258,33 @@ def format_solve_report(
         )
 
     lines.append(f"Total cost: {total_cost:.3e}")
+
+    if include_diagnostics:
+        if len(problem.terms) == 0:
+            J_all = np.zeros((0, int(runtime.pack.n_total)), dtype=float)
+            grad_norm = 0.0
+            rank = 0
+            svals = np.zeros((0,), dtype=float)
+            svals_str = _format_vector(svals, max_elems=max_elems, precision=precision)
+        else:
+            r_all, J_all = runtime.linearize(required=required_list)
+            grad = np.asarray(J_all.T @ r_all, dtype=float).reshape(-1)
+            grad_norm = float(np.linalg.norm(grad))
+            rank = int(np.linalg.matrix_rank(J_all)) if J_all.size > 0 else 0
+            svals = np.linalg.svd(J_all, compute_uv=False) if J_all.size > 0 else np.zeros((0,), dtype=float)
+            svals_str = _format_vector(svals, max_elems=max_elems, precision=precision)
+
+        if len(active_terms) == 0:
+            active_str = "none"
+        else:
+            active_str = ", ".join(f"[{i}] {name} ({norm:.3e})" for i, name, norm in active_terms)
+
+        lines.append("")
+        lines.append("Diagnostics:")
+        lines.append(f"- ||J^T r||={grad_norm:.3e}")
+        lines.append(f"- rank(J)={rank}/{int(J_all.shape[1])} (rows={int(J_all.shape[0])})")
+        lines.append(f"- svd(J)={svals_str}")
+        lines.append(f"- active terms (||r_w||>{float(active_tol):.1e}): {active_str}")
 
     if include_named:
         lines.append("")

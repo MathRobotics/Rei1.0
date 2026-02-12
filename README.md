@@ -85,6 +85,25 @@ PYTHONPATH=. python examples/main_kots_traj.py
 
 ※ この例は `matplotlib` を使って軌道を描画します。
 
+### Kots 軌道問題の高レベルビルダー
+
+`eiopt.backends.kots.compile_kots_trajectory_problem()` を使うと、
+軌道マップ生成・導関数マップ生成・`p` 変数次元チェック・`KotsTrajectoryStateBuilder` 構築・`compile_problem()` までを一括で実行できます。
+
+```python
+from eiopt.backends.kots import compile_kots_trajectory_problem
+
+compiled = compile_kots_trajectory_problem(
+    dsl,
+    model=kots,
+    data=kots.state_dict_,
+    dynamics_fields=("tau",),
+)
+
+runtime = compiled.runtime
+traj_map = compiled.trajectory_map
+```
+
 ### solve_gauss_newton の返り値
 
 `solve_gauss_newton()` は最適化後の全決定変数ベクトル（`VariablePack` の順）も返します。
@@ -147,6 +166,40 @@ ineq_constraint_idxs = runtime.find_constraint_term_indices(kind="ineq")
 runtime.set_cost_weight_by_constraint(kind="ineq", w=1e-1)
 ```
 
+### term別線形化と IOC 行列
+
+termごとの線形化結果は `runtime.linearize_terms()` で取得できます。`weighted=False` を使うと未加重の `r_i, J_i` を取り出せます。
+
+```python
+terms = runtime.linearize_terms(weighted=False)
+for t in terms:
+    print(t.term_index, t.name, t.residual.shape, t.jacobian.shape, t.attrs)
+```
+
+IOC用に `A = [J_0^T r_0, ..., J_n^T r_n]` を作るヘルパーも使えます。
+
+```python
+from eiopt import build_term_gradient_matrix, estimate_weights_simplex
+
+A, term_indices = build_term_gradient_matrix(runtime, weighted=False)
+w_hat = estimate_weights_simplex(A)  # w>=0, sum(w)=1
+```
+
+### state の時系列一括取得
+
+`runtime.collect_state_traj()` で `StateKey` ループを書かずに時系列をまとめて取得できます。
+
+```python
+ee_traj = runtime.collect_state_traj(
+    owner_type="link",
+    owner_name="ee",
+    dtype="kinematics",
+    field="pos",
+    ks=range(11),
+    expected_dim=3,
+)
+```
+
 ### 最適化後の Expr 値レポート
 
 最適化後に、目的関数(terms)に含まれる residual と、DSLで名前が付いた Expr（例: `ee_pos`, `target_pos`）の値を
@@ -159,6 +212,9 @@ x0 = runtime.pack.get().copy()
 x_star, *_ = solve_gauss_newton(runtime)
 print(format_solve_report(runtime, x0=x0, x_star=x_star))
 ```
+
+`format_solve_report()` は既定で `||J^T r||`, `rank(J)`, `svd(J)`, active term も表示します。
+不要なら `include_diagnostics=False` を指定できます。
 
 名前付き Expr の値をコード側で直接使う場合は `get_named_expr_value()` が使えます。
 

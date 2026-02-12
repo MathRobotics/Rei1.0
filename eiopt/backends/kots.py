@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,6 +16,15 @@ from ..core.state_schema import (
     split_jac_field,
 )
 from ..core.trajectory import TrajectoryMap
+from ..dsl import compile_problem
+from ..dsl.dsl_ops import find_var_dsl
+from ..dsl.trajectory import (
+    build_trajectory_map,
+    build_trajectory_maps_with_derivatives,
+    default_dt_from_time,
+    default_steps_from_time,
+)
+from ..model.runtime import ProblemRuntime
 from ._template import BackendDispatchStateBuilder
 
 try:
@@ -43,6 +52,17 @@ class KotsFieldFamily:
 class _TotalJointDynamicsStateRef:
     field: str
     refs: tuple[Any, ...]
+
+
+@dataclass(frozen=True)
+class KotsTrajectoryCompiledProblem:
+    runtime: ProblemRuntime
+    builder: "KotsTrajectoryStateBuilder"
+    trajectory_map: TrajectoryMap
+    trajectory_derivative_maps: dict[int, TrajectoryMap]
+    p_var: str
+    dt: float
+    model_order: int
 
 
 # kots.py 内で「どの field ファミリを提供するか」を宣言する登録リスト。
@@ -607,3 +627,168 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
                 out[key] = value
 
         return out
+
+
+def _mapping_as_dict(mapping: Mapping[str, Any], *, where: str) -> dict[str, Any]:
+    if isinstance(mapping, dict):
+        return mapping
+    try:
+        return dict(mapping)
+    except Exception as e:
+        raise TypeError(f"{where} must be a mapping.") from e
+
+
+def _infer_model_dof(model: Any) -> int | None:
+    dof_fn = getattr(model, "dof", None)
+    if callable(dof_fn):
+        try:
+            return int(dof_fn())
+        except Exception:
+            return None
+    robot = getattr(model, "robot_", None)
+    if robot is not None and hasattr(robot, "dof"):
+        try:
+            return int(getattr(robot, "dof"))
+        except Exception:
+            return None
+    return None
+
+
+def _infer_model_order(model: Any) -> int:
+    order_fn = getattr(model, "order", None)
+    if callable(order_fn):
+        try:
+            return max(1, int(order_fn()))
+        except Exception:
+            pass
+
+    order_attr = getattr(model, "order_", None)
+    if order_attr is None:
+        return 1
+    try:
+        return max(1, int(order_attr))
+    except Exception:
+        return 1
+
+
+def _resolve_dt(dsl: Mapping[str, Any], *, default_dt: float | None = None) -> float:
+    dt = default_dt_from_time(dsl)
+    if dt is None:
+        dt = default_dt
+    if dt is None:
+        dt = 1.0
+    dt_f = float(dt)
+    if dt_f <= 0.0:
+        raise ValueError(f"time.dt must be > 0. Got {dt_f}.")
+    return dt_f
+
+
+def _resolve_p_var_name(*, dsl: Mapping[str, Any], trajectory_dsl: Mapping[str, Any], p_var: str | None) -> str:
+    if p_var is not None:
+        name = str(p_var).strip()
+    else:
+        name = str(trajectory_dsl.get("var", "p")).strip()
+    if name == "":
+        raise ValueError("trajectory.var must be non-empty.")
+
+    var_dsl = find_var_dsl(_mapping_as_dict(dsl, where="dsl"), name=name)
+    if var_dsl is None:
+        raise ValueError(f"DSL must declare variable {name!r}.")
+    return name
+
+
+def compile_kots_trajectory_problem(
+    dsl: Mapping[str, Any],
+    *,
+    model: Any,
+    data: Any,
+    p_var: str | None = None,
+    max_derivative_order: int | None = None,
+    derivative_wrt: str = "time",
+    default_steps: int | None = None,
+    default_q_dim: int | None = None,
+    default_dt: float | None = None,
+    fields: Sequence[str] | None = None,
+    dynamics_fields: Sequence[str] | None = DYNAMICS_FIELDS,
+    dynamics_owner_type: str = "total_joint",
+) -> KotsTrajectoryCompiledProblem:
+    """Compile a trajectory-parameterized Kots optimization runtime from DSL.
+
+    This helper bundles:
+      1) trajectory map construction
+      2) derivative trajectory map construction
+      3) trajectory variable dimension validation
+      4) KotsTrajectoryStateBuilder setup
+      5) compile_problem(..., build_state=builder.build_state)
+    """
+
+    dsl_dict = _mapping_as_dict(dsl, where="dsl")
+    trajectory_dsl_raw = dsl_dict.get("trajectory", None)
+    if not isinstance(trajectory_dsl_raw, Mapping):
+        raise ValueError("DSL must contain [trajectory] section.")
+    trajectory_dsl = _mapping_as_dict(trajectory_dsl_raw, where="dsl.trajectory")
+
+    p_var_name = _resolve_p_var_name(dsl=dsl_dict, trajectory_dsl=trajectory_dsl, p_var=p_var)
+
+    if default_steps is None:
+        default_steps = default_steps_from_time(dsl_dict)
+    if default_q_dim is None:
+        default_q_dim = _infer_model_dof(model)
+
+    traj_map = build_trajectory_map(
+        trajectory_dsl,
+        default_steps=default_steps,
+        default_q_dim=default_q_dim,
+    )
+    dt = _resolve_dt(dsl_dict, default_dt=default_dt)
+    model_order = _infer_model_order(model)
+
+    if max_derivative_order is None:
+        max_derivative_order_use = max(0, model_order - 1)
+    else:
+        max_derivative_order_use = int(max_derivative_order)
+        if max_derivative_order_use < 0:
+            raise ValueError(
+                f"max_derivative_order must be >= 0, got {max_derivative_order_use}."
+            )
+
+    traj_maps = build_trajectory_maps_with_derivatives(
+        trajectory_dsl,
+        max_derivative_order=max_derivative_order_use,
+        derivative_wrt=derivative_wrt,
+        default_steps=traj_map.steps,
+        default_q_dim=traj_map.q_dim,
+        default_dt=dt,
+    )
+    traj_maps_by_order = {i: m for i, m in enumerate(traj_maps)}
+
+    p_var_dsl = find_var_dsl(dsl_dict, name=p_var_name)
+    if p_var_dsl is None:
+        raise ValueError(f"DSL must declare variable {p_var_name!r}.")
+    p_dim_dsl = int(p_var_dsl.get("dim", -1))
+    if p_dim_dsl != traj_map.p_dim:
+        raise ValueError(
+            f"variable {p_var_name!r} dim mismatch: dsl={p_dim_dsl}, trajectory p_dim={traj_map.p_dim}."
+        )
+
+    builder = KotsTrajectoryStateBuilder(
+        model,
+        data,
+        trajectory_map=traj_map,
+        trajectory_derivative_maps=traj_maps_by_order,
+        p_var=p_var_name,
+        fields=fields,
+        dynamics_fields=dynamics_fields,
+        dynamics_owner_type=dynamics_owner_type,
+    )
+    runtime = compile_problem(dsl_dict, build_state=builder.build_state)
+
+    return KotsTrajectoryCompiledProblem(
+        runtime=runtime,
+        builder=builder,
+        trajectory_map=traj_map,
+        trajectory_derivative_maps=traj_maps_by_order,
+        p_var=p_var_name,
+        dt=float(dt),
+        model_order=int(model_order),
+    )
