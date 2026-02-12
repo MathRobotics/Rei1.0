@@ -162,7 +162,7 @@ type = "l2"
 - `owner.owner_type`: `"link" | "joint" | ...`
 - `owner.owner_name`: link/joint 名
 - `k`: 時刻インデックス（`TimeGrid` の `k`）
-- `dtype`: 大分類（推奨: `"kinematics"` / `"joint"` / `"dynamics"`）
+- `dtype`: 大分類（推奨: `"kinematics"` / `"dynamics"`）
 - `field`: 量の名前（例: `"pos"`, `"rot"`, `"vel"`, `"acc"`, `"momentum"`, `"force"`, `"torque"`）
 - `frame`: 座標系（推奨: `"world"` / `"local"`）
 - `rel_frame`: 相対量が必要なときの相手フレーム（任意）

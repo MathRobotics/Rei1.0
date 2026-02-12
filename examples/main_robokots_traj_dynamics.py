@@ -10,7 +10,7 @@ except ImportError as e:  # pragma: no cover
     raise SystemExit(
         "This example requires matplotlib for trajectory plotting.\n"
         "Install matplotlib in your environment and re-run:\n"
-        "  PYTHONPATH=. python examples/main_robokots_traj_dq.py"
+        "  PYTHONPATH=. python examples/main_robokots_traj_dynamics.py"
     ) from e
 
 try:
@@ -20,12 +20,12 @@ except ImportError as e:  # pragma: no cover
         "This example requires RoboKots with compatible dependencies.\n"
         "Install `robokots` and ensure `mathrobo` provides CMVector.\n"
         "Then run:\n"
-        "  PYTHONPATH=. python examples/main_robokots_traj_dq.py"
+        "  PYTHONPATH=. python examples/main_robokots_traj_dynamics.py"
     ) from e
 
 from eiopt import compile_problem, format_solve_report, load_problem_toml, solve_runtime
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
-from eiopt.core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, make_key
+from eiopt.core.state_schema import DEFAULT_FRAME, DTYPE_DYNAMICS, DTYPE_KINEMATICS, make_key
 from eiopt.dsl.dsl_ops import find_var_dsl
 from eiopt.dsl.trajectory import (
     build_trajectory_map,
@@ -36,8 +36,8 @@ from eiopt.dsl.trajectory import (
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
-_ORDER = 2
-_DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos_dq.toml"
+_ORDER = 3
+_DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos_dynamics.toml"
 
 # Solver selection (edit these in code)
 _SOLVER = "cyipopt"  # "gauss_newton" | "scipy_minimize" | "cyipopt"
@@ -55,11 +55,13 @@ def _plot_trajectory(
     target_ks: np.ndarray,
     q_opt: np.ndarray,
     qdot_opt: np.ndarray,
+    tau_opt: np.ndarray,
     dt: float,
 ) -> None:
-    fig, axes = plt.subplots(1, 3, figsize=(15.0, 4.5))
+    fig, axes = plt.subplots(2, 2, figsize=(14.0, 9.0))
+    axes_flat = axes.ravel()
 
-    ax_xy = axes[0]
+    ax_xy = axes_flat[0]
     if ee_target.shape[0] > 0:
         ax_xy.plot(ee_target[:, 0], ee_target[:, 1], "x--", label="target waypoints")
     ax_xy.plot(ee_opt[:, 0], ee_opt[:, 1], "o-", label="optimized")
@@ -74,7 +76,7 @@ def _plot_trajectory(
     ax_xy.grid(True, alpha=0.35)
     ax_xy.legend()
 
-    ax_q = axes[1]
+    ax_q = axes_flat[1]
     ks = np.arange(q_opt.shape[0], dtype=int)
     for j in range(q_opt.shape[1]):
         ax_q.plot(ks, q_opt[:, j], "o-", label=f"q{j}")
@@ -84,7 +86,7 @@ def _plot_trajectory(
     ax_q.grid(True, alpha=0.35)
     ax_q.legend()
 
-    ax_qdot = axes[2]
+    ax_qdot = axes_flat[2]
     ks_dot = np.arange(qdot_opt.shape[0], dtype=int)
     for j in range(qdot_opt.shape[1]):
         ax_qdot.plot(ks_dot, qdot_opt[:, j], "o-", label=f"dq{j}/dt")
@@ -93,6 +95,16 @@ def _plot_trajectory(
     ax_qdot.set_ylabel("dq/dt [rad/s]")
     ax_qdot.grid(True, alpha=0.35)
     ax_qdot.legend()
+
+    ax_tau = axes_flat[3]
+    ks_tau = np.arange(tau_opt.shape[0], dtype=int)
+    for j in range(tau_opt.shape[1]):
+        ax_tau.plot(ks_tau, tau_opt[:, j], "o-", label=f"tau{j}")
+    ax_tau.set_title("Joint Torque")
+    ax_tau.set_xlabel("k")
+    ax_tau.set_ylabel("tau")
+    ax_tau.grid(True, alpha=0.35)
+    ax_tau.legend()
 
     fig.tight_layout()
     plt.show()
@@ -118,6 +130,27 @@ def _collect_ee_pos_traj(runtime, *, steps: int) -> np.ndarray:
             raise ValueError(f"ee pos size mismatch at k={key.k}. Expected 3, got {v.size}.")
         ee_list.append(v)
     return np.vstack(ee_list)
+
+
+def _collect_joint_torque_traj(runtime, *, steps: int) -> np.ndarray:
+    required = [
+        make_key(
+            k=k,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="tau",
+        )
+        for k in range(int(steps))
+    ]
+    runtime.update_state_if_needed(required=required)
+    tau_list: list[np.ndarray] = []
+    for key in required:
+        v = np.asarray(runtime.state.get(key), dtype=float).reshape(-1)
+        tau_list.append(v)
+    if len(tau_list) == 0:
+        return np.zeros((0, 0), dtype=float)
+    return np.vstack(tau_list)
 
 
 def _collect_target_waypoints(dsl: dict) -> tuple[np.ndarray, np.ndarray]:
@@ -224,7 +257,7 @@ def _analytic_joint_velocity(
     return (traj_d1.A @ p + traj_d1.b).reshape(traj_d1.steps, traj_d1.q_dim)
 
 
-def run_trajectory_dq_demo(
+def run_trajectory_dynamics_demo(
     *,
     solver: str = _SOLVER,
     max_iters: int = 1000,
@@ -235,7 +268,7 @@ def run_trajectory_dq_demo(
     if not _MODEL_PATH.is_file():
         raise SystemExit(
             f"Model file not found: {_MODEL_PATH}\n"
-            "Update `_MODEL_PATH` in examples/main_robokots_traj_dq.py to your model JSON."
+            "Update `_MODEL_PATH` in examples/main_robokots_traj_dynamics.py to your model JSON."
         )
 
     kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
@@ -281,7 +314,7 @@ def run_trajectory_dq_demo(
         trajectory_map=traj_map,
         trajectory_derivative_maps=traj_maps_by_order,
         p_var=p_var,
-        dynamics_fields=None,
+        dynamics_fields=("tau",),
     )
     runtime = compile_problem(dsl, build_state=builder.build_state)
 
@@ -311,6 +344,7 @@ def run_trajectory_dq_demo(
         q_dim=traj_map.q_dim,
         dt=dt,
     )
+    tau_opt = _collect_joint_torque_traj(runtime, steps=steps)
     ee_opt = _collect_ee_pos_traj(runtime, steps=steps)
     target_ks, ee_target = _collect_target_waypoints(dsl)
 
@@ -319,6 +353,8 @@ def run_trajectory_dq_demo(
         print(f"q[{k}] =", traj_map.q_at(x_star, k))
     for k in range(qdot_opt.shape[0]):
         print(f"qdot[{k}] =", qdot_opt[k])
+    for k in range(tau_opt.shape[0]):
+        print(f"tau[{k}] =", tau_opt[k])
     print("ee* (xyz):\n", ee_opt)
     print(format_solve_report(runtime, x0=x0, x_star=x_star))
     _plot_trajectory(
@@ -327,13 +363,14 @@ def run_trajectory_dq_demo(
         target_ks=target_ks,
         q_opt=q_opt,
         qdot_opt=qdot_opt,
+        tau_opt=tau_opt,
         dt=dt,
     )
     return 0
 
 
 def main() -> int:
-    return run_trajectory_dq_demo(
+    return run_trajectory_dynamics_demo(
         solver=_SOLVER,
         max_iters=1000,
         scipy_method=_SCIPY_METHOD,

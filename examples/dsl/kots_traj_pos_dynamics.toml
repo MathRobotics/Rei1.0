@@ -138,7 +138,8 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   value = [0.0, 0.0]
 
   [terms.cost]
-  type = "l2"
+  type = "scalar_weight"
+  w = 1.0
 
 [[terms]]
   [terms.expr]
@@ -160,7 +161,8 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   value = [0.0, 0.0]
 
   [terms.cost]
-  type = "l2"
+  type = "scalar_weight"
+  w = 1.0
 
 [[terms]]
   [terms.expr]
@@ -173,3 +175,29 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   [terms.cost]
   type = "scalar_weight"
   w = 1e-3
+
+[[terms]]
+  [terms.expr]
+  type = "stack"
+  name = "tau_traj_regularization"
+
+  [terms.expr.range]
+  k0 = 0
+  k1 = 10
+
+  [terms.expr.inner]
+  type = "get_state"
+  name = "tau_k"
+
+  [terms.expr.inner.key]
+  owner_type = "total_joint"
+  owner_name = "robot"
+  dtype = "dynamics"
+  field = "tau"
+
+  [terms.expr.inner.jac]
+  var = "p"
+
+  [terms.cost]
+  type = "scalar_weight"
+  w = 1e-5

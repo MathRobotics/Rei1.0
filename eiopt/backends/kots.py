@@ -39,6 +39,12 @@ class KotsFieldFamily:
     field: str
 
 
+@dataclass(frozen=True)
+class _TotalJointDynamicsStateRef:
+    field: str
+    refs: tuple[Any, ...]
+
+
 # kots.py 内で「どの field ファミリを提供するか」を宣言する登録リスト。
 KOTS_DEFAULT_FIELD_FAMILIES: tuple[KotsFieldFamily, ...] = (
     KotsFieldFamily(field="pos"),
@@ -201,44 +207,34 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if not isinstance(owner_name, str) or owner_name == "":
             raise ValueError(f"Kots backend expects non-empty owner_name in key, got: {key!r}")
 
+        state_field = self._state_field_name(key.field)
         if owner_type == "total_joint" and getattr(key, "dtype", None) == DTYPE_JOINT and key.field == "q":
             # Joint-q terms are computed directly from optimization variables; no backend state query is required.
             return ("total_joint", owner_name, "q")
 
-        if owner_type == "total_joint" and getattr(key, "dtype", None) == DTYPE_DYNAMICS:
+        if owner_type == self.dynamics_owner_type and getattr(key, "dtype", None) == DTYPE_DYNAMICS:
             # RoboKots does not robustly support world dynamics queries for owner_type="total_joint".
             # Expand to per-joint queries and stack them in dof order.
-            state_field = _ROBOKOTS_FIELD_ALIASES.get(str(key.field), str(key.field))
             joint_refs = self._resolve_total_joint_dynamics_refs(state_field=state_field, key=key)
             if joint_refs is not None:
-                return ("total_joint_dynamics", state_field, joint_refs)
+                return _TotalJointDynamicsStateRef(field=state_field, refs=joint_refs)
 
         route = self._route_for_key(key)
         if route is None or route not in self._dispatch:
             raise ValueError(f"Kots backend has no handler route for key: {key!r}")
 
         frame_name = getattr(key, "frame", None) or "world"
-        state_field = _ROBOKOTS_FIELD_ALIASES.get(str(key.field), str(key.field))
         return StateType(str(owner_type), owner_name, state_field, str(frame_name))
 
     def _resolve_total_joint_dynamics_refs(self, *, state_field: str, key: StateKey) -> tuple[Any, ...] | None:
-        robot = getattr(self.model, "robot_", None)
-        if robot is None:
-            return None
-        joints_raw = getattr(robot, "joints", None)
-        if joints_raw is None:
+        joints = self._dof_sorted_joints()
+        if joints is None:
             return None
 
-        joints = [joint for joint in joints_raw if int(getattr(joint, "dof", 0)) > 0]
-        joints.sort(key=lambda joint: int(getattr(joint, "dof_index", 0)))
         if len(joints) == 0:
             return tuple()
 
-        frame_name = getattr(key, "frame", None) or "world"
-        # torque family does not need world-frame conversion in RoboKots get_value path.
-        # Keeping frame unset avoids a known owner_type='total_joint' world-path bug upstream.
-        if "torque" in state_field:
-            frame_name = None
+        frame_name = self._total_joint_dynamics_frame_name(state_field=state_field, key=key)
 
         refs: list[Any] = []
         for joint in joints:
@@ -247,6 +243,29 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
                 raise ValueError("KotsStateBuilder: joint.name must be non-empty for dynamics expansion.")
             refs.append(StateType("joint", joint_name, state_field, frame_name))
         return tuple(refs)
+
+    @staticmethod
+    def _state_field_name(field: Any) -> str:
+        return _ROBOKOTS_FIELD_ALIASES.get(str(field), str(field))
+
+    def _dof_sorted_joints(self) -> list[Any] | None:
+        robot = getattr(self.model, "robot_", None)
+        if robot is None:
+            return None
+        joints_raw = getattr(robot, "joints", None)
+        if joints_raw is None:
+            return None
+        joints = [joint for joint in joints_raw if int(getattr(joint, "dof", 0)) > 0]
+        joints.sort(key=lambda joint: int(getattr(joint, "dof_index", 0)))
+        return joints
+
+    def _total_joint_dynamics_frame_name(self, *, state_field: str, key: StateKey) -> str | None:
+        frame_name = getattr(key, "frame", None) or "world"
+        # torque family does not need world-frame conversion in RoboKots get_value path.
+        # Keeping frame unset avoids a known owner_type='total_joint' world-path bug upstream.
+        if "torque" in state_field:
+            return None
+        return str(frame_name)
 
     @staticmethod
     def _state_ref_data_type(state_ref: Any) -> str | None:
@@ -272,16 +291,9 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             self._raise_missing_state_key(state_ref=state_ref, cause=e)
 
     def _value_from_state_ref(self, state_ref: Any) -> Array:
-        if (
-            isinstance(state_ref, tuple)
-            and len(state_ref) == 3
-            and state_ref[0] == "total_joint_dynamics"
-        ):
-            refs = tuple(state_ref[2])
-            parts = [self._value_from_single_state_ref(ref) for ref in refs]
-            if len(parts) == 0:
-                return np.zeros((0,), dtype=float)
-            return np.concatenate(parts, axis=0)
+        total_joint_ref = self._as_total_joint_dynamics_state_ref(state_ref)
+        if total_joint_ref is not None:
+            return self._concat_total_joint_values(total_joint_ref.refs)
 
         return self._value_from_single_state_ref(state_ref)
 
@@ -307,25 +319,42 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
     def _handle_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del key
         del q
+        total_joint_ref = self._as_total_joint_dynamics_state_ref(state_ref)
+        if total_joint_ref is not None:
+            return self._stack_total_joint_jacobians(total_joint_ref.refs)
+
+        return self._jac_from_single_state_ref(state_ref)
+
+    @staticmethod
+    def _as_total_joint_dynamics_state_ref(state_ref: Any) -> _TotalJointDynamicsStateRef | None:
+        if isinstance(state_ref, _TotalJointDynamicsStateRef):
+            return state_ref
         if (
             isinstance(state_ref, tuple)
             and len(state_ref) == 3
             and state_ref[0] == "total_joint_dynamics"
         ):
-            refs = tuple(state_ref[2])
-            blocks = [self._jac_from_single_state_ref(ref) for ref in refs]
-            if len(blocks) == 0:
-                return np.zeros((0, self._model_dof() * self._model_order()), dtype=float)
-            ncols = int(blocks[0].shape[1])
-            for block in blocks[1:]:
-                if int(block.shape[1]) != ncols:
-                    raise ValueError(
-                        "KotsStateBuilder: inconsistent Jacobian column size while stacking total_joint dynamics. "
-                        f"Expected {ncols}, got {block.shape[1]}."
-                    )
-            return np.vstack(blocks)
+            return _TotalJointDynamicsStateRef(field=str(state_ref[1]), refs=tuple(state_ref[2]))
+        return None
 
-        return self._jac_from_single_state_ref(state_ref)
+    def _concat_total_joint_values(self, refs: tuple[Any, ...]) -> Array:
+        parts = [self._value_from_single_state_ref(ref) for ref in refs]
+        if len(parts) == 0:
+            return np.zeros((0,), dtype=float)
+        return np.concatenate(parts, axis=0)
+
+    def _stack_total_joint_jacobians(self, refs: tuple[Any, ...]) -> Array:
+        blocks = [self._jac_from_single_state_ref(ref) for ref in refs]
+        if len(blocks) == 0:
+            return np.zeros((0, self._model_dof() * self._model_order()), dtype=float)
+        ncols = int(blocks[0].shape[1])
+        for block in blocks[1:]:
+            if int(block.shape[1]) != ncols:
+                raise ValueError(
+                    "KotsStateBuilder: inconsistent Jacobian column size while stacking total_joint dynamics. "
+                    f"Expected {ncols}, got {block.shape[1]}."
+                )
+        return np.vstack(blocks)
 
 
 class KotsTrajectoryStateBuilder(KotsStateBuilder):
