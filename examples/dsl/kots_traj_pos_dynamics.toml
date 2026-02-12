@@ -229,3 +229,30 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   [terms.cost]
   type = "scalar_weight"
   w = 1e-5
+
+[[terms]]
+  [terms.expr]
+  type = "stack"
+  name = "dtau_traj_regularization"
+
+  [terms.expr.range]
+  k0 = 0
+  k1 = 10
+
+  [terms.expr.inner]
+  type = "get_state"
+  name = "dtau_k"
+
+  [terms.expr.inner.key]
+  owner_type = "total_joint"
+  owner_name = "robot"
+  dtype = "dynamics"
+  field = "tau_diff"
+
+  [terms.expr.inner.jac]
+  var = "p"
+
+  [terms.cost]
+  type = "scalar_weight"
+  w = 1e-5
+

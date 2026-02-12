@@ -263,6 +263,95 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 data={},
             )
 
+    def test_compile_kots_trajectory_problem_detects_missing_dynamics_field_registration(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "dtau",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "Missing: torque_rate"):
+            _ = compile_kots_trajectory_problem(
+                dsl,
+                model=model,
+                data={},
+                dynamics_fields=("tau",),
+            )
+
+    def test_compile_kots_trajectory_problem_detects_unsupported_dynamics_owner_type(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "joint",
+                            "owner_name": "joint0",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "tau",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "unsupported owner_type"):
+            _ = compile_kots_trajectory_problem(
+                dsl,
+                model=model,
+                data={},
+                dynamics_fields=("tau",),
+                dynamics_owner_type="total_joint",
+            )
+
     def test_dynamics_value_and_param_jac_chain(self) -> None:
         model = _FakeKotsModel()
         traj0 = _traj_map_from_rows(

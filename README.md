@@ -289,7 +289,8 @@ var = "p"
 var = "q"
 ```
 
-`field="tau"` は `torque` として正規化されます（`tau_J_p` も `torque_J_p` に正規化）。
+`field="tau"` は `torque` として正規化されます。`field="dtau"` / `field="tau_diff"` は
+`torque_rate` に正規化されます（例: `tau_J_p -> torque_J_p`, `tau_diff_J_p -> torque_rate_J_p`）。
 
 ## 決定変数の取得（get_var）
 
@@ -355,8 +356,10 @@ RoboKots 向けには、決定変数を軌道パラメータ `p` とし、`Traje
 - `StateKey.k`（時刻インデックス）ごとに `q(k)` を構成して kinematics を更新します。
 - `KotsTrajectoryStateBuilder` は既定で `torque/torque_rate/momentum/force` を登録します。
   必要に応じて `dynamics_fields=(...)` で対象 field を絞る/追加できます。
-  Kots 側は `state_info/jacobian` が返せる field をそのまま登録でき、`tau/dtau/h/wrench` などの別名も
+  Kots 側は `state_info/jacobian` が返せる field をそのまま登録でき、`tau/dtau/tau_diff/h/wrench` などの別名も
   `torque/torque_rate/momentum/force` に正規化されます。
+  `compile_kots_trajectory_problem(...)` は DSL が要求する dynamics field と
+  `dynamics_fields` 登録の不一致を検出し、線形化前に `ValueError` を返します。
   （RoboKots への問い合わせ時は `torque_rate -> torque_diff1` へ自動変換します）
   `torque_rate`（`dtau`）を使う場合は RoboKots モデル次数が `order >= 4` 必須です。
   Pinocchio 側は標準で `torque`, `momentum`, `force` をサポートし、追加分は

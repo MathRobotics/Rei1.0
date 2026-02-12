@@ -5,7 +5,12 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.core.state_schema import DEFAULT_FRAME, DTYPE_DYNAMICS, DTYPE_KINEMATICS
+from eiopt.core.state_schema import (
+    DEFAULT_FRAME,
+    DTYPE_DYNAMICS,
+    DTYPE_KINEMATICS,
+    canonical_field_name,
+)
 from eiopt.dsl.trajectory import build_trajectory_map_with_derivative
 
 
@@ -24,17 +29,28 @@ def collect_ee_pos_traj(runtime: Any, *, steps: int) -> np.ndarray:
     )
 
 
-def collect_joint_torque_traj(runtime: Any, *, steps: int) -> np.ndarray:
+def collect_joint_dynamics_traj(
+    runtime: Any,
+    *,
+    steps: int,
+    field: str = "tau",
+    owner_name: str = "robot",
+) -> np.ndarray:
+    field_name = canonical_field_name(str(field))
     return np.asarray(
         runtime.collect_state_traj(
             owner_type="total_joint",
-            owner_name="robot",
+            owner_name=str(owner_name),
             dtype=DTYPE_DYNAMICS,
-            field="tau",
+            field=field_name,
             ks=range(int(steps)),
         ),
         dtype=float,
     )
+
+
+def collect_joint_torque_traj(runtime: Any, *, steps: int) -> np.ndarray:
+    return collect_joint_dynamics_traj(runtime, steps=steps, field="tau")
 
 
 def collect_target_waypoints(

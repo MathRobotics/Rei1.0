@@ -387,6 +387,59 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(traj[0], np.array([0.0, 10.0], dtype=float)))
         self.assertTrue(np.allclose(traj[2], np.array([2.0, 12.0], dtype=float)))
 
+    def test_runtime_collect_state_traj_canonicalizes_field_alias(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "identity", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        owner = OwnerKey(owner_type="total_joint", owner_name="robot")
+
+        def build_state(_x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            req = [] if required is None else list(required)
+            out: dict[StateKey, object] = {}
+            for key in req:
+                if key.owner != owner or key.dtype != DTYPE_DYNAMICS or key.field != "torque":
+                    continue
+                out[key] = np.array([float(key.k)], dtype=float)
+            return out
+
+        runtime = compile_problem(dsl, build_state=build_state)
+        traj = runtime.collect_state_traj(
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="tau",
+            ks=[0, 1, 2],
+            expected_dim=1,
+        )
+        self.assertEqual(traj.shape, (3, 1))
+        self.assertTrue(np.allclose(traj[:, 0], np.array([0.0, 1.0, 2.0], dtype=float)))
+
+    def test_runtime_collect_state_traj_missing_key_error_is_readable(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "identity", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(KeyError, "missing required keys"):
+            _ = runtime.collect_state_traj(
+                owner_type="demo",
+                owner_name="thing",
+                dtype="vec",
+                field="y",
+                ks=[0, 1],
+            )
+
     def test_ioc_matrix_and_simplex_weight_estimation(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
@@ -667,14 +720,42 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertIn("torque_rate", fields)
         self.assertIn("torque_rate_J_q", fields)
 
+    def test_get_state_builder_canonicalizes_tau_diff_alias(self) -> None:
+        dsl = {
+            "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "tau_diff",
+                        },
+                        "jac": {"var": "q"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        fields = {k.field for k in runtime.required}
+        self.assertIn("torque_rate", fields)
+        self.assertIn("torque_rate_J_q", fields)
+
     def test_state_schema_dynamics_field_aliases(self) -> None:
         self.assertIn("torque", DYNAMICS_FIELDS)
         self.assertIn("torque_rate", DYNAMICS_FIELDS)
         self.assertEqual(canonical_field_name("tau"), "torque")
         self.assertEqual(canonical_field_name("dtau"), "torque_rate")
+        self.assertEqual(canonical_field_name("tau_diff"), "torque_rate")
+        self.assertEqual(canonical_field_name("torque_diff1"), "torque_rate")
         self.assertEqual(canonical_field_name("h"), "momentum")
         self.assertEqual(canonical_field_name("wrench"), "force")
         self.assertEqual(canonical_field_name("dtau_J_p"), "torque_rate_J_p")
+        self.assertEqual(canonical_field_name("tau_diff_J_p"), "torque_rate_J_p")
 
     def test_stack_get_state_canonicalizes_dtau_alias(self) -> None:
         dsl = {
