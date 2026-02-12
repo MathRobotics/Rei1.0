@@ -16,7 +16,7 @@ from .nodes import (
     TimeDiffExpr,
 )
 from ..core.state_cache import OwnerKey, StateKey
-from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, canonical_field_name, jac_field
+from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, canonical_dtype_name, canonical_field_name, jac_field
 from ..dsl.trajectory import (
     build_trajectory_map,
     build_trajectory_map_with_derivative,
@@ -106,7 +106,7 @@ def build_get_state(ctx, dsl):
     key_dsl = dsl["key"]
     k = int(key_dsl.get("k", 0))
     owner = OwnerKey(key_dsl["owner_type"], key_dsl["owner_name"])
-    dtype = str(key_dsl["dtype"])
+    dtype = canonical_dtype_name(str(key_dsl["dtype"]))
     field = canonical_field_name(str(key_dsl["field"]))
     frame = key_dsl.get("frame", None)
     rel_frame = key_dsl.get("rel_frame", None)

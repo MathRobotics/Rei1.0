@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence, Iterable
 from dataclasses import dataclass
+import re
 from typing import Any
 
 import numpy as np
@@ -9,11 +10,13 @@ import numpy as np
 from ..core.state_cache import StateKey
 from ..core.state_schema import (
     DYNAMICS_FIELDS,
+    DTYPE_COORD,
     DTYPE_DYNAMICS,
-    DTYPE_JOINT,
     DTYPE_KINEMATICS,
     canonical_field_name,
     split_jac_field,
+    torque_derivative_field,
+    torque_derivative_order,
 )
 from ..core.trajectory import TrajectoryMap
 from ..dsl import compile_problem
@@ -37,10 +40,7 @@ except ImportError as e:  # pragma: no cover
 
 Array = np.ndarray
 STATE_JACOBIAN_VAR = "state"
-_ROBOKOTS_FIELD_ALIASES: dict[str, str] = {
-    # RoboKots state names use *_diff1 for first derivatives.
-    "torque_rate": "torque_diff1",
-}
+_ROBOKOTS_TORQUE_DIFF_PATTERN = re.compile(r"^torque_diff([1-9][0-9]*)$")
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,7 @@ class KotsTrajectoryCompiledProblem:
     p_var: str
     dt: float
     model_order: int
+    dynamics_fields: tuple[str, ...] = ()
 
 
 # kots.py 内で「どの field ファミリを提供するか」を宣言する登録リスト。
@@ -228,7 +229,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             raise ValueError(f"Kots backend expects non-empty owner_name in key, got: {key!r}")
 
         state_field = self._state_field_name(key.field)
-        if owner_type == "total_joint" and getattr(key, "dtype", None) == DTYPE_JOINT and key.field == "q":
+        if owner_type == "total_joint" and getattr(key, "dtype", None) == DTYPE_COORD and key.field == "q":
             # Joint-q terms are computed directly from optimization variables; no backend state query is required.
             return ("total_joint", owner_name, "q")
 
@@ -266,7 +267,13 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
 
     @staticmethod
     def _state_field_name(field: Any) -> str:
-        return _ROBOKOTS_FIELD_ALIASES.get(str(field), str(field))
+        field_name = canonical_field_name(str(field))
+        order = torque_derivative_order(field_name)
+        if order is None:
+            return field_name
+        if order == 0:
+            return field_name
+        return f"torque_diff{order}"
 
     def _dof_sorted_joints(self) -> list[Any] | None:
         robot = getattr(self.model, "robot_", None)
@@ -297,9 +304,14 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
 
     def _raise_missing_state_key(self, *, state_ref: Any, cause: KeyError) -> None:
         data_type = self._state_ref_data_type(state_ref)
-        if data_type == "torque_diff1":
+        m = None if data_type is None else _ROBOKOTS_TORQUE_DIFF_PATTERN.fullmatch(data_type)
+        if m is not None:
+            diff_order = int(m.group(1))
+            eiopt_field = torque_derivative_field(diff_order)
+            required_model_order = diff_order + 3
             raise ValueError(
-                "KotsStateBuilder: dynamics field 'torque_rate' (dtau/tau_diff) requires RoboKots model order >= 4. "
+                "KotsStateBuilder: dynamics field "
+                f"{eiopt_field!r} requires RoboKots model order >= {required_model_order}. "
                 f"Current model order is {self._model_order()}."
             ) from cause
         raise cause
@@ -416,7 +428,7 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
             dynamics_owner_type=dynamics_owner_type,
         )
         self.register_value_and_jac(
-            dtype=DTYPE_JOINT,
+            dtype=DTYPE_COORD,
             owner_type="total_joint",
             field="q",
             value_handler=self._handle_joint_q_value,
@@ -706,6 +718,26 @@ def _base_field_name(field: str) -> str:
     return base
 
 
+def _canonicalize_dynamics_fields(
+    dynamics_fields: Sequence[str] | None,
+) -> tuple[str, ...] | None:
+    if dynamics_fields is None:
+        return None
+    out: list[str] = []
+    seen: set[str] = set()
+    for field_raw in dynamics_fields:
+        field = canonical_field_name(str(field_raw).strip())
+        if field == "":
+            continue
+        if field in seen:
+            continue
+        seen.add(field)
+        out.append(field)
+    if len(out) == 0:
+        raise ValueError("compile_kots_trajectory_problem: dynamics_fields must be non-empty when provided.")
+    return tuple(out)
+
+
 def _registered_dynamics_base_fields(
     *,
     builder: KotsTrajectoryStateBuilder,
@@ -719,12 +751,13 @@ def _registered_dynamics_base_fields(
     return fields
 
 
-def _required_dynamics_base_fields(
+def _required_dynamics_base_fields_in_order(
     *,
     runtime: ProblemRuntime,
     owner_type: str,
-) -> tuple[set[str], set[str]]:
-    requested_fields: set[str] = set()
+) -> tuple[list[str], set[str]]:
+    requested_fields: list[str] = []
+    requested_seen: set[str] = set()
     unsupported_owner_types: set[str] = set()
     for key in runtime.required:
         if getattr(key, "dtype", None) != DTYPE_DYNAMICS:
@@ -734,8 +767,45 @@ def _required_dynamics_base_fields(
         if key_owner_type != owner_type:
             unsupported_owner_types.add(str(key_owner_type))
             continue
-        requested_fields.add(_base_field_name(str(getattr(key, "field", ""))))
+        field = _base_field_name(str(getattr(key, "field", "")))
+        if field in requested_seen:
+            continue
+        requested_seen.add(field)
+        requested_fields.append(field)
     return requested_fields, unsupported_owner_types
+
+
+def _required_dynamics_base_fields(
+    *,
+    runtime: ProblemRuntime,
+    owner_type: str,
+) -> tuple[set[str], set[str]]:
+    requested_fields, unsupported_owner_types = _required_dynamics_base_fields_in_order(
+        runtime=runtime,
+        owner_type=owner_type,
+    )
+    return set(requested_fields), unsupported_owner_types
+
+
+def _validate_model_order_for_dynamics_fields(
+    *,
+    model_order: int,
+    dynamics_fields: Sequence[str] | None,
+) -> None:
+    if dynamics_fields is None:
+        return
+    for field in dynamics_fields:
+        deriv_order = torque_derivative_order(str(field))
+        if deriv_order is None or deriv_order <= 0:
+            continue
+        required_model_order = int(deriv_order) + 3
+        if int(model_order) >= required_model_order:
+            continue
+        raise ValueError(
+            "compile_kots_trajectory_problem: dynamics field "
+            f"{field!r} requires RoboKots model order >= {required_model_order}. "
+            f"Current model order is {int(model_order)}."
+        )
 
 
 def _validate_kots_runtime_dynamics_coverage(
@@ -772,7 +842,7 @@ def _validate_kots_runtime_dynamics_coverage(
         "compile_kots_trajectory_problem: DSL requests dynamics field(s) that are not registered in "
         "KotsTrajectoryStateBuilder. "
         f"Missing: {missing_str}. Requested: {requested_str}. Registered: {registered_str}. "
-        "Add missing entries to `dynamics_fields` (e.g. include 'tau_diff'/'dtau' for torque_rate), "
+        "Add missing entries to `dynamics_fields` (e.g. include 'torque_d1' for first torque derivative), "
         "or remove corresponding get_state dynamics terms."
     )
 
@@ -789,7 +859,7 @@ def compile_kots_trajectory_problem(
     default_q_dim: int | None = None,
     default_dt: float | None = None,
     fields: Sequence[str] | None = None,
-    dynamics_fields: Sequence[str] | None = DYNAMICS_FIELDS,
+    dynamics_fields: Sequence[str] | None = None,
     dynamics_owner_type: str = "total_joint",
 ) -> KotsTrajectoryCompiledProblem:
     """Compile a trajectory-parameterized Kots optimization runtime from DSL.
@@ -851,6 +921,36 @@ def compile_kots_trajectory_problem(
             f"variable {p_var_name!r} dim mismatch: dsl={p_dim_dsl}, trajectory p_dim={traj_map.p_dim}."
         )
 
+    dynamics_fields_use = _canonicalize_dynamics_fields(dynamics_fields)
+    if dynamics_fields_use is None:
+        probe_builder = KotsTrajectoryStateBuilder(
+            model,
+            data,
+            trajectory_map=traj_map,
+            trajectory_derivative_maps=traj_maps_by_order,
+            p_var=p_var_name,
+            fields=fields,
+            dynamics_fields=None,
+            dynamics_owner_type=dynamics_owner_type,
+        )
+        probe_runtime = compile_problem(dsl_dict, build_state=probe_builder.build_state)
+        requested_fields_order, unsupported_owner_types = _required_dynamics_base_fields_in_order(
+            runtime=probe_runtime,
+            owner_type=dynamics_owner_type,
+        )
+        if unsupported_owner_types:
+            unsupported = ", ".join(sorted(unsupported_owner_types))
+            raise ValueError(
+                "compile_kots_trajectory_problem: DSL contains dynamics keys with unsupported owner_type(s): "
+                f"{unsupported}. Supported owner_type is {dynamics_owner_type!r}."
+            )
+        dynamics_fields_use = tuple(requested_fields_order) if len(requested_fields_order) > 0 else None
+
+    _validate_model_order_for_dynamics_fields(
+        model_order=int(model_order),
+        dynamics_fields=dynamics_fields_use,
+    )
+
     builder = KotsTrajectoryStateBuilder(
         model,
         data,
@@ -858,7 +958,7 @@ def compile_kots_trajectory_problem(
         trajectory_derivative_maps=traj_maps_by_order,
         p_var=p_var_name,
         fields=fields,
-        dynamics_fields=dynamics_fields,
+        dynamics_fields=dynamics_fields_use,
         dynamics_owner_type=dynamics_owner_type,
     )
     runtime = compile_problem(dsl_dict, build_state=builder.build_state)
@@ -876,4 +976,5 @@ def compile_kots_trajectory_problem(
         p_var=p_var_name,
         dt=float(dt),
         model_order=int(model_order),
+        dynamics_fields=tuple() if dynamics_fields_use is None else tuple(dynamics_fields_use),
     )

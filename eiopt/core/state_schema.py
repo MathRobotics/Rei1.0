@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Tuple
 
 import numpy as np
@@ -18,7 +19,7 @@ OWNER_TYPES: Tuple[str, ...] = ("joint", "link", "total_link", "total_joint", "t
 # Recommended dtype values (not enforced)
 DTYPE_KINEMATICS = "kinematics"
 DTYPE_DYNAMICS = "dynamics"
-DTYPE_JOINT = "joint"
+DTYPE_COORD = "coord"
 
 DEFAULT_ROBOT_NAME: str = "robot"
 
@@ -40,19 +41,52 @@ KIN_FIELDS: Tuple[str, ...] = FRAME_FIELDS
 # Dynamics-like fields (minimal set; backends may extend)
 MOMENTUM_FIELDS: Tuple[str, ...] = ("momentum",)
 FORCE_FIELDS: Tuple[str, ...] = ("force",)
-TORQUE_FIELDS: Tuple[str, ...] = ("torque", "torque_rate")
+TORQUE_FIELDS: Tuple[str, ...] = ("torque", "torque_d1")
 
 DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
 
-FIELD_ALIASES: dict[str, str] = {
-    "tau": "torque",
-    "dtau": "torque_rate",
-    "tau_diff": "torque_rate",
-    "torque_dot": "torque_rate",
-    "torque_diff1": "torque_rate",
-    "h": "momentum",
-    "wrench": "force",
-}
+FIELD_ALIASES: dict[str, str] = {}
+
+_TORQUE_D_PATTERN = re.compile(r"^torque_d([0-9]+)$")
+_DEPRECATED_TORQUE_ALIAS_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^tau$"),
+    re.compile(r"^h$"),
+    re.compile(r"^wrench$"),
+    re.compile(r"^dtau(?:[1-9][0-9]*)?$"),
+    re.compile(r"^tau_diff(?:[1-9][0-9]*)?$"),
+    re.compile(r"^torque_rate(?:[1-9][0-9]*)?$"),
+    re.compile(r"^torque_dot(?:[1-9][0-9]*)?$"),
+    re.compile(r"^torque_diff[1-9][0-9]*$"),
+)
+_DEPRECATED_DTYPE_ALIASES: tuple[str, ...] = ("joint",)
+
+
+def torque_derivative_field(order: int) -> str:
+    order_i = int(order)
+    if order_i <= 0:
+        raise ValueError(f"torque_derivative_field: order must be >= 1, got {order_i}.")
+    return f"torque_d{order_i}"
+
+
+def _canonicalize_torque_field(field: str) -> str:
+    if field == "torque":
+        return "torque"
+
+    match = _TORQUE_D_PATTERN.fullmatch(field)
+    if match is not None:
+        order = int(match.group(1))
+        if order >= 1:
+            return torque_derivative_field(order)
+        return field
+
+    return field
+
+
+def _is_deprecated_torque_alias(field: str) -> bool:
+    for pattern in _DEPRECATED_TORQUE_ALIAS_PATTERNS:
+        if pattern.fullmatch(field) is not None:
+            return True
+    return False
 
 
 def jac_field(field: str, *, var: str) -> str:
@@ -84,7 +118,38 @@ def canonical_field_name(field: str) -> str:
     if is_jac_field(f):
         base, var = split_jac_field(f)
         return jac_field(canonical_field_name(base), var=var)
-    return FIELD_ALIASES.get(f, f)
+    if _is_deprecated_torque_alias(f):
+        raise ValueError(
+            "canonical_field_name: deprecated field alias "
+            f"{f!r}. Use canonical field names (e.g. 'torque', 'momentum', 'force', 'torque_d1')."
+        )
+    alias = FIELD_ALIASES.get(f, f)
+    return _canonicalize_torque_field(alias)
+
+
+def canonical_dtype_name(dtype: str) -> str:
+    d = str(dtype).strip()
+    if d == "":
+        raise ValueError("canonical_dtype_name: dtype must be non-empty.")
+    if d in _DEPRECATED_DTYPE_ALIASES:
+        raise ValueError(
+            f"canonical_dtype_name: deprecated dtype alias {d!r}. "
+            f"Use canonical dtype name {DTYPE_COORD!r}."
+        )
+    return d
+
+
+def torque_derivative_order(field: str) -> int | None:
+    field_name = canonical_field_name(str(field))
+    if field_name == "torque":
+        return 0
+    m = _TORQUE_D_PATTERN.fullmatch(field_name)
+    if m is None:
+        return None
+    order = int(m.group(1))
+    if order <= 0:
+        return None
+    return order
 
 
 def make_key(
@@ -97,11 +162,12 @@ def make_key(
     frame: str | None = None,
     rel_frame: str | None = None,
 ) -> StateKey:
+    dtype_name = canonical_dtype_name(str(dtype))
     field_name = canonical_field_name(str(field))
     return StateKey(
         k=int(k),
         owner=OwnerKey(owner_type=str(owner_type), owner_name=str(owner_name)),
-        dtype=str(dtype),
+        dtype=dtype_name,
         field=field_name,
         frame=frame,
         rel_frame=rel_frame,
@@ -135,7 +201,7 @@ def joint_q_key(*, k: int = 0, owner_name: str = DEFAULT_ROBOT_NAME) -> StateKey
         k=int(k),
         owner_type="total_joint",
         owner_name=str(owner_name),
-        dtype=DTYPE_JOINT,
+        dtype=DTYPE_COORD,
         field="q",
     )
 
@@ -150,7 +216,7 @@ def joint_q_jac_key(
         k=int(k),
         owner_type="total_joint",
         owner_name=str(owner_name),
-        dtype=DTYPE_JOINT,
+        dtype=DTYPE_COORD,
         field="q",
         var=str(var),
     )
