@@ -108,6 +108,16 @@ x_star, cost, iters, rnorm, dxnorm, converged = solve_runtime(
 )
 ```
 
+### 実行時に特定 term の重みだけ変更
+
+`compile_problem()` 後に、term index または `expr.name` を指定して重みを変更できます。
+（対象コストは `scalar_weight` / `diag_weight` など `set_weight()` を持つもの）
+
+```python
+runtime.set_cost_weight("tau_traj_regularization", 1e-4)  # expr.name で指定
+# runtime.set_cost_weight(7, 1e-4)  # index 指定も可
+```
+
 ### 最適化後の Expr 値レポート
 
 最適化後に、目的関数(terms)に含まれる residual と、DSLで名前が付いた Expr（例: `ee_pos`, `target_pos`）の値を

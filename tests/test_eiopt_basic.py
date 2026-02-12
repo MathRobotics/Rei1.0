@@ -95,6 +95,65 @@ class TestEiOptBasic(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unknown solver"):
             _ = solve_runtime(runtime, solver="unknown_solver")
 
+    def test_runtime_set_cost_weight_updates_specific_term_and_invalidates_cache(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "keep_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "tune_term", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r0, _J0 = runtime.linearize()
+        self.assertTrue(np.allclose(r0, np.array([2.0, 4.0], dtype=float)))
+
+        idx = runtime.set_cost_weight("tune_term", 9.0)
+        self.assertEqual(idx, 1)
+
+        r1, _J1 = runtime.linearize()
+        self.assertTrue(np.allclose(r1, np.array([2.0, 6.0], dtype=float)))
+
+    def test_runtime_set_cost_weight_rejects_ambiguous_term_name(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [1.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "dup", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "dup", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 2.0},
+                },
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(ValueError, "multiple terms matched"):
+            runtime.set_cost_weight("dup", 3.0)
+
+    def test_runtime_set_cost_weight_rejects_unweighted_cost(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [1.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "plain", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(TypeError, "does not support runtime weight updates"):
+            runtime.set_cost_weight("plain", 3.0)
+
     def test_get_state_expr_reads_cache(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
         pack = VariablePack([q_var])

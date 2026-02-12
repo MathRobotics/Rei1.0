@@ -47,6 +47,11 @@ _IPOPT_OPTIONS = {"max_iter": 1000,
                   "tol": 1e-6, "acceptable_tol": 1e-4, "acceptable_iter": 10,
                   "print_level": 5, "print_timing_statistics": "yes"}
 
+# Optional per-term runtime overrides (key: term expr.name in DSL, value: scalar/diag weight).
+_TERM_WEIGHT_OVERRIDES: dict[str, float] = {
+    # "tau_traj_regularization": 1e-4,
+}
+
 
 def _plot_trajectory(
     *,
@@ -317,6 +322,9 @@ def run_trajectory_dynamics_demo(
         dynamics_fields=("tau",),
     )
     runtime = compile_problem(dsl, build_state=builder.build_state)
+    for term_name, weight in _TERM_WEIGHT_OVERRIDES.items():
+        idx = runtime.set_cost_weight(term_name, weight)
+        print(f"Updated cost weight: term[{idx}] '{term_name}' -> {weight:g}")
 
     x0 = runtime.pack.get().copy()
     x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_runtime(

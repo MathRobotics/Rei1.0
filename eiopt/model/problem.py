@@ -23,6 +23,13 @@ class Problem:
     _last_r: Optional[Array] = None
     _last_J: Optional[Array] = None
 
+    def invalidate_cache(self) -> None:
+        self._last_rev = -1
+        self._last_time_rev = -1
+        self._last_req_sig = 0
+        self._last_r = None
+        self._last_J = None
+
     def _required_sig(self, required) -> int:
         if required is None:
             return 0

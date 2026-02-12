@@ -98,3 +98,59 @@ class ProblemRuntime:
     def cost_value(self, *, required: Iterable[StateKey] | None = None) -> float:
         r_all, _ = self.linearize(required=required)
         return float(r_all @ r_all)
+
+    def _term_display_name(self, index: int) -> str:
+        expr, _cost = self.problem.terms[index]
+        name = getattr(expr, "name", None)
+        if isinstance(name, str) and name:
+            return name
+        return expr.__class__.__name__
+
+    def _resolve_term_index(self, term: int | str) -> int:
+        if isinstance(term, int):
+            idx = int(term)
+            if idx < 0 or idx >= len(self.problem.terms):
+                raise IndexError(
+                    f"set_cost_weight: term index out of range: {idx}. "
+                    f"Expected 0..{len(self.problem.terms) - 1}."
+                )
+            return idx
+
+        term_name = str(term)
+        if term_name == "":
+            raise ValueError("set_cost_weight: term name must be non-empty.")
+
+        matches = [
+            i
+            for i, (expr, _cost) in enumerate(self.problem.terms)
+            if getattr(expr, "name", None) == term_name
+        ]
+        if len(matches) == 0:
+            raise ValueError(f"set_cost_weight: no term found with name={term_name!r}.")
+        if len(matches) > 1:
+            idxs = ", ".join(str(i) for i in matches)
+            raise ValueError(
+                f"set_cost_weight: multiple terms matched name={term_name!r} at indices [{idxs}]. "
+                "Use an explicit term index."
+            )
+        return matches[0]
+
+    def set_cost_weight(self, term: int | str, w: Any) -> int:
+        """Update one term's cost weight and invalidate linearization cache.
+
+        `term` can be either the term index or the term expression name.
+        The target cost must implement `set_weight(w)`.
+        """
+
+        idx = self._resolve_term_index(term)
+        _expr, cost = self.problem.terms[idx]
+        set_weight = getattr(cost, "set_weight", None)
+        if not callable(set_weight):
+            raise TypeError(
+                f"set_cost_weight: term[{idx}] '{self._term_display_name(idx)}' "
+                f"uses cost type '{type(cost).__name__}' which does not support runtime weight updates."
+            )
+
+        set_weight(w)
+        self.problem.invalidate_cache()
+        return idx
