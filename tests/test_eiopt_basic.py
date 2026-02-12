@@ -10,7 +10,7 @@ from eiopt.core.bspline import (
     default_clamped_uniform_knots,
 )
 from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
-from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
+from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_KINEMATICS, DYNAMICS_FIELDS, canonical_field_name, jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt.core.trajectory import TrajectoryMap
 from eiopt.dsl.trajectory import (
@@ -121,7 +121,7 @@ class TestEiOptBasic(unittest.TestCase):
         cache = StateCache(build_state=build_state)
         cache.update_if_needed(pack, time=time, required=[key_val, key_jac])
 
-        expr = GetStateExpr(name="get_y", vars=[q_var], key_value=key_val, key_jac_q=key_jac)
+        expr = GetStateExpr(name="get_y", vars=[q_var], key_value=key_val, key_jacs=[key_jac])
         ctx = RuntimeContext(pack=pack, state=cache, time=time)
 
         y, blocks = expr.eval(ctx)
@@ -159,6 +159,191 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertIn(jac_field("pos", var="q"), fields)
         frames = {k.frame for k in runtime.required}
         self.assertEqual(frames, {"world"})
+
+    def test_get_state_expr_multiple_jac_blocks(self) -> None:
+        p_var = Variable(name="p", x=np.array([0.1, 0.2], dtype=float))
+        q_var = Variable(name="q", x=np.array([1.0, 2.0, 3.0], dtype=float))
+        pack = VariablePack([p_var, q_var])
+        time = TimeGrid.single_time()
+
+        owner = OwnerKey(owner_type="demo", owner_name="thing")
+        key_val = StateKey(k=0, owner=owner, dtype="vec", field="y")
+        key_jac_p = StateKey(k=0, owner=owner, dtype="vec", field="y_J_p")
+        key_jac_q = StateKey(k=0, owner=owner, dtype="vec", field="y_J_q")
+
+        def build_state(_x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            req = set(required) if required is not None else {key_val, key_jac_p, key_jac_q}
+            out: dict[StateKey, object] = {}
+            if key_val in req:
+                out[key_val] = np.array([2.0, -1.0], dtype=float)
+            if key_jac_p in req:
+                out[key_jac_p] = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)
+            if key_jac_q in req:
+                out[key_jac_q] = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 1.0]], dtype=float)
+            return out
+
+        cache = StateCache(build_state=build_state)
+        cache.update_if_needed(pack, time=time, required=[key_val, key_jac_p, key_jac_q])
+
+        expr = GetStateExpr(
+            name="get_y_multi",
+            vars=[p_var, q_var],
+            key_value=key_val,
+            key_jacs=[key_jac_p, key_jac_q],
+        )
+        y, blocks = expr.eval(RuntimeContext(pack=pack, state=cache, time=time))
+
+        self.assertTrue(np.allclose(y, np.array([2.0, -1.0], dtype=float)))
+        self.assertEqual(len(blocks), 2)
+        self.assertTrue(np.allclose(blocks[0], np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)))
+        self.assertTrue(np.allclose(blocks[1], np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 1.0]], dtype=float)))
+
+    def test_get_state_builder_supports_jacs_list(self) -> None:
+        dsl = {
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.0, 0.0]},
+                {"name": "q", "dim": 2, "init": [0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "link",
+                            "owner_name": "end",
+                            "dtype": "kinematics",
+                            "field": "pos",
+                        },
+                        "jacs": [
+                            {"var": "p"},
+                            {"var": "q"},
+                        ],
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        fields = {k.field for k in runtime.required}
+        self.assertIn("pos", fields)
+        self.assertIn(jac_field("pos", var="p"), fields)
+        self.assertIn(jac_field("pos", var="q"), fields)
+
+    def test_get_state_builder_requires_explicit_jac_var_when_multiple_vars(self) -> None:
+        dsl = {
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.0, 0.0]},
+                {"name": "q", "dim": 2, "init": [0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "link",
+                            "owner_name": "end",
+                            "dtype": "kinematics",
+                            "field": "pos",
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "Multiple variables exist"):
+            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+    def test_get_state_builder_canonicalizes_tau_alias(self) -> None:
+        dsl = {
+            "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "tau",
+                        },
+                        "jac": {"var": "q"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        fields = {k.field for k in runtime.required}
+        self.assertIn("torque", fields)
+        self.assertIn("torque_J_q", fields)
+
+    def test_get_state_builder_canonicalizes_dtau_alias(self) -> None:
+        dsl = {
+            "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "dtau",
+                        },
+                        "jac": {"var": "q"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        fields = {k.field for k in runtime.required}
+        self.assertIn("torque_rate", fields)
+        self.assertIn("torque_rate_J_q", fields)
+
+    def test_state_schema_dynamics_field_aliases(self) -> None:
+        self.assertIn("torque", DYNAMICS_FIELDS)
+        self.assertIn("torque_rate", DYNAMICS_FIELDS)
+        self.assertEqual(canonical_field_name("tau"), "torque")
+        self.assertEqual(canonical_field_name("dtau"), "torque_rate")
+        self.assertEqual(canonical_field_name("h"), "momentum")
+        self.assertEqual(canonical_field_name("wrench"), "force")
+        self.assertEqual(canonical_field_name("dtau_J_p"), "torque_rate_J_p")
+
+    def test_stack_get_state_canonicalizes_dtau_alias(self) -> None:
+        dsl = {
+            "time": {"N": 1, "dt": 0.1},
+            "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "stack",
+                        "range": {"k0": 0, "k1": 1},
+                        "inner": {
+                            "type": "get_state",
+                            "key": {
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_DYNAMICS,
+                                "field": "dtau",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        torque_rate_keys = [k for k in runtime.required if k.field == "torque_rate"]
+        torque_rate_jac_keys = [k for k in runtime.required if k.field == "torque_rate_J_p"]
+        self.assertEqual({k.k for k in torque_rate_keys}, {0, 1})
+        self.assertEqual({k.k for k in torque_rate_jac_keys}, {0, 1})
 
     def test_get_var_expr_reads_pack(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
@@ -614,6 +799,132 @@ class TestEiOptBasic(unittest.TestCase):
 
         self.assertTrue(np.allclose(r, r_ref))
         self.assertTrue(np.allclose(J, J_ref))
+
+    def test_time_diff_expr_wrt_time_scales_by_dt(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.5},
+            "variables": [
+                {"name": "q", "dim": 6, "init": [0.0, 0.0, 1.0, 2.0, 3.0, 6.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "time_diff",
+                        "name": "dqdt",
+                        "segment_dim": 2,
+                        "wrt": "time",
+                        "base": {"type": "get_var", "var": "q"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        q = np.array([0.0, 0.0, 1.0, 2.0, 3.0, 6.0], dtype=float).reshape(3, 2)
+        r_ref = ((q[1:, :] - q[:-1, :]) / 0.5).reshape(-1)
+
+        D = np.zeros((4, 6), dtype=float)
+        D[0:2, 0:2] = -2.0 * np.eye(2, dtype=float)
+        D[0:2, 2:4] = 2.0 * np.eye(2, dtype=float)
+        D[2:4, 2:4] = -2.0 * np.eye(2, dtype=float)
+        D[2:4, 4:6] = 2.0 * np.eye(2, dtype=float)
+
+        self.assertTrue(np.allclose(r, r_ref))
+        self.assertTrue(np.allclose(J, D))
+
+    def test_const_repeat_expr_uses_time_steps(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "const_repeat",
+                        "name": "q_max_traj",
+                        "var": "p",
+                        "value": [1.0, -1.0],
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        self.assertTrue(np.allclose(r, np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0], dtype=float)))
+        self.assertEqual(J.shape, (6, 2))
+        self.assertTrue(np.allclose(J, 0.0))
+
+    def test_build_trajectory_maps_with_derivatives_linear_uses_finite_difference(self) -> None:
+        traj_dsl = {
+            "type": "linear",
+            "steps": 3,
+            "q_dim": 1,
+            "linear": {
+                "A": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+            },
+        }
+        maps = build_trajectory_maps_with_derivatives(
+            traj_dsl,
+            max_derivative_order=1,
+            derivative_wrt="time",
+            default_dt=0.2,
+        )
+        self.assertEqual(len(maps), 2)
+        self.assertEqual(maps[0].steps, 3)
+        self.assertEqual(maps[1].steps, 3)
+
+        p = np.array([0.0, 1.0, 3.0], dtype=float)
+        q = (maps[0].A @ p + maps[0].b).reshape(3)
+        dq = (maps[1].A @ p + maps[1].b).reshape(3)
+
+        dq_ref = np.array(
+            [
+                (q[1] - q[0]) / 0.2,
+                (q[2] - q[0]) / 0.4,
+                (q[2] - q[1]) / 0.2,
+            ],
+            dtype=float,
+        )
+        self.assertTrue(np.allclose(dq, dq_ref))
+
+    def test_build_trajectory_maps_with_derivatives_bspline_nonuniform_time_fallback(self) -> None:
+        traj_dsl = {
+            "type": "bspline",
+            "steps": 3,
+            "q_dim": 1,
+            "degree": 1,
+            "num_ctrl_points": 2,
+            "u_samples": [0.0, 0.25, 1.0],
+        }
+        maps = build_trajectory_maps_with_derivatives(
+            traj_dsl,
+            max_derivative_order=1,
+            derivative_wrt="time",
+            default_dt=0.5,
+        )
+        self.assertEqual(len(maps), 2)
+
+        p = np.array([1.0, 5.0], dtype=float)
+        q = (maps[0].A @ p + maps[0].b).reshape(3)
+        dq = (maps[1].A @ p + maps[1].b).reshape(3)
+        dq_ref = np.array(
+            [
+                (q[1] - q[0]) / 0.5,
+                (q[2] - q[0]) / 1.0,
+                (q[2] - q[1]) / 0.5,
+            ],
+            dtype=float,
+        )
+        self.assertTrue(np.allclose(dq, dq_ref))
 
     def test_trajectory_map_q_and_jac(self) -> None:
         A = np.array(

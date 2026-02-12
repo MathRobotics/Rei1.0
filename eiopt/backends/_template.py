@@ -17,6 +17,7 @@ DispatchHandler = Callable[[Array, StateKey, Any], Any]
 class _DispatchEntry:
     handler: DispatchHandler
     state_ref_field: str | None = None
+    jacobian_wrt: str | None = None
 
 
 class BackendDispatchStateBuilder:
@@ -61,6 +62,7 @@ class BackendDispatchStateBuilder:
         field: str,
         handler: DispatchHandler,
         state_ref_field: str | None = None,
+        jacobian_wrt: str | None = None,
     ) -> None:
         route = (str(dtype), str(owner_type), str(field))
         if any(part == "" for part in route):
@@ -69,11 +71,14 @@ class BackendDispatchStateBuilder:
             raise TypeError("BackendDispatchStateBuilder: handler must be callable.")
         if state_ref_field is not None and str(state_ref_field) == "":
             raise ValueError("BackendDispatchStateBuilder: state_ref_field must be non-empty.")
+        if jacobian_wrt is not None and str(jacobian_wrt) == "":
+            raise ValueError("BackendDispatchStateBuilder: jacobian_wrt must be non-empty.")
         if route in self._dispatch:
             raise ValueError(f"BackendDispatchStateBuilder: duplicate handler route: {route}.")
         self._dispatch[route] = _DispatchEntry(
             handler=handler,
             state_ref_field=None if state_ref_field is None else str(state_ref_field),
+            jacobian_wrt=None if jacobian_wrt is None else str(jacobian_wrt),
         )
 
     def register_handlers(
@@ -100,6 +105,7 @@ class BackendDispatchStateBuilder:
         value_handler: DispatchHandler | None = None,
         jac_handler: DispatchHandler | None = None,
         jac_var: str | None = None,
+        jacobian_wrt: str | None = None,
     ) -> tuple[str, str]:
         """Register value/jacobian handlers for one logical field family."""
 
@@ -113,6 +119,9 @@ class BackendDispatchStateBuilder:
         if var == "":
             raise ValueError("BackendDispatchStateBuilder: jac_var must be non-empty.")
         jac_name = jac_field(field_name, var=var)
+        jacobian_wrt_name = var if jacobian_wrt is None else str(jacobian_wrt)
+        if jacobian_wrt_name == "":
+            raise ValueError("BackendDispatchStateBuilder: jacobian_wrt must be non-empty.")
 
         if value_handler is not None:
             self.register_handler(
@@ -129,6 +138,7 @@ class BackendDispatchStateBuilder:
                 field=jac_name,
                 handler=jac_handler,
                 state_ref_field=field_name,
+                jacobian_wrt=jacobian_wrt_name,
             )
         return field_name, jac_name
 

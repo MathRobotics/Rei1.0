@@ -86,22 +86,10 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   var = "p"
 
   [terms.expr.base.b]
-  type = "const"
+  type = "const_repeat"
   var = "p"
   name = "q_max_traj"
-  value = [
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793,
-    3.141592653589793, 3.141592653589793
-  ]
+  value = [3.141592653589793, 3.141592653589793]
 
   [terms.cost]
   type = "scalar_weight"
@@ -116,22 +104,10 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   type = "sub"
 
   [terms.expr.base.a]
-  type = "const"
+  type = "const_repeat"
   var = "p"
   name = "q_min_traj"
-  value = [
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793,
-    -3.141592653589793, -3.141592653589793
-  ]
+  value = [-3.141592653589793, -3.141592653589793]
 
   [terms.expr.base.b]
   type = "get_traj_var"
@@ -197,3 +173,55 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   [terms.cost]
   type = "scalar_weight"
   w = 1e-3
+
+[[terms]]
+  [terms.expr]
+  type = "stack"
+  name = "tau_traj_regularization"
+
+  [terms.expr.range]
+  k0 = 0
+  k1 = 10
+
+  [terms.expr.inner]
+  type = "get_state"
+  name = "tau_k"
+
+  [terms.expr.inner.key]
+  owner_type = "total_joint"
+  owner_name = "robot"
+  dtype = "dynamics"
+  field = "tau"
+
+  [terms.expr.inner.jac]
+  var = "p"
+
+  [terms.cost]
+  type = "scalar_weight"
+  w = 1e-5
+
+[[terms]]
+  [terms.expr]
+  type = "stack"
+  name = "dtau_traj_regularization"
+
+  [terms.expr.range]
+  k0 = 0
+  k1 = 10
+
+  [terms.expr.inner]
+  type = "get_state"
+  name = "dtau_k"
+
+  [terms.expr.inner.key]
+  owner_type = "total_joint"
+  owner_name = "robot"
+  dtype = "dynamics"
+  field = "dtau"
+
+  [terms.expr.inner.jac]
+  var = "p"
+
+  [terms.cost]
+  type = "scalar_weight"
+  w = 1e-7

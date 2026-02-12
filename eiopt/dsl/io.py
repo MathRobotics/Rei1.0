@@ -27,8 +27,6 @@ def _normalize_toml_problem_def(data: dict[str, Any]) -> None:
         names = [str(n) for n in names if n is not None]
         if len(names) == 1:
             default_var = names[0]
-        elif "q" in names:
-            default_var = "q"
 
     terms = data.get("terms")
     if not isinstance(terms, list):

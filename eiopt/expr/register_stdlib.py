@@ -5,6 +5,7 @@ import numpy as np
 from .expr_register import ExprRegister
 from .nodes import (
     ConstantExpr,
+    RepeatConstantExpr,
     GetStateExpr,
     GetVarExpr,
     SubExpr,
@@ -15,7 +16,7 @@ from .nodes import (
     TimeDiffExpr,
 )
 from ..core.state_cache import OwnerKey, StateKey
-from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, jac_field
+from ..core.state_schema import DEFAULT_FRAME, DTYPE_KINEMATICS, canonical_field_name, jac_field
 from ..dsl.trajectory import (
     build_trajectory_map,
     build_trajectory_map_with_derivative,
@@ -28,6 +29,7 @@ from ..dsl.trajectory import (
 
 def register_stdlib(expr_register: ExprRegister) -> None:
     expr_register.register_expr("const", build_const)
+    expr_register.register_expr("const_repeat", build_const_repeat)
     expr_register.register_expr("get_state", build_get_state)
     expr_register.register_expr("get_var", build_get_var)
     expr_register.register_expr("get_traj_var", build_get_traj_var)
@@ -38,11 +40,10 @@ def register_stdlib(expr_register: ExprRegister) -> None:
 
 
 def _default_var_name(ctx, *, preferred: str = "q") -> str:
+    del preferred
     names = [v.name for v in ctx.pack.vars]
     if len(names) == 1:
         return names[0]
-    if preferred in names:
-        return preferred
     raise ValueError(
         "Multiple variables exist; specify the variable explicitly "
         "(e.g. get_var.var='x' or get_state.jac.var='x')."
@@ -63,22 +64,50 @@ def build_const(ctx, dsl):
     return ConstantExpr(name=dsl.get("name", "const"), value=np.asarray(dsl["value"], float))
 
 
+def build_const_repeat(ctx, dsl):
+    repeats_raw = dsl.get("repeats", dsl.get("steps", None))
+    if repeats_raw is None:
+        time = getattr(ctx, "time", None)
+        if time is not None and hasattr(time, "N"):
+            try:
+                repeats_raw = int(time.N) + 1
+            except Exception:
+                repeats_raw = None
+    if repeats_raw is None:
+        raise ValueError("const_repeat: repeats (or steps) is required when time.N is unavailable.")
+
+    try:
+        repeats = int(repeats_raw)
+    except Exception as e:
+        raise ValueError(f"const_repeat: repeats must be an integer, got {repeats_raw!r}.") from e
+    if repeats <= 0:
+        raise ValueError(f"const_repeat: repeats must be > 0, got {repeats}.")
+
+    if "var" in dsl:
+        var_name = str(dsl.get("var", _default_var_name(ctx)))
+        v = next((x for x in ctx.pack.vars if x.name == var_name), None)
+        if v is None:
+            raise ValueError(f"const_repeat: unknown variable: {var_name!r}")
+        return RepeatConstantExpr(
+            name=dsl.get("name", "const_repeat"),
+            value=np.asarray(dsl["value"], float),
+            repeats=repeats,
+            vars=[v],
+        )
+
+    return RepeatConstantExpr(
+        name=dsl.get("name", "const_repeat"),
+        value=np.asarray(dsl["value"], float),
+        repeats=repeats,
+    )
+
+
 def build_get_state(ctx, dsl):
-    jac_dsl = dsl.get("jac", {}) or {}
-    jac_var = jac_dsl.get("var", None)
-    if jac_var is None:
-        jac_var = _default_var_name(ctx)
-    jac_var = str(jac_var)
-
-    q = next((v for v in ctx.pack.vars if v.name == jac_var), None)
-    if q is None:
-        raise ValueError(f"get_state: unknown jac variable: {jac_var!r}")
-
     key_dsl = dsl["key"]
     k = int(key_dsl.get("k", 0))
     owner = OwnerKey(key_dsl["owner_type"], key_dsl["owner_name"])
     dtype = str(key_dsl["dtype"])
-    field = key_dsl["field"]
+    field = canonical_field_name(str(key_dsl["field"]))
     frame = key_dsl.get("frame", None)
     rel_frame = key_dsl.get("rel_frame", None)
 
@@ -90,14 +119,52 @@ def build_get_state(ctx, dsl):
 
     key_value = StateKey(k=k, owner=owner, dtype=dtype, field=field, frame=frame, rel_frame=rel_frame)
 
-    jac_field_name = jac_dsl.get("field", jac_field(field, var=jac_var))
-    key_jac = StateKey(k=k, owner=owner, dtype=dtype, field=jac_field_name, frame=frame, rel_frame=rel_frame)
+    jac_entries: list[dict] = []
+    jac_dsl = dsl.get("jac", None)
+    if jac_dsl is not None:
+        if not isinstance(jac_dsl, dict):
+            raise ValueError("get_state: jac must be a dict when provided.")
+        jac_entries.append(dict(jac_dsl))
+
+    jacs_dsl = dsl.get("jacs", None)
+    if jacs_dsl is not None:
+        if not isinstance(jacs_dsl, list):
+            raise ValueError("get_state: jacs must be a list[dict] when provided.")
+        for i, item in enumerate(jacs_dsl):
+            if not isinstance(item, dict):
+                raise ValueError(f"get_state: jacs[{i}] must be a dict, got {type(item).__name__}.")
+            jac_entries.append(dict(item))
+
+    if len(jac_entries) == 0:
+        jac_entries = [{}]
+
+    vars_out = []
+    key_jacs = []
+    seen_var_names = set()
+    for jac_entry in jac_entries:
+        jac_var = jac_entry.get("var", None)
+        if jac_var is None:
+            jac_var = _default_var_name(ctx)
+        jac_var = str(jac_var)
+        if jac_var in seen_var_names:
+            raise ValueError(f"get_state: duplicate jac var {jac_var!r}.")
+        seen_var_names.add(jac_var)
+
+        v = next((x for x in ctx.pack.vars if x.name == jac_var), None)
+        if v is None:
+            raise ValueError(f"get_state: unknown jac variable: {jac_var!r}")
+
+        jac_field_name_raw = jac_entry.get("field", jac_field(field, var=jac_var))
+        jac_field_name = canonical_field_name(str(jac_field_name_raw))
+        key_jac = StateKey(k=k, owner=owner, dtype=dtype, field=jac_field_name, frame=frame, rel_frame=rel_frame)
+        vars_out.append(v)
+        key_jacs.append(key_jac)
 
     return GetStateExpr(
         name=dsl.get("name", "get_state"),
-        vars=[q],
+        vars=vars_out,
         key_value=key_value,
-        key_jac_q=key_jac,
+        key_jacs=key_jacs,
     )
 
 
@@ -267,6 +334,7 @@ def build_stack(ctx, dsl):
     parts = []
     for k in range(k0, k1 + 1):
         inner_k = dict(inner)
+        inner_k["k"] = k
         inner_k.setdefault("key", dict(inner.get("key", {})))
         inner_k["key"]["k"] = k
         parts.append(ctx.build_expr(inner_k))
@@ -289,8 +357,44 @@ def build_time_diff(ctx, dsl):
         raise ValueError(f"time_diff: segment_dim must be an integer, got {segment_dim_raw!r}.") from e
     if segment_dim <= 0:
         raise ValueError(f"time_diff: segment_dim must be > 0, got {segment_dim}.")
+
+    wrt = str(dsl.get("wrt", dsl.get("derivative_wrt", "index"))).strip().lower()
+    divide_by_dt = bool(dsl.get("divide_by_dt", False))
+
+    use_time_dt = False
+    if wrt in ("time", "t"):
+        use_time_dt = True
+    elif wrt in ("index", "step", "k", "sample"):
+        use_time_dt = False
+    else:
+        raise ValueError(
+            "time_diff: wrt must be one of 'index', 'step', 'k', 'sample', 'time', 't'. "
+            f"Got {wrt!r}."
+        )
+    if divide_by_dt:
+        use_time_dt = True
+
+    dt_raw = dsl.get("dt", None)
+    dt = None
+    if dt_raw is not None:
+        try:
+            dt = float(dt_raw)
+        except Exception as e:
+            raise ValueError(f"time_diff: dt must be a float, got {dt_raw!r}.") from e
+        if dt <= 0.0:
+            raise ValueError(f"time_diff: dt must be > 0, got {dt}.")
+
+    scale_raw = dsl.get("scale", 1.0)
+    try:
+        scale = float(scale_raw)
+    except Exception as e:
+        raise ValueError(f"time_diff: scale must be a float, got {scale_raw!r}.") from e
+
     return TimeDiffExpr(
         name=dsl.get("name", "time_diff"),
         base=base,
         segment_dim=segment_dim,
+        scale=scale,
+        use_time_dt=use_time_dt,
+        dt=dt,
     )

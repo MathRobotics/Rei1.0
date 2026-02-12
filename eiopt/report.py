@@ -13,6 +13,7 @@ Array = np.ndarray
 
 _DEFAULT_NAME_BLACKLIST = {
     "const",
+    "const_repeat",
     "get_state",
     "get_var",
     "get_traj_var",

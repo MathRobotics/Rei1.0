@@ -173,6 +173,29 @@ type = "l2"
 
 Python 側は `eiopt.core.state_schema.jac_field()` が使えます。
 
+`get_state` は単一 Jacobian (`expr.jac`) に加え、複数 Jacobian (`expr.jacs`) をサポートします。
+複数変数がある場合は `var` を明示してください。
+
+```toml
+[terms.expr]
+type = "get_state"
+
+[terms.expr.key]
+k = 0
+owner_type = "link"
+owner_name = "ee"
+dtype = "kinematics"
+field = "pos"
+
+[[terms.expr.jacs]]
+var = "p"
+
+[[terms.expr.jacs]]
+var = "q"
+```
+
+`field="tau"` は `torque` として正規化されます（`tau_J_p` も `torque_J_p` に正規化）。
+
 ## 決定変数の取得（get_var）
 
 `q` などの **決定変数そのもの** は backend の状態計算ではなく、`get_var` Expr で `VariablePack` から直接読み出すのを推奨します。
@@ -181,7 +204,7 @@ Python 側は `eiopt.core.state_schema.jac_field()` が使えます。
 ```toml
 [terms.expr]
 type = "get_var"
-var = "q" # 省略可（変数が1つなら自動）
+var = "q" # 変数が1つのときのみ省略可
 ```
 
 軌道最適化などで `q` を時系列にスタックしている場合は、`k` を指定すると `q(k)` を返し、ヤコビアンは選択行列になります。
@@ -203,6 +226,7 @@ var = "q" # 省略可（変数が1つなら自動）
 type = "time_diff"
 name = "traj_smooth"
 segment_dim = 2
+wrt = "time" # "index"(既定) | "time"
 
 [terms.expr.base]
 type = "get_traj_var"
@@ -214,6 +238,15 @@ type = "scalar_weight"
 w = 1e-2
 ```
 
+境界や関節上限のような時系列定数は `const_repeat` で簡潔に書けます。
+
+```toml
+[terms.expr.base.b]
+type = "const_repeat"
+var = "p"
+value = [3.141592653589793, 3.141592653589793] # repeats は既定で time.N+1
+```
+
 この項は関節軌道 `q` を滑らかにしますが、`ee_pos` の軌道を直接滑らかにしたい場合は
 `get_state(pos)` を `stack` して `time_diff`（必要なら2回）をかけた項も追加してください。
 
@@ -223,8 +256,17 @@ RoboKots 向けには、決定変数を軌道パラメータ `p` とし、`Traje
 `q(k)` と `dq/dp` を与える `KotsTrajectoryStateBuilder` が使えます。
 
 - `StateKey.field="pos_J_p"` のようなヤコビアン要求に対して、内部で
-  `J_state_p = J_state_q @ (dq/dp)` を適用します。
+  `J_state_p = J_state_state @ (dstate/dp)` を適用します。
 - `StateKey.k`（時刻インデックス）ごとに `q(k)` を構成して kinematics を更新します。
+- `KotsTrajectoryStateBuilder` は既定で `torque/torque_rate/momentum/force` を登録します。
+  必要に応じて `dynamics_fields=(...)` で対象 field を絞る/追加できます。
+  Kots 側は `state_info/jacobian` が返せる field をそのまま登録でき、`tau/dtau/h/wrench` などの別名も
+  `torque/torque_rate/momentum/force` に正規化されます。
+  （RoboKots への問い合わせ時は `torque_rate -> torque_diff1` へ自動変換します）
+  `torque_rate`（`dtau`）を使う場合は RoboKots モデル次数が `order >= 4` 必須です。
+  Pinocchio 側は標準で `torque`, `momentum`, `force` をサポートし、追加分は
+  `dynamics_custom_handlers` で登録できます。
+- `trajectory_derivative_maps` を渡すと、モデル次数に応じた `q, dq, ddq...` を内部状態に展開できます。
 
 軌道近似は DSL の `[trajectory]` で指定できます。
 
@@ -241,14 +283,29 @@ num_ctrl_points = 6
 ```python
 from eiopt import compile_problem
 from eiopt.backends.kots import KotsTrajectoryStateBuilder
-from eiopt.dsl import build_trajectory_map, default_steps_from_time
+from eiopt.dsl import build_trajectory_map, build_trajectory_maps_with_derivatives, default_steps_from_time
 
 traj = build_trajectory_map(
     dsl["trajectory"],
     default_steps=default_steps_from_time(dsl),
     default_q_dim=int(kots.dof()),
 )
-builder = KotsTrajectoryStateBuilder(kots, data, trajectory_map=traj, p_var="p")
+traj_maps = build_trajectory_maps_with_derivatives(
+    dsl["trajectory"],
+    max_derivative_order=max(0, int(kots.order()) - 1),
+    derivative_wrt="time",
+    default_steps=traj.steps,
+    default_q_dim=traj.q_dim,
+    default_dt=float(dsl["time"]["dt"]),
+)
+builder = KotsTrajectoryStateBuilder(
+    kots,
+    data,
+    trajectory_map=traj,
+    trajectory_derivative_maps={i: m for i, m in enumerate(traj_maps)},
+    p_var="p",
+    dynamics_fields=("tau", "dtau"),
+)
 runtime = compile_problem(dsl, build_state=builder.build_state)
 ```
 

@@ -15,18 +15,27 @@ class GetStateExpr:
     name: str
     vars: Sequence[Variable]
     key_value: StateKey
-    key_jac_q: StateKey
+    key_jacs: Sequence[StateKey]
 
     def deps(self):
-        return [self.key_value, self.key_jac_q]
+        return [self.key_value, *self.key_jacs]
 
     def eval(self, ctx: RuntimeContext):
         sc = ctx.state  # StateCache-like
         y = np.asarray(sc.get(self.key_value), dtype=float).reshape(-1)
-        J = np.asarray(sc.get(self.key_jac_q), dtype=float)
-        if J.shape != (y.size, self.vars[0].dim()):
-            raise ValueError(f"{self.name}: J shape mismatch: {J.shape} vs {(y.size, self.vars[0].dim())}")
-        return y, [J]
+
+        if len(self.vars) != len(self.key_jacs):
+            raise ValueError(
+                f"{self.name}: internal mismatch len(vars)={len(self.vars)} vs len(key_jacs)={len(self.key_jacs)}."
+            )
+
+        blocks = []
+        for v, key_jac in zip(self.vars, self.key_jacs):
+            J = np.asarray(sc.get(key_jac), dtype=float)
+            if J.shape != (y.size, v.dim()):
+                raise ValueError(f"{self.name}: J shape mismatch for var '{v.name}': {J.shape} vs {(y.size, v.dim())}")
+            blocks.append(J)
+        return y, blocks
 
 
 @dataclass
@@ -191,6 +200,9 @@ class TimeDiffExpr:
     name: str
     base: Expr
     segment_dim: int
+    scale: float = 1.0
+    use_time_dt: bool = False
+    dt: float | None = None
 
     @property
     def vars(self):
@@ -216,7 +228,23 @@ class TimeDiffExpr:
             raise ValueError(f"{self.name}: need at least 2 steps, got {steps}.")
 
         y2 = y.reshape(steps, seg)
-        r = (y2[1:, :] - y2[:-1, :]).reshape(-1)
+
+        scale = float(self.scale)
+        if self.use_time_dt:
+            dt = self.dt
+            if dt is None:
+                time = getattr(ctx, "time", None)
+                if time is None or not hasattr(time, "dt"):
+                    raise ValueError(f"{self.name}: wrt='time' requires time.dt in context or explicit dt in DSL.")
+                try:
+                    dt = float(time.dt)
+                except Exception as e:
+                    raise ValueError(f"{self.name}: invalid time.dt in context: {getattr(time, 'dt', None)!r}") from e
+            if dt <= 0.0:
+                raise ValueError(f"{self.name}: dt must be > 0 for wrt='time', got {dt}.")
+            scale = scale / float(dt)
+
+        r = scale * (y2[1:, :] - y2[:-1, :]).reshape(-1)
 
         blocks2 = []
         for B in blocks:
@@ -226,7 +254,7 @@ class TimeDiffExpr:
                     f"{self.name}: block row mismatch. base size={y.size}, block shape={Bm.shape}."
                 )
             B3 = Bm.reshape(steps, seg, Bm.shape[1])
-            Bd = (B3[1:, :, :] - B3[:-1, :, :]).reshape((steps - 1) * seg, Bm.shape[1])
+            Bd = scale * (B3[1:, :, :] - B3[:-1, :, :]).reshape((steps - 1) * seg, Bm.shape[1])
             blocks2.append(Bd)
         return r, blocks2
 
@@ -242,6 +270,29 @@ class ConstantExpr:
 
     def eval(self, ctx: RuntimeContext):
         y = np.asarray(self.value, dtype=float).reshape(-1)
+        blocks = [np.zeros((y.size, v.dim()), dtype=float) for v in self.vars]
+        return y, blocks
+
+
+@dataclass
+class RepeatConstantExpr:
+    """Repeat a constant segment vector along the time axis."""
+
+    name: str
+    value: np.ndarray
+    repeats: int
+    vars: Sequence[Variable] = ()
+
+    def deps(self):
+        return []
+
+    def eval(self, ctx: RuntimeContext):
+        del ctx
+        base = np.asarray(self.value, dtype=float).reshape(-1)
+        repeats = int(self.repeats)
+        if repeats <= 0:
+            raise ValueError(f"{self.name}: repeats must be > 0, got {repeats}.")
+        y = np.tile(base, repeats)
         blocks = [np.zeros((y.size, v.dim()), dtype=float) for v in self.vars]
         return y, blocks
 

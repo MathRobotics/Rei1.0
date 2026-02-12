@@ -30,12 +30,13 @@ from eiopt.dsl.dsl_ops import find_var_dsl
 from eiopt.dsl.trajectory import (
     build_trajectory_map,
     build_trajectory_map_with_derivative,
+    build_trajectory_maps_with_derivatives,
     default_steps_from_time,
 )
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
-_ORDER = 3
+_ORDER = 4
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos_dq.toml"
 
 # Solver selection (edit these in code)
@@ -172,6 +173,22 @@ def _infer_model_dof(model) -> int | None:
     return None
 
 
+def _infer_model_order(model) -> int:
+    order_fn = getattr(model, "order", None)
+    if callable(order_fn):
+        try:
+            return max(1, int(order_fn()))
+        except Exception:
+            pass
+    order_attr = getattr(model, "order_", None)
+    if order_attr is None:
+        return 1
+    try:
+        return max(1, int(order_attr))
+    except Exception:
+        return 1
+
+
 def _resolve_dt(dsl: dict) -> float:
     time_dsl = dsl.get("time", {})
     if isinstance(time_dsl, dict) and "dt" in time_dsl:
@@ -235,6 +252,17 @@ def run_trajectory_dq_demo(
         default_steps=default_steps_from_time(dsl),
         default_q_dim=_infer_model_dof(kots),
     )
+    dt = _resolve_dt(dsl)
+    model_order = _infer_model_order(kots)
+    traj_maps = build_trajectory_maps_with_derivatives(
+        traj_dsl,
+        max_derivative_order=max(0, model_order - 1),
+        derivative_wrt="time",
+        default_steps=traj_map.steps,
+        default_q_dim=traj_map.q_dim,
+        default_dt=dt,
+    )
+    traj_maps_by_order = {i: m for i, m in enumerate(traj_maps)}
 
     p_var_dsl = find_var_dsl(dsl, name=p_var)
     if p_var_dsl is None:
@@ -249,7 +277,9 @@ def run_trajectory_dq_demo(
         kots,
         data,
         trajectory_map=traj_map,
+        trajectory_derivative_maps=traj_maps_by_order,
         p_var=p_var,
+        dynamics_fields=("tau", "dtau"),
     )
     runtime = compile_problem(dsl, build_state=builder.build_state)
 
@@ -270,7 +300,6 @@ def run_trajectory_dq_demo(
     print("\tFinal step norm:", _dxnorm)
     print("\tConverged:", _converged)
 
-    dt = _resolve_dt(dsl)
     steps = int(traj_map.steps)
     q_opt = np.vstack([traj_map.q_at(x_star, k) for k in range(steps)])
     qdot_opt = _analytic_joint_velocity(

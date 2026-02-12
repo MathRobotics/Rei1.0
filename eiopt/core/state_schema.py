@@ -40,9 +40,17 @@ KIN_FIELDS: Tuple[str, ...] = FRAME_FIELDS
 # Dynamics-like fields (minimal set; backends may extend)
 MOMENTUM_FIELDS: Tuple[str, ...] = ("momentum",)
 FORCE_FIELDS: Tuple[str, ...] = ("force",)
-TORQUE_FIELDS: Tuple[str, ...] = ("torque",)
+TORQUE_FIELDS: Tuple[str, ...] = ("torque", "torque_rate")
 
 DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
+
+FIELD_ALIASES: dict[str, str] = {
+    "tau": "torque",
+    "dtau": "torque_rate",
+    "torque_dot": "torque_rate",
+    "h": "momentum",
+    "wrench": "force",
+}
 
 
 def jac_field(field: str, *, var: str) -> str:
@@ -69,6 +77,14 @@ def split_jac_field(field: str) -> tuple[str, str]:
     return base, var
 
 
+def canonical_field_name(field: str) -> str:
+    f = str(field)
+    if is_jac_field(f):
+        base, var = split_jac_field(f)
+        return jac_field(canonical_field_name(base), var=var)
+    return FIELD_ALIASES.get(f, f)
+
+
 def make_key(
     *,
     k: int,
@@ -79,11 +95,12 @@ def make_key(
     frame: str | None = None,
     rel_frame: str | None = None,
 ) -> StateKey:
+    field_name = canonical_field_name(str(field))
     return StateKey(
         k=int(k),
         owner=OwnerKey(owner_type=str(owner_type), owner_name=str(owner_name)),
         dtype=str(dtype),
-        field=str(field),
+        field=field_name,
         frame=frame,
         rel_frame=rel_frame,
     )

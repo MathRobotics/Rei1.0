@@ -108,6 +108,79 @@ def infer_bspline_q_dim_from_var(traj_dsl: Mapping[str, Any], *, var_dim: int) -
     return q_dim if q_dim > 0 else None
 
 
+def _first_derivative_operator(*, steps: int, step_size: float) -> np.ndarray:
+    """Finite-difference derivative operator with edge one-sided stencils.
+
+    Returns matrix ``G`` such that ``dq/dx ~= G @ q`` for a single scalar trajectory.
+    """
+
+    steps = int(steps)
+    h = float(step_size)
+    if steps < 2:
+        raise ValueError(f"_first_derivative_operator: steps must be >= 2, got {steps}.")
+    if h <= 0.0:
+        raise ValueError(f"_first_derivative_operator: step_size must be > 0, got {h}.")
+
+    G = np.zeros((steps, steps), dtype=float)
+    if steps == 2:
+        G[0, 0] = -1.0 / h
+        G[0, 1] = 1.0 / h
+        G[1, 0] = -1.0 / h
+        G[1, 1] = 1.0 / h
+        return G
+
+    G[0, 0] = -1.0 / h
+    G[0, 1] = 1.0 / h
+    G[-1, -2] = -1.0 / h
+    G[-1, -1] = 1.0 / h
+
+    c = 0.5 / h
+    for i in range(1, steps - 1):
+        G[i, i - 1] = -c
+        G[i, i + 1] = c
+    return G
+
+
+def _finite_difference_maps(
+    base: TrajectoryMap,
+    *,
+    max_derivative_order: int,
+    step_size: float,
+) -> list[TrajectoryMap]:
+    """Approximate derivative trajectory maps via finite-difference operators."""
+
+    max_order = int(max_derivative_order)
+    if max_order < 0:
+        raise ValueError(f"_finite_difference_maps: max_derivative_order must be >= 0, got {max_order}.")
+    if max_order == 0:
+        return [base]
+
+    G = _first_derivative_operator(steps=int(base.steps), step_size=float(step_size))
+    Iq = np.eye(int(base.q_dim), dtype=float)
+
+    maps = [base]
+    G_power = np.eye(int(base.steps), dtype=float)
+    for _order in range(1, max_order + 1):
+        G_power = G @ G_power
+        D = np.kron(G_power, Iq)
+        maps.append(
+            TrajectoryMap(
+                A=D @ base.A,
+                b=D @ base.b,
+                steps=int(base.steps),
+                q_dim=int(base.q_dim),
+            )
+        )
+    return maps
+
+
+def _is_uniform_spacing(x: np.ndarray, *, atol: float = 1e-10, rtol: float = 1e-9) -> bool:
+    if x.size < 3:
+        return True
+    d = np.diff(x)
+    return bool(np.allclose(d, d[0], atol=atol, rtol=rtol))
+
+
 def build_trajectory_map(
     traj_dsl: Mapping[str, Any],
     *,
@@ -290,8 +363,15 @@ def build_trajectory_maps_with_derivatives(
     """Build a ``TrajectoryMap`` for trajectory derivatives.
 
     Returns ``maps`` where ``maps[r]`` is the map for derivative order ``r`` with
-    ``r = 0..max_derivative_order``. For non-zero derivatives, currently only
-    ``type='bspline'`` is supported.
+    ``r = 0..max_derivative_order``.
+
+    - For ``type='bspline'``:
+      - ``derivative_wrt in {'u','param','parameter'}`` uses analytic derivatives.
+      - ``derivative_wrt='time'`` uses analytic derivatives when parameter samples are
+        uniformly spaced in time; otherwise it falls back to finite differences on
+        sampled trajectory values.
+    - For non-bspline types, derivatives are finite-difference approximations on the
+      sampled trajectory values.
     """
 
     try:
@@ -315,19 +395,41 @@ def build_trajectory_maps_with_derivatives(
     if typ == "":
         raise ValueError("build_trajectory_maps_with_derivatives: trajectory.type is required.")
 
+    base_map = build_trajectory_map(
+        traj_dsl,
+        default_steps=default_steps,
+        default_q_dim=default_q_dim,
+    )
     if max_order == 0:
-        return [
-            build_trajectory_map(
-                traj_dsl,
-                default_steps=default_steps,
-                default_q_dim=default_q_dim,
-            )
-        ]
+        return [base_map]
 
-    if typ != "bspline":
+    wrt = str(derivative_wrt).strip().lower()
+    if wrt in ("u", "param", "parameter"):
+        fd_step_size = 1.0
+    elif wrt == "time":
+        if default_dt is None:
+            raise ValueError(
+                "build_trajectory_maps_with_derivatives: default_dt is required for derivative_wrt='time'."
+            )
+        fd_step_size = float(default_dt)
+        if fd_step_size <= 0.0:
+            raise ValueError(
+                "build_trajectory_maps_with_derivatives: default_dt must be > 0 for derivative_wrt='time'. "
+                f"Got {fd_step_size}."
+            )
+    else:
         raise ValueError(
-            "build_trajectory_maps_with_derivatives: analytic derivative is currently supported "
-            f"only for trajectory.type='bspline' (got {typ!r})."
+            "build_trajectory_maps_with_derivatives: derivative_wrt must be one of "
+            "'u', 'param', 'parameter', 'time'. "
+            f"Got {derivative_wrt!r}."
+        )
+
+    # Non-bspline types: finite-difference approximation on sampled trajectory values.
+    if typ != "bspline":
+        return _finite_difference_maps(
+            base_map,
+            max_derivative_order=max_order,
+            step_size=fd_step_size,
         )
 
     steps = resolve_optional_positive_int(
@@ -364,69 +466,70 @@ def build_trajectory_maps_with_derivatives(
     knot_vector = None if knot_vector_raw is None else np.asarray(knot_vector_raw, dtype=float).reshape(-1)
     u_samples = None if u_samples_raw is None else np.asarray(u_samples_raw, dtype=float).reshape(-1)
 
-    wrt = str(derivative_wrt).strip().lower()
     if wrt in ("u", "param", "parameter"):
         parameter_scale = 1.0
-    elif wrt == "time":
-        if default_dt is None:
-            raise ValueError(
-                "build_trajectory_maps_with_derivatives: default_dt is required for derivative_wrt='time'."
-            )
-        dt = float(default_dt)
-        if dt <= 0.0:
-            raise ValueError(
-                "build_trajectory_maps_with_derivatives: default_dt must be > 0 for derivative_wrt='time'. "
-                f"Got {dt}."
-            )
-        if int(steps) <= 1:
-            raise ValueError(
-                "build_trajectory_maps_with_derivatives: steps must be >= 2 for derivative_wrt='time'."
-            )
-
-        if knot_vector is None:
-            knots = default_clamped_uniform_knots(
-                num_ctrl_points=num_ctrl_points,
-                degree=degree,
-            )
-        else:
-            knots = np.asarray(knot_vector, dtype=float).reshape(-1)
-
-        u_min = float(knots[degree])
-        u_max = float(knots[num_ctrl_points])
-        if u_max <= u_min:
-            raise ValueError(
-                "build_trajectory_maps_with_derivatives: invalid bspline knot domain for time scaling."
-            )
-        u_span = float(u_max - u_min)
-
-        if u_samples is not None:
-            if u_samples.size != int(steps):
-                raise ValueError(
-                    "build_trajectory_maps_with_derivatives: u_samples size mismatch. "
-                    f"Expected {steps}, got {u_samples.size}."
-                )
-            if u_samples.size >= 2:
-                du = np.diff(u_samples)
-                if not np.allclose(du, du[0], atol=1e-10, rtol=1e-9):
-                    raise ValueError(
-                        "build_trajectory_maps_with_derivatives: derivative_wrt='time' currently requires "
-                        "uniformly spaced u_samples."
-                    )
-                u_span = float(u_samples[-1] - u_samples[0])
-
-        horizon = float((int(steps) - 1) * dt)
-        if horizon <= 0.0:
-            raise ValueError(
-                "build_trajectory_maps_with_derivatives: invalid time horizon for derivative_wrt='time'."
-            )
-        parameter_scale = u_span / horizon
-    else:
-        raise ValueError(
-            "build_trajectory_maps_with_derivatives: derivative_wrt must be one of "
-            "'u', 'param', 'parameter', 'time'. "
-            f"Got {derivative_wrt!r}."
+        return TrajectoryMap.from_bspline_derivatives(
+            steps=steps,
+            q_dim=q_dim,
+            degree=degree,
+            num_ctrl_points=num_ctrl_points,
+            knot_vector=knot_vector,
+            u_samples=u_samples,
+            max_derivative_order=max_order,
+            parameter_scale=parameter_scale,
         )
 
+    # wrt == "time" reaches here.
+    if int(steps) <= 1:
+        raise ValueError(
+            "build_trajectory_maps_with_derivatives: steps must be >= 2 for derivative_wrt='time'."
+        )
+
+    dt = float(fd_step_size)
+    if dt <= 0.0:
+        raise ValueError(
+            "build_trajectory_maps_with_derivatives: default_dt must be > 0 for derivative_wrt='time'. "
+            f"Got {dt}."
+        )
+
+    if knot_vector is None:
+        knots = default_clamped_uniform_knots(
+            num_ctrl_points=num_ctrl_points,
+            degree=degree,
+        )
+    else:
+        knots = np.asarray(knot_vector, dtype=float).reshape(-1)
+
+    u_min = float(knots[degree])
+    u_max = float(knots[num_ctrl_points])
+    if u_max <= u_min:
+        raise ValueError(
+            "build_trajectory_maps_with_derivatives: invalid bspline knot domain for time scaling."
+        )
+    u_span = float(u_max - u_min)
+
+    # If parameter samples are non-uniform, chain-rule scaling is not globally constant.
+    # Fall back to finite-difference derivative maps on sampled q(t).
+    if u_samples is not None:
+        if u_samples.size != int(steps):
+            raise ValueError(
+                "build_trajectory_maps_with_derivatives: u_samples size mismatch. "
+                f"Expected {steps}, got {u_samples.size}."
+            )
+        if not _is_uniform_spacing(u_samples):
+            return _finite_difference_maps(
+                base_map,
+                max_derivative_order=max_order,
+                step_size=dt,
+            )
+        u_span = float(u_samples[-1] - u_samples[0])
+
+    horizon = float((int(steps) - 1) * dt)
+    if horizon <= 0.0:
+        raise ValueError(
+            "build_trajectory_maps_with_derivatives: invalid time horizon for derivative_wrt='time'."
+        )
+    parameter_scale = u_span / horizon
     return TrajectoryMap.from_bspline_derivatives(
         steps=steps,
         q_dim=q_dim,

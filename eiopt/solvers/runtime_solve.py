@@ -251,6 +251,11 @@ def solve_runtime(
     max_iters: int = 200,
     tol_r: float = 1e-10,
     tol_dx: float = 1e-12,
+    gn_damping: float = 1e-8,
+    gn_line_search: bool = True,
+    gn_ls_beta: float = 0.5,
+    gn_ls_min_step: float = 1e-8,
+    gn_ls_max_iters: int = 12,
     tol: float | None = None,
     on_iter: IterCallback | None = None,
     scipy_method: str = "L-BFGS-B",
@@ -269,6 +274,11 @@ def solve_runtime(
             required=required,
             tol_r=float(tol_r),
             tol_dx=float(tol_dx),
+            damping=float(gn_damping),
+            line_search=bool(gn_line_search),
+            ls_beta=float(gn_ls_beta),
+            ls_min_step=float(gn_ls_min_step),
+            ls_max_iters=int(gn_ls_max_iters),
             on_iter=on_iter,
         )
 
