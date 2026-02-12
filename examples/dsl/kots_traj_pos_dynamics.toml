@@ -30,7 +30,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   k = 0
   owner_type = "total_joint"
   owner_name = "robot"
-  dtype = "joint"
+  dtype = "coord"
   field = "q"
 
   [terms.expr.a.jac]
@@ -62,7 +62,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   k = 10
   owner_type = "total_joint"
   owner_name = "robot"
-  dtype = "joint"
+  dtype = "coord"
   field = "q"
 
   [terms.expr.a.jac]
@@ -207,7 +207,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 [[terms]]
   [terms.expr]
   type = "stack"
-  name = "tau_traj_regularization"
+  name = "torque_traj_regularization"
 
   [terms.expr.range]
   k0 = 0
@@ -215,13 +215,13 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
   [terms.expr.inner]
   type = "get_state"
-  name = "tau_k"
+  name = "torque_k"
 
   [terms.expr.inner.key]
   owner_type = "total_joint"
   owner_name = "robot"
   dtype = "dynamics"
-  field = "tau"
+  field = "torque"
 
   [terms.expr.inner.jac]
   var = "p"
@@ -233,7 +233,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 [[terms]]
   [terms.expr]
   type = "stack"
-  name = "dtau_traj_regularization"
+  name = "torque_d1_traj_regularization"
 
   [terms.expr.range]
   k0 = 0
@@ -241,13 +241,39 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
   [terms.expr.inner]
   type = "get_state"
-  name = "dtau_k"
+  name = "torque_d1_k"
 
   [terms.expr.inner.key]
   owner_type = "total_joint"
   owner_name = "robot"
   dtype = "dynamics"
-  field = "tau_diff"
+  field = "torque_d1"
+
+  [terms.expr.inner.jac]
+  var = "p"
+
+  [terms.cost]
+  type = "scalar_weight"
+  w = 1e-5
+
+[[terms]]
+  [terms.expr]
+  type = "stack"
+  name = "torque_d2_traj_regularization"
+
+  [terms.expr.range]
+  k0 = 0
+  k1 = 10
+
+  [terms.expr.inner]
+  type = "get_state"
+  name = "torque_d2_k"
+
+  [terms.expr.inner.key]
+  owner_type = "total_joint"
+  owner_name = "robot"
+  dtype = "dynamics"
+  field = "torque_d2"
 
   [terms.expr.inner.jac]
   var = "p"

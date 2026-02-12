@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_JOINT, make_jac_key, make_key
+from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, make_jac_key, make_key
 from eiopt.core.trajectory import TrajectoryMap
 
 
@@ -94,8 +94,10 @@ class _FakeKotsModel:
 
         if field == "torque":
             return q + 2.0 * dq + 3.0 * ddq
-        if field in ("torque_rate", "torque_diff1"):
+        if field in ("torque_d1", "torque_diff1"):
             return dq + 4.0 * ddq
+        if field in ("torque_d2", "torque_diff2"):
+            return ddq
         raise ValueError(f"Unsupported field: {field!r}")
 
     def jacobian(self, state_ref):
@@ -109,11 +111,19 @@ class _FakeKotsModel:
                 ],
                 dtype=float,
             )
-        if field in ("torque_rate", "torque_diff1"):
+        if field in ("torque_d1", "torque_diff1"):
             return np.array(
                 [
                     [0.0, 1.0, 4.0, 0.0, 0.0, 0.0],
                     [0.0, 0.0, 0.0, 0.0, 1.0, 4.0],
+                ],
+                dtype=float,
+            )
+        if field in ("torque_d2", "torque_diff2"):
+            return np.array(
+                [
+                    [0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
                 ],
                 dtype=float,
             )
@@ -182,6 +192,12 @@ def _traj_map_from_rows(rows: list[list[float]]) -> TrajectoryMap:
 
 
 class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
+    def test_kots_state_field_name_maps_torque_derivative_orders(self) -> None:
+        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_diff1")
+        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_diff2")
+        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+            _ = _kots_mod.KotsStateBuilder._state_field_name("tau_diff2")
+
     def test_compile_kots_trajectory_problem_builds_runtime_bundle(self) -> None:
         model = _FakeKotsModel()
         dsl = {
@@ -213,7 +229,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             dsl,
             model=model,
             data={},
-            dynamics_fields=("tau",),
+            dynamics_fields=("torque",),
         )
 
         self.assertEqual(compiled.p_var, "p")
@@ -228,6 +244,51 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         r, J = compiled.runtime.linearize()
         self.assertTrue(np.allclose(r, np.array([0.0, 0.0], dtype=float)))
         self.assertTrue(np.allclose(J, np.eye(2, dtype=float)))
+
+    def test_compile_kots_trajectory_problem_inferrs_dynamics_fields_from_dsl(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "torque",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data={},
+        )
+        self.assertEqual(compiled.dynamics_fields, ("torque",))
+        _ = compiled.runtime.linearize()
 
     def test_compile_kots_trajectory_problem_validates_p_dim(self) -> None:
         model = _FakeKotsModel()
@@ -291,7 +352,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                             "owner_type": "total_joint",
                             "owner_name": "robot",
                             "dtype": DTYPE_DYNAMICS,
-                            "field": "dtau",
+                            "field": "torque_d1",
                         },
                         "jac": {"var": "p"},
                     },
@@ -299,12 +360,12 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "Missing: torque_rate"):
+        with self.assertRaisesRegex(ValueError, "Missing: torque_d1"):
             _ = compile_kots_trajectory_problem(
                 dsl,
                 model=model,
                 data={},
-                dynamics_fields=("tau",),
+                dynamics_fields=("torque",),
             )
 
     def test_compile_kots_trajectory_problem_detects_unsupported_dynamics_owner_type(self) -> None:
@@ -335,7 +396,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                             "owner_type": "joint",
                             "owner_name": "joint0",
                             "dtype": DTYPE_DYNAMICS,
-                            "field": "tau",
+                            "field": "torque",
                         },
                         "jac": {"var": "p"},
                     },
@@ -348,7 +409,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 dsl,
                 model=model,
                 data={},
-                dynamics_fields=("tau",),
+                dynamics_fields=("torque",),
                 dynamics_owner_type="total_joint",
             )
 
@@ -385,7 +446,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             trajectory_map=traj0,
             trajectory_derivative_maps={0: traj0, 1: traj1, 2: traj2},
             p_var="p",
-            dynamics_fields=("tau", "dtau"),
+            dynamics_fields=("torque", "torque_d1"),
         )
 
         required = [
@@ -394,14 +455,14 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="tau",
+                field="torque",
             ),
             make_jac_key(
                 k=0,
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="tau",
+                field="torque",
                 var="p",
             ),
             make_key(
@@ -409,21 +470,21 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="dtau",
+                field="torque_d1",
             ),
             make_jac_key(
                 k=0,
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="dtau",
+                field="torque_d1",
                 var="p",
             ),
             make_jac_key(
                 k=0,
                 owner_type="total_joint",
                 owner_name="robot",
-                dtype=DTYPE_JOINT,
+                dtype=DTYPE_COORD,
                 field="q",
                 var="p",
             ),
@@ -432,14 +493,14 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="tau",
+                field="torque",
             ),
             make_jac_key(
                 k=1,
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="tau",
+                field="torque",
                 var="p",
             ),
             make_key(
@@ -447,21 +508,21 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="dtau",
+                field="torque_d1",
             ),
             make_jac_key(
                 k=1,
                 owner_type="total_joint",
                 owner_name="robot",
                 dtype=DTYPE_DYNAMICS,
-                field="dtau",
+                field="torque_d1",
                 var="p",
             ),
             make_jac_key(
                 k=1,
                 owner_type="total_joint",
                 owner_name="robot",
-                dtype=DTYPE_JOINT,
+                dtype=DTYPE_COORD,
                 field="q",
                 var="p",
             ),
@@ -472,25 +533,41 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
 
         self.assertTrue(
             np.allclose(
-                out[make_key(k=0, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="tau")],
+                out[make_key(k=0, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="torque")],
                 np.array([17.0, 44.0], dtype=float),
             )
         )
         self.assertTrue(
             np.allclose(
-                out[make_key(k=0, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="dtau")],
+                out[
+                    make_key(
+                        k=0,
+                        owner_type="total_joint",
+                        owner_name="robot",
+                        dtype=DTYPE_DYNAMICS,
+                        field="torque_d1",
+                    )
+                ],
                 np.array([18.0, 46.0], dtype=float),
             )
         )
         self.assertTrue(
             np.allclose(
-                out[make_key(k=1, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="tau")],
+                out[make_key(k=1, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="torque")],
                 np.array([52.0, 116.0], dtype=float),
             )
         )
         self.assertTrue(
             np.allclose(
-                out[make_key(k=1, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="dtau")],
+                out[
+                    make_key(
+                        k=1,
+                        owner_type="total_joint",
+                        owner_name="robot",
+                        dtype=DTYPE_DYNAMICS,
+                        field="torque_d1",
+                    )
+                ],
                 np.array([48.0, 106.0], dtype=float),
             )
         )
@@ -503,7 +580,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                         owner_type="total_joint",
                         owner_name="robot",
                         dtype=DTYPE_DYNAMICS,
-                        field="tau",
+                        field="torque",
                         var="p",
                     )
                 ],
@@ -518,7 +595,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                         owner_type="total_joint",
                         owner_name="robot",
                         dtype=DTYPE_DYNAMICS,
-                        field="dtau",
+                        field="torque_d1",
                         var="p",
                     )
                 ],
@@ -533,7 +610,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                         owner_type="total_joint",
                         owner_name="robot",
                         dtype=DTYPE_DYNAMICS,
-                        field="tau",
+                        field="torque",
                         var="p",
                     )
                 ],
@@ -548,7 +625,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                         owner_type="total_joint",
                         owner_name="robot",
                         dtype=DTYPE_DYNAMICS,
-                        field="dtau",
+                        field="torque_d1",
                         var="p",
                     )
                 ],
@@ -563,7 +640,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                         k=0,
                         owner_type="total_joint",
                         owner_name="robot",
-                        dtype=DTYPE_JOINT,
+                        dtype=DTYPE_COORD,
                         field="q",
                         var="p",
                     )
@@ -578,7 +655,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                         k=1,
                         owner_type="total_joint",
                         owner_name="robot",
-                        dtype=DTYPE_JOINT,
+                        dtype=DTYPE_COORD,
                         field="q",
                         var="p",
                     )
@@ -589,6 +666,62 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
 
         self.assertEqual(model.kinematics_calls, 2)
         self.assertEqual(model.dynamics_calls, 2)
+
+    def test_second_torque_derivative_value_and_jac_chain(self) -> None:
+        model = _FakeKotsModel()
+        traj0 = _traj_map_from_rows(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [6.0, 0.0],
+                [0.0, 7.0],
+            ]
+        )
+        traj1 = _traj_map_from_rows(
+            [
+                [2.0, 0.0],
+                [0.0, 3.0],
+                [8.0, 0.0],
+                [0.0, 9.0],
+            ]
+        )
+        traj2 = _traj_map_from_rows(
+            [
+                [4.0, 0.0],
+                [0.0, 5.0],
+                [10.0, 0.0],
+                [0.0, 11.0],
+            ]
+        )
+
+        builder = KotsTrajectoryStateBuilder(
+            model,
+            data={},
+            trajectory_map=traj0,
+            trajectory_derivative_maps={0: traj0, 1: traj1, 2: traj2},
+            p_var="p",
+            dynamics_fields=("torque", "torque_d1", "torque_d2"),
+        )
+
+        key_d2 = make_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque_d2",
+        )
+        key_d2_jac = make_jac_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque_d2",
+            var="p",
+        )
+
+        out = builder.build_state(np.array([1.0, 2.0], dtype=float), required=[key_d2, key_d2_jac])
+        self.assertTrue(np.allclose(out[key_d2], np.array([4.0, 10.0], dtype=float)))
+        self.assertTrue(np.allclose(out[key_d2_jac], np.array([[4.0, 0.0], [0.0, 5.0]], dtype=float)))
 
     def test_order4_low_order_state_jac_chain(self) -> None:
         model = _FakeKotsModelOrder4()
@@ -631,7 +764,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             trajectory_map=traj0,
             trajectory_derivative_maps={0: traj0, 1: traj1, 2: traj2, 3: traj3},
             p_var="p",
-            dynamics_fields=("tau",),
+            dynamics_fields=("torque",),
         )
 
         key_tau = make_key(
@@ -639,14 +772,14 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             owner_type="total_joint",
             owner_name="robot",
             dtype=DTYPE_DYNAMICS,
-            field="tau",
+            field="torque",
         )
         key_tau_jac = make_jac_key(
             k=0,
             owner_type="total_joint",
             owner_name="robot",
             dtype=DTYPE_DYNAMICS,
-            field="tau",
+            field="torque",
             var="p",
         )
 

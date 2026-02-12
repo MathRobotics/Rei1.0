@@ -27,7 +27,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     k = 0
     owner_type = "total_joint"
     owner_name = "robot"
-    dtype = "joint"
+    dtype = "coord"
     field = "q"
 
     [terms.expr.a.jac]
@@ -55,7 +55,7 @@ init = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     k = 10
     owner_type = "total_joint"
     owner_name = "robot"
-    dtype = "joint"
+    dtype = "coord"
     field = "q"
 
     [terms.expr.a.jac]

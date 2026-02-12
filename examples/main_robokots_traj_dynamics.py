@@ -25,7 +25,7 @@ except ImportError as e:  # pragma: no cover
 
 from eiopt import format_solve_report, load_problem_toml, solve_runtime
 from eiopt.backends.kots import compile_kots_trajectory_problem
-from eiopt.core.state_schema import canonical_field_name
+from eiopt.core.state_schema import torque_derivative_order
 from _kots_traj_common import (
     analytic_joint_velocity,
     collect_ee_pos_traj,
@@ -35,9 +35,8 @@ from _kots_traj_common import (
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
-_ORDER = 4
+_ORDER = 5
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos_dynamics.toml"
-_DYNAMICS_FIELDS = ("tau", "tau_diff")
 
 # Solver selection (edit these in code)
 _SOLVER = "cyipopt"  # "gauss_newton" | "scipy_minimize" | "cyipopt"
@@ -49,7 +48,7 @@ _IPOPT_OPTIONS = {"max_iter": 1000,
 
 # Optional per-term runtime overrides (key: term expr.name in DSL, value: scalar/diag weight).
 _TERM_WEIGHT_OVERRIDES: dict[str, float] = {
-    # "tau_traj_regularization": 1e-4,
+    # "torque_traj_regularization": 1e-4,
 }
 # Optional per-attribute runtime overrides.
 _TERM_ATTR_WEIGHT_OVERRIDES: list[tuple[str, object, float]] = [
@@ -60,26 +59,14 @@ _TERM_CONSTRAINT_KIND_WEIGHT_OVERRIDES: dict[str, float] = {
     # "ineq": 1e-2,
 }
 
-
-def _canonicalize_dynamics_fields(fields: tuple[str, ...]) -> tuple[str, ...]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for field_raw in fields:
-        field = canonical_field_name(str(field_raw).strip())
-        if field == "":
-            continue
-        if field in seen:
-            continue
-        seen.add(field)
-        out.append(field)
-    return tuple(out)
-
-
 def _display_dynamics_field_name(field: str) -> str:
     if field == "torque":
         return "tau"
-    if field == "torque_rate":
+    order = torque_derivative_order(field)
+    if order == 1:
         return "tau_diff"
+    if isinstance(order, int) and order > 1:
+        return f"tau_diff{order}"
     return field
 
 
@@ -160,14 +147,6 @@ def run_trajectory_dynamics_demo(
             f"Model file not found: {_MODEL_PATH}\n"
             "Update `_MODEL_PATH` in examples/main_robokots_traj_dynamics.py to your model JSON."
         )
-    dynamics_fields = _canonicalize_dynamics_fields(_DYNAMICS_FIELDS)
-    if len(dynamics_fields) == 0:
-        raise SystemExit("`_DYNAMICS_FIELDS` must contain at least one non-empty field.")
-    if _ORDER < 4 and "torque_rate" in dynamics_fields:
-        raise SystemExit(
-            "tau_diff (torque_rate) requires RoboKots model order >= 4.\n"
-            f"Current _ORDER is {_ORDER}. Increase _ORDER or remove tau_diff from _DYNAMICS_FIELDS."
-        )
 
     kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
     data = kots.state_dict_
@@ -177,10 +156,15 @@ def run_trajectory_dynamics_demo(
         dsl,
         model=kots,
         data=data,
-        dynamics_fields=dynamics_fields,
     )
     runtime = compiled.runtime
     traj_map = compiled.trajectory_map
+    dynamics_fields = tuple(compiled.dynamics_fields)
+    if len(dynamics_fields) == 0:
+        raise SystemExit(
+            "DSL does not request any dynamics get_state field.\n"
+            "Add at least one dynamics term (e.g. field='torque') to plot dynamics trajectory."
+        )
     dt = float(compiled.dt)
     traj_dsl = dsl.get("trajectory", None)
     if not isinstance(traj_dsl, dict):

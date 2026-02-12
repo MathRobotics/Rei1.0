@@ -33,7 +33,7 @@ def collect_joint_dynamics_traj(
     runtime: Any,
     *,
     steps: int,
-    field: str = "tau",
+    field: str = "torque",
     owner_name: str = "robot",
 ) -> np.ndarray:
     field_name = canonical_field_name(str(field))
@@ -50,7 +50,7 @@ def collect_joint_dynamics_traj(
 
 
 def collect_joint_torque_traj(runtime: Any, *, steps: int) -> np.ndarray:
-    return collect_joint_dynamics_traj(runtime, steps=steps, field="tau")
+    return collect_joint_dynamics_traj(runtime, steps=steps, field="torque")
 
 
 def collect_target_waypoints(

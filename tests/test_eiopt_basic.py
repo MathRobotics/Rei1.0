@@ -387,7 +387,7 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(traj[0], np.array([0.0, 10.0], dtype=float)))
         self.assertTrue(np.allclose(traj[2], np.array([2.0, 12.0], dtype=float)))
 
-    def test_runtime_collect_state_traj_canonicalizes_field_alias(self) -> None:
+    def test_runtime_collect_state_traj_uses_canonical_field(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
             "terms": [
@@ -413,12 +413,52 @@ class TestEiOptBasic(unittest.TestCase):
             owner_type="total_joint",
             owner_name="robot",
             dtype=DTYPE_DYNAMICS,
-            field="tau",
+            field="torque",
             ks=[0, 1, 2],
             expected_dim=1,
         )
         self.assertEqual(traj.shape, (3, 1))
         self.assertTrue(np.allclose(traj[:, 0], np.array([0.0, 1.0, 2.0], dtype=float)))
+
+    def test_runtime_collect_state_traj_rejects_tau_alias(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "identity", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+            _ = runtime.collect_state_traj(
+                owner_type="total_joint",
+                owner_name="robot",
+                dtype=DTYPE_DYNAMICS,
+                field="tau",
+                ks=[0, 1],
+            )
+
+    def test_runtime_collect_state_traj_rejects_joint_dtype_alias(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "identity", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(ValueError, "deprecated dtype alias"):
+            _ = runtime.collect_state_traj(
+                owner_type="total_joint",
+                owner_name="robot",
+                dtype="joint",
+                field="torque",
+                ks=[0, 1],
+            )
 
     def test_runtime_collect_state_traj_missing_key_error_is_readable(self) -> None:
         dsl = {
@@ -670,7 +710,7 @@ class TestEiOptBasic(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Multiple variables exist"):
             _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
-    def test_get_state_builder_canonicalizes_tau_alias(self) -> None:
+    def test_get_state_builder_rejects_tau_alias(self) -> None:
         dsl = {
             "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
             "terms": [
@@ -690,12 +730,58 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
+        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+    def test_get_state_builder_uses_torque_d1_field(self) -> None:
+        dsl = {
+            "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "torque_d1",
+                        },
+                        "jac": {"var": "q"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
         runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         fields = {k.field for k in runtime.required}
-        self.assertIn("torque", fields)
-        self.assertIn("torque_J_q", fields)
+        self.assertIn("torque_d1", fields)
+        self.assertIn("torque_d1_J_q", fields)
 
-    def test_get_state_builder_canonicalizes_dtau_alias(self) -> None:
+    def test_get_state_builder_rejects_joint_dtype_alias(self) -> None:
+        dsl = {
+            "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": "joint",
+                            "field": "q",
+                        },
+                        "jac": {"var": "q"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "deprecated dtype alias"):
+            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+    def test_get_state_builder_rejects_dtau_alias(self) -> None:
         dsl = {
             "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
             "terms": [
@@ -715,49 +801,37 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        fields = {k.field for k in runtime.required}
-        self.assertIn("torque_rate", fields)
-        self.assertIn("torque_rate_J_q", fields)
-
-    def test_get_state_builder_canonicalizes_tau_diff_alias(self) -> None:
-        dsl = {
-            "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
-            "terms": [
-                {
-                    "expr": {
-                        "type": "get_state",
-                        "key": {
-                            "k": 0,
-                            "owner_type": "total_joint",
-                            "owner_name": "robot",
-                            "dtype": DTYPE_DYNAMICS,
-                            "field": "tau_diff",
-                        },
-                        "jac": {"var": "q"},
-                    },
-                    "cost": {"type": "l2"},
-                }
-            ],
-        }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        fields = {k.field for k in runtime.required}
-        self.assertIn("torque_rate", fields)
-        self.assertIn("torque_rate_J_q", fields)
+        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_state_schema_dynamics_field_aliases(self) -> None:
         self.assertIn("torque", DYNAMICS_FIELDS)
-        self.assertIn("torque_rate", DYNAMICS_FIELDS)
-        self.assertEqual(canonical_field_name("tau"), "torque")
-        self.assertEqual(canonical_field_name("dtau"), "torque_rate")
-        self.assertEqual(canonical_field_name("tau_diff"), "torque_rate")
-        self.assertEqual(canonical_field_name("torque_diff1"), "torque_rate")
-        self.assertEqual(canonical_field_name("h"), "momentum")
-        self.assertEqual(canonical_field_name("wrench"), "force")
-        self.assertEqual(canonical_field_name("dtau_J_p"), "torque_rate_J_p")
-        self.assertEqual(canonical_field_name("tau_diff_J_p"), "torque_rate_J_p")
+        self.assertIn("torque_d1", DYNAMICS_FIELDS)
+        self.assertEqual(canonical_field_name("torque"), "torque")
+        self.assertEqual(canonical_field_name("momentum"), "momentum")
+        self.assertEqual(canonical_field_name("force"), "force")
+        self.assertEqual(canonical_field_name("torque_d1"), "torque_d1")
+        self.assertEqual(canonical_field_name("torque_d2"), "torque_d2")
+        for legacy in (
+            "tau",
+            "h",
+            "wrench",
+            "dtau",
+            "tau_diff",
+            "torque_rate",
+            "torque_diff1",
+            "torque_diff2",
+            "dtau2",
+            "tau_diff2",
+        ):
+            with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+                _ = canonical_field_name(legacy)
+        self.assertEqual(canonical_field_name("torque_d1_J_p"), "torque_d1_J_p")
+        for legacy_jac in ("dtau_J_p", "tau_diff_J_p", "torque_diff2_J_p"):
+            with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+                _ = canonical_field_name(legacy_jac)
 
-    def test_stack_get_state_canonicalizes_dtau_alias(self) -> None:
+    def test_stack_get_state_uses_torque_d1_field(self) -> None:
         dsl = {
             "time": {"N": 1, "dt": 0.1},
             "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
@@ -772,7 +846,7 @@ class TestEiOptBasic(unittest.TestCase):
                                 "owner_type": "total_joint",
                                 "owner_name": "robot",
                                 "dtype": DTYPE_DYNAMICS,
-                                "field": "dtau",
+                                "field": "torque_d1",
                             },
                             "jac": {"var": "p"},
                         },
@@ -782,10 +856,10 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        torque_rate_keys = [k for k in runtime.required if k.field == "torque_rate"]
-        torque_rate_jac_keys = [k for k in runtime.required if k.field == "torque_rate_J_p"]
-        self.assertEqual({k.k for k in torque_rate_keys}, {0, 1})
-        self.assertEqual({k.k for k in torque_rate_jac_keys}, {0, 1})
+        torque_d1_keys = [k for k in runtime.required if k.field == "torque_d1"]
+        torque_d1_jac_keys = [k for k in runtime.required if k.field == "torque_d1_J_p"]
+        self.assertEqual({k.k for k in torque_d1_keys}, {0, 1})
+        self.assertEqual({k.k for k in torque_d1_jac_keys}, {0, 1})
 
     def test_get_var_expr_reads_pack(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
