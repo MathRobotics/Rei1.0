@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from .problem import Problem
-from .runtime import LinearizedTerm, ProblemRuntime
+from .nullspace import (
+    NullspaceReducedRuntime,
+    NullspaceEqualityReduction,
+    build_nullspace_equality_reduction,
+)
+from .runtime import LinearizedTerm, ProblemRuntime, StackedTermSlice
 from .term import (
     Variable,
     pack,
@@ -21,6 +26,10 @@ __all__ = [
     "Problem",
     "ProblemRuntime",
     "LinearizedTerm",
+    "StackedTermSlice",
+    "NullspaceReducedRuntime",
+    "NullspaceEqualityReduction",
+    "build_nullspace_equality_reduction",
     "Variable",
     "pack",
     "total_dim",

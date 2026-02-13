@@ -9,5 +9,14 @@ They should not be imported unless you have the corresponding dependency install
 
 from __future__ import annotations
 
-__all__ = []
+from .trajectory_adapter import (
+    BackendTrajectoryCompileResult,
+    TrajectoryBackendAdapter,
+    compile_trajectory_problem_with_adapter,
+)
 
+__all__ = [
+    "BackendTrajectoryCompileResult",
+    "TrajectoryBackendAdapter",
+    "compile_trajectory_problem_with_adapter",
+]

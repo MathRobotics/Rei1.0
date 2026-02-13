@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from .core.state_cache import StateKey
-from .model.runtime import LinearizedTerm, ProblemRuntime
+from .model.runtime import LinearizedTerm, ProblemRuntime, StackedTermSlice
 
 Array = np.ndarray
 
@@ -73,6 +73,61 @@ def build_term_gradient_matrix_from_terms(
     return A, term_indices
 
 
+def build_term_gradient_matrix_from_stacked(
+    r_all: Array | Any,
+    J_all: Array | Any,
+    layout: Iterable[StackedTermSlice],
+    *,
+    n_total: int | None = None,
+) -> tuple[Array, list[int]]:
+    """Build IOC matrix A from stacked residual/J and per-term row slices."""
+
+    r = np.asarray(r_all, dtype=float).reshape(-1)
+    J = np.asarray(J_all, dtype=float)
+    if J.ndim != 2:
+        raise ValueError(
+            f"build_term_gradient_matrix_from_stacked: J_all must be 2D, got shape {J.shape}."
+        )
+    if J.shape[0] != r.size:
+        raise ValueError(
+            "build_term_gradient_matrix_from_stacked: row mismatch between r_all and J_all. "
+            f"len(r_all)={r.size}, J_all.shape={J.shape}."
+        )
+
+    if n_total is None:
+        n_total = int(J.shape[1])
+    n_total = int(n_total)
+    if n_total < 0:
+        raise ValueError(
+            f"build_term_gradient_matrix_from_stacked: n_total must be >= 0, got {n_total}."
+        )
+    if int(J.shape[1]) != n_total:
+        raise ValueError(
+            "build_term_gradient_matrix_from_stacked: column mismatch. "
+            f"J_all.shape[1]={int(J.shape[1])}, expected n_total={n_total}."
+        )
+
+    term_layout = list(layout)
+    n_cols = len(term_layout)
+    A = np.zeros((n_total, n_cols), dtype=float)
+    term_indices: list[int] = []
+    n_rows = int(r.size)
+
+    for j, item in enumerate(term_layout):
+        start = int(item.row_start)
+        stop = int(item.row_stop)
+        if start < 0 or stop < start or stop > n_rows:
+            raise ValueError(
+                "build_term_gradient_matrix_from_stacked: invalid row slice for "
+                f"term[{int(item.term_index)}]: [{start}:{stop}] with total rows={n_rows}."
+            )
+        r_i = r[start:stop]
+        J_i = J[start:stop, :]
+        A[:, j] = np.asarray(J_i.T @ r_i, dtype=float).reshape(-1)
+        term_indices.append(int(item.term_index))
+    return A, term_indices
+
+
 def build_term_gradient_matrix(
     runtime: ProblemRuntime,
     *,
@@ -81,6 +136,20 @@ def build_term_gradient_matrix(
     term_indices: Iterable[int] | None = None,
 ) -> tuple[Array, list[int]]:
     """Linearize selected terms and return IOC matrix A."""
+
+    linearize_stacked = getattr(runtime, "linearize_stacked_terms_with_layout", None)
+    if callable(linearize_stacked):
+        r_all, J_all, layout = linearize_stacked(
+            required=required,
+            weighted=weighted,
+            term_indices=term_indices,
+        )
+        return build_term_gradient_matrix_from_stacked(
+            r_all,
+            J_all,
+            layout,
+            n_total=int(runtime.pack.n_total),
+        )
 
     terms = runtime.linearize_terms(
         required=required,

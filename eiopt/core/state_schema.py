@@ -46,7 +46,7 @@ TORQUE_FIELDS: Tuple[str, ...] = ("torque", "torque_d1")
 DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
 
 _TORQUE_D_PATTERN = re.compile(r"^torque_d([0-9]+)$")
-_DEPRECATED_TORQUE_ALIAS_PATTERNS: tuple[re.Pattern[str], ...] = (
+_INVALID_TORQUE_ALIAS_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^tau$"),
     re.compile(r"^h$"),
     re.compile(r"^wrench$"),
@@ -56,7 +56,7 @@ _DEPRECATED_TORQUE_ALIAS_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^torque_dot(?:[1-9][0-9]*)?$"),
     re.compile(r"^torque_diff[1-9][0-9]*$"),
 )
-_DEPRECATED_DTYPE_ALIASES: tuple[str, ...] = ("joint",)
+_INVALID_DTYPE_ALIASES: tuple[str, ...] = ("joint",)
 
 
 def torque_derivative_field(order: int) -> str:
@@ -80,8 +80,8 @@ def _canonicalize_torque_field(field: str) -> str:
     return field
 
 
-def _is_deprecated_torque_alias(field: str) -> bool:
-    for pattern in _DEPRECATED_TORQUE_ALIAS_PATTERNS:
+def _is_invalid_torque_alias(field: str) -> bool:
+    for pattern in _INVALID_TORQUE_ALIAS_PATTERNS:
         if pattern.fullmatch(field) is not None:
             return True
     return False
@@ -116,9 +116,9 @@ def canonical_field_name(field: str) -> str:
     if is_jac_field(f):
         base, var = split_jac_field(f)
         return jac_field(canonical_field_name(base), var=var)
-    if _is_deprecated_torque_alias(f):
+    if _is_invalid_torque_alias(f):
         raise ValueError(
-            "canonical_field_name: deprecated field alias "
+            "canonical_field_name: unsupported field alias "
             f"{f!r}. Use canonical field names (e.g. 'torque', 'momentum', 'force', 'torque_d1')."
         )
     return _canonicalize_torque_field(f)
@@ -128,9 +128,9 @@ def canonical_dtype_name(dtype: str) -> str:
     d = str(dtype).strip()
     if d == "":
         raise ValueError("canonical_dtype_name: dtype must be non-empty.")
-    if d in _DEPRECATED_DTYPE_ALIASES:
+    if d in _INVALID_DTYPE_ALIASES:
         raise ValueError(
-            f"canonical_dtype_name: deprecated dtype alias {d!r}. "
+            f"canonical_dtype_name: unsupported dtype alias {d!r}. "
             f"Use canonical dtype name {DTYPE_COORD!r}."
         )
     return d

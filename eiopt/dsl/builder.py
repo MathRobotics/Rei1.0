@@ -19,9 +19,9 @@ from ..model.term import (
     VariablePack,
 )
 from .environment import DslBuildEnv
+from .variable_utils import expand_variable_init, resolve_variable_dim
 
 Array = np.ndarray
-
 
 def _canonical_constraint_kind(kind: Any) -> str:
     value = str(kind).strip().lower()
@@ -52,12 +52,8 @@ def _normalize_constraint_attrs(term_dsl: dict[str, Any], attrs: dict[str, Any])
         else:
             raise ValueError("term.constraint must be a string or dict.")
 
-    if "constraint_type" in attrs and "constraint_kind" not in attrs:
-        attrs["constraint_kind"] = attrs["constraint_type"]
-
     if "constraint_kind" in attrs:
         attrs["constraint_kind"] = _canonical_constraint_kind(attrs["constraint_kind"])
-        attrs["constraint_type"] = attrs["constraint_kind"]
         attrs.setdefault("is_constraint", True)
 
     return attrs
@@ -79,15 +75,14 @@ def create_default_expr_register() -> ExprRegister:
 
 def build_variable(dsl: dict[str, Any]) -> Variable:
     name = str(dsl["name"])
+    dim = resolve_variable_dim(dsl.get("dim", None), name=name)
 
     if "init" in dsl:
-        x = np.asarray(dsl["init"], dtype=float).reshape(-1)
-        dim = int(dsl.get("dim", x.size))
-        if x.size != dim:
-            raise ValueError(f"variable '{name}': init size {x.size} != dim {dim}")
+        x = expand_variable_init(dsl["init"], dim=dim, where=f"variable '{name}'")
         return Variable(name=name, x=x.copy())
 
-    dim = int(dsl["dim"])
+    if dim is None:
+        raise ValueError(f"variable '{name}': either dim or init is required.")
     return Variable(name=name, x=np.zeros((dim,), dtype=float))
 
 

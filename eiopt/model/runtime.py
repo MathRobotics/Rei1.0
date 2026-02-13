@@ -54,6 +54,15 @@ class LinearizedTerm:
     jacobian: Array
 
 
+@dataclass(frozen=True)
+class StackedTermSlice:
+    term_index: int
+    name: str
+    attrs: dict[str, Any]
+    row_start: int
+    row_stop: int
+
+
 @dataclass
 class ProblemRuntime:
     """Runtime holder for a compiled problem.
@@ -177,23 +186,22 @@ class ProblemRuntime:
             Jg[:, s:e] = B
         return Jg
 
-    def linearize_terms(
+    def _linearize_term_arrays(
         self,
         *,
         required: Iterable[StateKey] | None = None,
         weighted: bool = True,
         term_indices: Iterable[int] | None = None,
-    ) -> list[LinearizedTerm]:
-        """Linearize each selected term separately.
-
-        Returns a list of `LinearizedTerm` entries preserving requested term order.
-        """
-
+    ) -> tuple[list[int], list[str], list[dict[str, Any]], list[Array], list[Array]]:
         req = self.required_list(required)
         self.update_state_if_needed(required=req)
         idxs = self._normalize_term_indices(term_indices)
 
-        out: list[LinearizedTerm] = []
+        names: list[str] = []
+        attrs_list: list[dict[str, Any]] = []
+        residuals: list[Array] = []
+        jacobians: list[Array] = []
+
         for idx in idxs:
             expr, cost = self.problem.terms[idx]
             term_name = self._term_display_name(idx)
@@ -226,6 +234,121 @@ class ProblemRuntime:
                     blocks=blocks_raw,
                 )
 
+            names.append(term_name)
+            attrs_list.append(attrs)
+            residuals.append(r_use)
+            jacobians.append(J_use)
+        return idxs, names, attrs_list, residuals, jacobians
+
+    def _stack_term_arrays(
+        self,
+        *,
+        idxs: list[int],
+        names: list[str],
+        attrs_list: list[dict[str, Any]],
+        residuals: list[Array],
+        jacobians: list[Array],
+    ) -> tuple[Array, Array, list[StackedTermSlice]]:
+        n_total = int(self.pack.n_total)
+        if len(residuals) == 0:
+            return np.zeros((0,), dtype=float), np.zeros((0, n_total), dtype=float), []
+
+        rows = int(sum(np.asarray(r, dtype=float).size for r in residuals))
+        r_all = np.empty((rows,), dtype=float)
+        J_all = np.empty((rows, n_total), dtype=float)
+        layout: list[StackedTermSlice] = []
+
+        offset = 0
+        for idx, name, attrs, r, J in zip(idxs, names, attrs_list, residuals, jacobians):
+            r_vec = np.asarray(r, dtype=float).reshape(-1)
+            J_mat = np.asarray(J, dtype=float)
+            m = int(r_vec.size)
+            if J_mat.ndim != 2 or J_mat.shape[0] != m or J_mat.shape[1] != n_total:
+                raise ValueError(
+                    "linearize_stacked_terms: internal shape mismatch for "
+                    f"term[{idx}]. residual size={m}, jacobian shape={J_mat.shape}, "
+                    f"expected (*, {n_total})."
+                )
+            row_start = int(offset)
+            row_stop = int(offset + m)
+            r_all[row_start:row_stop] = r_vec
+            J_all[row_start:row_stop, :] = J_mat
+            layout.append(
+                StackedTermSlice(
+                    term_index=int(idx),
+                    name=str(name),
+                    attrs=dict(attrs),
+                    row_start=row_start,
+                    row_stop=row_stop,
+                )
+            )
+            offset = row_stop
+        return r_all, J_all, layout
+
+    def linearize_stacked_terms(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        weighted: bool = True,
+        term_indices: Iterable[int] | None = None,
+    ) -> tuple[Array, Array]:
+        """Linearize selected terms and return stacked residual/Jacobian without term objects."""
+
+        idxs, names, attrs_list, residuals, jacobians = self._linearize_term_arrays(
+            required=required,
+            weighted=weighted,
+            term_indices=term_indices,
+        )
+        r_all, J_all, _layout = self._stack_term_arrays(
+            idxs=idxs,
+            names=names,
+            attrs_list=attrs_list,
+            residuals=residuals,
+            jacobians=jacobians,
+        )
+        return r_all, J_all
+
+    def linearize_stacked_terms_with_layout(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        weighted: bool = True,
+        term_indices: Iterable[int] | None = None,
+    ) -> tuple[Array, Array, list[StackedTermSlice]]:
+        """Linearize selected terms and return stacked arrays with per-term row slices."""
+
+        idxs, names, attrs_list, residuals, jacobians = self._linearize_term_arrays(
+            required=required,
+            weighted=weighted,
+            term_indices=term_indices,
+        )
+        return self._stack_term_arrays(
+            idxs=idxs,
+            names=names,
+            attrs_list=attrs_list,
+            residuals=residuals,
+            jacobians=jacobians,
+        )
+
+    def linearize_terms(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        weighted: bool = True,
+        term_indices: Iterable[int] | None = None,
+    ) -> list[LinearizedTerm]:
+        """Linearize each selected term separately.
+
+        Returns a list of `LinearizedTerm` entries preserving requested term order.
+        """
+
+        idxs, names, attrs_list, residuals, jacobians = self._linearize_term_arrays(
+            required=required,
+            weighted=weighted,
+            term_indices=term_indices,
+        )
+        out: list[LinearizedTerm] = []
+        for idx, term_name, attrs, r_use, J_use in zip(idxs, names, attrs_list, residuals, jacobians):
             out.append(
                 LinearizedTerm(
                     term_index=idx,
@@ -360,7 +483,7 @@ class ProblemRuntime:
 
         for i, attrs in enumerate(self.problem.term_attrs):
             is_constraint = bool(attrs.get("is_constraint", False))
-            term_kind_raw = attrs.get("constraint_kind", attrs.get("constraint_type", None))
+            term_kind_raw = attrs.get("constraint_kind", None)
             term_kind = None if term_kind_raw is None else _canonical_constraint_kind(term_kind_raw)
 
             if not is_constraint and term_kind is None:

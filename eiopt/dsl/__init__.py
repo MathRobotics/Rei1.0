@@ -21,6 +21,15 @@ from .trajectory import (
     default_steps_from_time,
     infer_bspline_q_dim_from_var,
 )
+from .trajectory_compile import (
+    PreparedTrajectoryProblemDsl,
+    prepare_trajectory_problem_dsl,
+)
+from .variable_utils import (
+    expand_variable_init,
+    normalize_variable_dsl,
+    resolve_variable_dim,
+)
 
 __all__ = [
     "DslBuildEnv",
@@ -42,4 +51,9 @@ __all__ = [
     "default_dt_from_time",
     "default_steps_from_time",
     "infer_bspline_q_dim_from_var",
+    "PreparedTrajectoryProblemDsl",
+    "prepare_trajectory_problem_dsl",
+    "resolve_variable_dim",
+    "expand_variable_init",
+    "normalize_variable_dsl",
 ]

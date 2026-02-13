@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 
 from .expr_register import ExprRegister
@@ -24,6 +26,7 @@ from ..dsl.trajectory import (
     default_dt_from_time,
     default_steps_from_time,
     infer_bspline_q_dim_from_var,
+    pick_trajectory_value,
 )
 
 
@@ -50,18 +53,231 @@ def _default_var_name(ctx, *, preferred: str = "q") -> str:
     )
 
 
+def _resolve_positive_int(value, *, where: str) -> int:
+    try:
+        out = int(value)
+    except Exception as e:
+        raise ValueError(f"{where}: expected positive integer, got {value!r}.") from e
+    if out <= 0:
+        raise ValueError(f"{where}: expected positive integer, got {out}.")
+    return out
+
+
+def _time_steps_from_ctx(ctx) -> int | None:
+    time = getattr(ctx, "time", None)
+    if time is None or not hasattr(time, "N"):
+        return None
+    try:
+        steps = int(time.N) + 1
+    except Exception:
+        return None
+    return steps if steps > 0 else None
+
+
+def _resolve_time_index(raw, *, ctx, where: str, allow_none: bool = False) -> int | None:
+    if raw is None:
+        return None if allow_none else 0
+
+    steps = _time_steps_from_ctx(ctx)
+
+    if isinstance(raw, str):
+        token = raw.strip().lower()
+        if token == "":
+            raise ValueError(f"{where}: k must be non-empty.")
+        if token in ("last", "end", "final"):
+            if steps is None:
+                raise ValueError(f"{where}: k={raw!r} requires time.N in DSL.")
+            return int(steps - 1)
+        if token in ("first", "start"):
+            return 0
+        if token.startswith("last-") or token.startswith("end-") or token.startswith("final-"):
+            if steps is None:
+                raise ValueError(f"{where}: k={raw!r} requires time.N in DSL.")
+            tail = token.split("-", 1)[1].strip()
+            if tail == "":
+                raise ValueError(f"{where}: invalid k specifier {raw!r}.")
+            try:
+                offset = int(tail)
+            except Exception as e:
+                raise ValueError(f"{where}: invalid k offset in {raw!r}.") from e
+            if offset < 0:
+                raise ValueError(f"{where}: k offset must be >= 0, got {offset}.")
+            k = int(steps - 1 - offset)
+        else:
+            try:
+                k = int(raw)
+            except Exception as e:
+                raise ValueError(
+                    f"{where}: k must be int or one of 'last', 'last-<n>', 'first'. Got {raw!r}."
+                ) from e
+    else:
+        try:
+            k = int(raw)
+        except Exception as e:
+            raise ValueError(
+                f"{where}: k must be int or one of 'last', 'last-<n>', 'first'. Got {raw!r}."
+            ) from e
+
+    if k < 0:
+        raise ValueError(f"{where}: k must be >= 0, got {k}.")
+    if steps is not None and k >= steps:
+        raise ValueError(f"{where}: k={k} out of range for time steps 0..{steps - 1}.")
+    return int(k)
+
+
+def _parse_fill_value(raw: object, *, where: str) -> float | None:
+    if not isinstance(raw, Mapping):
+        return None
+    if "fill" not in raw:
+        raise ValueError(f"{where}: dict value must contain key 'fill'.")
+    try:
+        return float(raw["fill"])
+    except Exception as e:
+        raise ValueError(f"{where}: value.fill must be numeric, got {raw['fill']!r}.") from e
+
+
+def _validate_vector_dim(value: np.ndarray, *, dim: int, where: str) -> np.ndarray:
+    vec = np.asarray(value, dtype=float).reshape(-1)
+    dim_i = int(dim)
+    if dim_i <= 0:
+        raise ValueError(f"{where}: dim must be > 0, got {dim_i}.")
+    if vec.size == dim_i:
+        return vec.copy()
+    if vec.size == 1 and dim_i > 1:
+        raise ValueError(
+            f"{where}: scalar value is not broadcast implicitly. "
+            "Use `value = { fill = <value> }` to fill all elements."
+        )
+    raise ValueError(f"{where}: value size {vec.size} is not compatible with dim {dim_i}.")
+
+
+def _infer_const_repeat_segment_dim(ctx, dsl, *, repeats: int) -> int | None:
+    seg_dim_raw = dsl.get("segment_dim", dsl.get("dim", None))
+    if seg_dim_raw is not None:
+        return _resolve_positive_int(seg_dim_raw, where="const_repeat.segment_dim")
+
+    traj_dsl = dsl.get("trajectory", None)
+    if traj_dsl is None:
+        root_dsl = getattr(ctx, "root_dsl", None)
+        if isinstance(root_dsl, dict):
+            traj_dsl = root_dsl.get("trajectory", None)
+    if not isinstance(traj_dsl, dict):
+        return None
+
+    resolve_traj = getattr(ctx, "resolve_trajectory_map", None)
+    if callable(resolve_traj):
+        try:
+            traj = resolve_traj(traj_dsl, default_q_dim=None)
+            if int(traj.steps) == int(repeats):
+                return int(traj.q_dim)
+        except Exception:
+            pass
+
+    typ = str(traj_dsl.get("type", "")).strip().lower()
+    if typ == "":
+        return None
+    steps_raw = pick_trajectory_value(traj_dsl, section=typ, key="steps")
+    q_dim_raw = pick_trajectory_value(traj_dsl, section=typ, key="q_dim")
+    if steps_raw is None or q_dim_raw is None:
+        return None
+    try:
+        steps = int(steps_raw)
+        q_dim = int(q_dim_raw)
+    except Exception:
+        return None
+    if steps <= 0 or q_dim <= 0:
+        return None
+    if int(steps) != int(repeats):
+        return None
+    return int(q_dim)
+
+
+def _infer_const_fill_dim_from_trajectory(
+    ctx,
+    *,
+    var_name: str,
+    var_dim: int,
+) -> int | None:
+    root_dsl = getattr(ctx, "root_dsl", None)
+    if not isinstance(root_dsl, dict):
+        return None
+    traj_dsl = root_dsl.get("trajectory", None)
+    if not isinstance(traj_dsl, dict):
+        return None
+
+    traj_var_raw = traj_dsl.get("var", None)
+    if traj_var_raw is not None and str(traj_var_raw).strip() not in ("", str(var_name)):
+        return None
+
+    resolve_traj = getattr(ctx, "resolve_trajectory_map", None)
+    if callable(resolve_traj):
+        try:
+            default_q_dim = None
+            if str(traj_dsl.get("type", "")).strip().lower() == "bspline":
+                default_q_dim = infer_bspline_q_dim_from_var(traj_dsl, var_dim=int(var_dim))
+            traj = resolve_traj(traj_dsl, default_q_dim=default_q_dim)
+            return int(traj.q_dim)
+        except Exception:
+            pass
+
+    typ = str(traj_dsl.get("type", "")).strip().lower()
+    if typ == "":
+        return None
+    q_dim_raw = pick_trajectory_value(traj_dsl, section=typ, key="q_dim")
+    if q_dim_raw is not None:
+        try:
+            q_dim = int(q_dim_raw)
+            if q_dim > 0:
+                return q_dim
+        except Exception:
+            return None
+    if typ == "bspline":
+        return infer_bspline_q_dim_from_var(traj_dsl, var_dim=int(var_dim))
+    return None
+
+
 def build_const(ctx, dsl):
+    value_raw = dsl["value"]
+    fill = _parse_fill_value(value_raw, where="const")
+    value = np.asarray(value_raw, float).reshape(-1) if fill is None else None
+
+    var_name = None
+    v = None
     if "var" in dsl:
         var_name = str(dsl.get("var", _default_var_name(ctx)))
-        q = next((v for v in ctx.pack.vars if v.name == var_name), None)
-        if q is None:
+        v = next((x for x in ctx.pack.vars if x.name == var_name), None)
+        if v is None:
             raise ValueError(f"const: unknown variable: {var_name!r}")
-        return ConstantExpr(
-            name=dsl.get("name", "const"),
-            vars=[q],
-            value=np.asarray(dsl["value"], float),
-        )
-    return ConstantExpr(name=dsl.get("name", "const"), value=np.asarray(dsl["value"], float))
+
+    dim_raw = dsl.get("dim", None)
+    dim = None if dim_raw is None else _resolve_positive_int(dim_raw, where="const.dim")
+
+    if fill is not None:
+        if dim is None:
+            if v is None:
+                raise ValueError("const: value.fill requires dim or var.")
+            inferred = _infer_const_fill_dim_from_trajectory(
+                ctx,
+                var_name=str(var_name),
+                var_dim=int(v.dim()),
+            )
+            dim = int(v.dim()) if inferred is None else int(inferred)
+        value = np.full((dim,), float(fill), dtype=float)
+    else:
+        if dim is not None:
+            value = _validate_vector_dim(np.asarray(value, dtype=float), dim=dim, where="const")
+        else:
+            value = np.asarray(value, dtype=float).reshape(-1)
+            if value.size == 1 and v is not None and int(v.dim()) > 1:
+                raise ValueError(
+                    "const: scalar value with multi-dimensional var is ambiguous. "
+                    "Use `value = { fill = <value> }` for all-equal vectors, "
+                    "or set const.dim explicitly."
+                )
+
+    if v is not None:
+        return ConstantExpr(name=dsl.get("name", "const"), vars=[v], value=value)
+    return ConstantExpr(name=dsl.get("name", "const"), value=value)
 
 
 def build_const_repeat(ctx, dsl):
@@ -83,6 +299,22 @@ def build_const_repeat(ctx, dsl):
     if repeats <= 0:
         raise ValueError(f"const_repeat: repeats must be > 0, got {repeats}.")
 
+    value_raw = dsl["value"]
+    fill = _parse_fill_value(value_raw, where="const_repeat")
+    seg_dim = _infer_const_repeat_segment_dim(ctx, dsl, repeats=repeats)
+
+    if fill is not None:
+        if seg_dim is None:
+            raise ValueError(
+                "const_repeat: value.fill requires segment_dim/dim, "
+                "or trajectory with inferable q_dim."
+            )
+        value = np.full((seg_dim,), float(fill), dtype=float)
+    else:
+        value = np.asarray(value_raw, dtype=float).reshape(-1)
+        if seg_dim is not None:
+            value = _validate_vector_dim(value, dim=seg_dim, where="const_repeat")
+
     if "var" in dsl:
         var_name = str(dsl.get("var", _default_var_name(ctx)))
         v = next((x for x in ctx.pack.vars if x.name == var_name), None)
@@ -90,21 +322,21 @@ def build_const_repeat(ctx, dsl):
             raise ValueError(f"const_repeat: unknown variable: {var_name!r}")
         return RepeatConstantExpr(
             name=dsl.get("name", "const_repeat"),
-            value=np.asarray(dsl["value"], float),
+            value=value,
             repeats=repeats,
             vars=[v],
         )
 
     return RepeatConstantExpr(
         name=dsl.get("name", "const_repeat"),
-        value=np.asarray(dsl["value"], float),
+        value=value,
         repeats=repeats,
     )
 
 
 def build_get_state(ctx, dsl):
     key_dsl = dsl["key"]
-    k = int(key_dsl.get("k", 0))
+    k = int(_resolve_time_index(key_dsl.get("k", 0), ctx=ctx, where="get_state.key.k"))
     owner = OwnerKey(key_dsl["owner_type"], key_dsl["owner_name"])
     dtype = canonical_dtype_name(str(key_dsl["dtype"]))
     field = canonical_field_name(str(key_dsl["field"]))
@@ -183,7 +415,7 @@ def build_get_var(ctx, dsl):
         key = dsl.get("key", None)
         if isinstance(key, dict) and "k" in key:
             k = key.get("k", None)
-    k_i = None if k is None else int(k)
+    k_i = _resolve_time_index(k, ctx=ctx, where="get_var.k", allow_none=True)
 
     return GetVarExpr(
         name=dsl.get("name", "get_var"),
@@ -308,7 +540,7 @@ def build_get_traj_var(ctx, dsl):
         key = dsl.get("key", None)
         if isinstance(key, dict) and "k" in key:
             k = key.get("k", None)
-    k_i = None if k is None else int(k)
+    k_i = _resolve_time_index(k, ctx=ctx, where="get_traj_var.k", allow_none=True)
 
     if max_deriv_order is not None:
         return TrajectoryVarDerivativesExpr(
@@ -329,7 +561,10 @@ def build_sub(ctx, dsl):
 
 def build_stack(ctx, dsl):
     r = dsl["range"]
-    k0, k1 = int(r["k0"]), int(r["k1"])
+    k0 = int(_resolve_time_index(r["k0"], ctx=ctx, where="stack.range.k0"))
+    k1 = int(_resolve_time_index(r["k1"], ctx=ctx, where="stack.range.k1"))
+    if k1 < k0:
+        raise ValueError(f"stack.range: expected k0 <= k1, got k0={k0}, k1={k1}.")
     inner = dsl["inner"]
     parts = []
     for k in range(k0, k1 + 1):

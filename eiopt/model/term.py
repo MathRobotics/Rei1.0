@@ -86,7 +86,7 @@ class Expr(Protocol):
 
 @dataclass
 class DirectVectorExpr:
-    """Adapter for legacy callables.
+    """Direct callback-based vector expression.
 
     - fn_value(ctx) -> (m,)
     - fn_blocks(ctx) -> list[blocks], aligned with vars
