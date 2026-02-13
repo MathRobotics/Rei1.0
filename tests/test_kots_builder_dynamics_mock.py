@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib
 import sys
 import types
@@ -7,8 +8,10 @@ import unittest
 
 import numpy as np
 
+from eiopt import solve_runtime
 from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, make_jac_key, make_key
 from eiopt.core.trajectory import TrajectoryMap
+from eiopt.model import build_nullspace_equality_reduction
 
 
 def _ensure_robokots_state_stub() -> None:
@@ -188,7 +191,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
     def test_kots_state_field_name_keeps_canonical_torque_derivative_orders(self) -> None:
         self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_d1")
         self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_d2")
-        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
             _ = _kots_mod.KotsStateBuilder._state_field_name("tau_diff2")
 
     def test_kots_state_ref_backend_fallback_uses_torque_diff_for_derivative(self) -> None:
@@ -268,6 +271,399 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         r, J = compiled.runtime.linearize()
         self.assertTrue(np.allclose(r, np.array([0.0, 0.0], dtype=float)))
         self.assertTrue(np.allclose(J, np.eye(2, dtype=float)))
+
+    def test_compile_kots_trajectory_problem_supports_external_nullspace_eq_runtime(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [0.0, 0.0, 0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "sub",
+                        "name": "q_init_eq",
+                        "a": {
+                            "type": "get_state",
+                            "key": {
+                                "k": 0,
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_COORD,
+                                "field": "q",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                        "b": {
+                            "type": "const",
+                            "var": "p",
+                            "value": [1.0, 2.0],
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data={},
+        )
+        reduction = build_nullspace_equality_reduction(compiled.runtime)
+        self.assertIsNotNone(reduction)
+        assert reduction is not None
+        self.assertEqual(reduction.runtime.pack.n_total, 2)
+        self.assertEqual(compiled.runtime.pack.n_total, 4)
+        runtime_for_solve = reduction.runtime
+        self.assertIs(runtime_for_solve, reduction.runtime)
+
+        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve_runtime(
+            runtime_for_solve,
+            solver="gauss_newton",
+            max_iters=30,
+            tol_r=1e-12,
+            tol_dx=1e-12,
+        )
+        self.assertTrue(converged)
+        p_star = reduction.lift(z_star)
+        self.assertTrue(np.allclose(p_star, np.array([1.0, 2.0, 0.0, 0.0], dtype=float), atol=1e-8))
+
+        p_cur = compiled.runtime.pack.get().copy()
+        self.assertTrue(np.allclose(p_cur, p_star, atol=1e-12))
+        eq_terms = compiled.runtime.linearize_constraint_terms(kind="eq", weighted=False)
+        req = np.concatenate([term.residual for term in eq_terms], axis=0)
+        self.assertLess(float(np.linalg.norm(req)), 1e-10)
+
+    def test_compile_kots_trajectory_problem_nullspace_term_selection(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [0.0, 0.0, 0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "sub",
+                        "name": "q0_eq",
+                        "a": {
+                            "type": "get_state",
+                            "key": {
+                                "k": 0,
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_COORD,
+                                "field": "q",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                        "b": {
+                            "type": "const",
+                            "var": "p",
+                            "value": [1.0, 2.0],
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "sub",
+                        "name": "q1_eq",
+                        "a": {
+                            "type": "get_state",
+                            "key": {
+                                "k": 1,
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_COORD,
+                                "field": "q",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                        "b": {
+                            "type": "const",
+                            "var": "p",
+                            "value": [3.0, 4.0],
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data={},
+        )
+        reduction = build_nullspace_equality_reduction(
+            compiled.runtime,
+            eq_term_indices=[0],
+            objective_term_indices=[2],
+        )
+        self.assertIsNotNone(reduction)
+        assert reduction is not None
+        self.assertEqual(reduction.eq_term_indices, (0,))
+        self.assertEqual(reduction.objective_term_indices, (2,))
+        self.assertEqual(reduction.runtime.pack.n_total, 2)
+
+        selected = reduction.runtime.linearize_terms(weighted=False, term_indices=[2])
+        self.assertEqual([t.term_index for t in selected], [2])
+        with self.assertRaisesRegex(ValueError, "global problem indexing"):
+            reduction.runtime.linearize_terms(weighted=False, term_indices=[1])
+
+    def test_compile_kots_trajectory_problem_nullspace_rejects_non_eq_term_selection(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [0.0, 0.0, 0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "sub",
+                        "name": "q_init_eq",
+                        "a": {
+                            "type": "get_state",
+                            "key": {
+                                "k": 0,
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_COORD,
+                                "field": "q",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                        "b": {
+                            "type": "const",
+                            "var": "p",
+                            "value": [1.0, 2.0],
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "constraint.kind='eq'"):
+            _ = build_nullspace_equality_reduction(
+                compile_kots_trajectory_problem(
+                    dsl,
+                    model=model,
+                    data={},
+                ).runtime,
+                eq_term_indices=[1],
+            )
+
+    def test_compile_kots_trajectory_problem_rejects_legacy_enabled_argument(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [0.0, 0.0, 0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "sub",
+                        "name": "q_init_eq",
+                        "a": {
+                            "type": "get_state",
+                            "key": {
+                                "k": 0,
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_COORD,
+                                "field": "q",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                        "b": {
+                            "type": "const",
+                            "var": "p",
+                            "value": [1.0, 2.0],
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        with self.assertRaisesRegex(TypeError, "enabled"):
+            _ = build_nullspace_equality_reduction(
+                compile_kots_trajectory_problem(
+                    dsl,
+                    model=model,
+                    data={},
+                ).runtime,
+                enabled=False,  # type: ignore[call-arg]
+                eq_term_indices=[0],
+            )
+
+    def test_compile_kots_trajectory_problem_auto_fills_p_dim_and_fill_init(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "steps": 2,
+                "degree": 3,
+                "num_ctrl_points": 4,
+            },
+            "variables": [
+                {"name": "p", "init": {"fill": 0.0}},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data={},
+        )
+        self.assertEqual(compiled.trajectory_map.q_dim, 2)
+        self.assertEqual(compiled.trajectory_map.p_dim, 8)
+        self.assertEqual(compiled.runtime.pack.n_total, 8)
+        self.assertTrue(np.allclose(compiled.runtime.pack.get(), np.zeros((8,), dtype=float)))
+
+    def test_compile_kots_trajectory_problem_does_not_mutate_input_dsl(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "steps": 2,
+                "degree": 3,
+                "num_ctrl_points": 4,
+            },
+            "variables": [
+                {"name": "p", "init": {"fill": 0.0}},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        dsl_before = copy.deepcopy(dsl)
+
+        _ = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data={},
+        )
+        self.assertEqual(dsl, dsl_before)
+        self.assertNotIn("q_dim", dsl["trajectory"])
+        self.assertNotIn("dim", dsl["variables"][0])
+
+    def test_compile_kots_trajectory_problem_rejects_scalar_init_without_fill(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "steps": 2,
+                "degree": 3,
+                "num_ctrl_points": 4,
+            },
+            "variables": [
+                {"name": "p", "init": 0.0},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "p_identity", "var": "p"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "init = \\{ fill = <value> \\}"):
+            _ = compile_kots_trajectory_problem(
+                dsl,
+                model=model,
+                data={},
+            )
 
     def test_compile_kots_trajectory_problem_inferrs_dynamics_fields_from_dsl(self) -> None:
         model = _FakeKotsModel()

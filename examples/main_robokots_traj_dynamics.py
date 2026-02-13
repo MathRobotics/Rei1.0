@@ -25,6 +25,7 @@ except ImportError as e:  # pragma: no cover
 
 from eiopt import format_solve_report, load_problem_toml, solve_runtime
 from eiopt.backends.kots import compile_kots_trajectory_problem
+from eiopt.model import build_nullspace_equality_reduction
 from _kots_traj_common import (
     analytic_joint_velocity,
     collect_ee_pos_traj,
@@ -36,6 +37,7 @@ _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 _ORDER = 5
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "kots_traj_pos_dynamics.toml"
+_USE_NULLSPACE_EQ = True
 
 # Solver selection (edit these in code)
 _SOLVER = "cyipopt"  # "gauss_newton" | "scipy_minimize" | "cyipopt"
@@ -44,19 +46,6 @@ _SCIPY_OPTIONS = {"maxiter": 1000}
 _IPOPT_OPTIONS = {"max_iter": 1000,
                   "tol": 1e-6, "acceptable_tol": 1e-4, "acceptable_iter": 10,
                   "print_level": 5, "print_timing_statistics": "yes"}
-
-# Optional per-term runtime overrides (key: term expr.name in DSL, value: scalar/diag weight).
-_TERM_WEIGHT_OVERRIDES: dict[str, float] = {
-    # "torque_traj_regularization": 1e-4,
-}
-# Optional per-attribute runtime overrides.
-_TERM_ATTR_WEIGHT_OVERRIDES: list[tuple[str, object, float]] = [
-    # ("is_constraint", True, 1e-2),
-]
-# Optional per-constraint-kind overrides ("eq" or "ineq").
-_TERM_CONSTRAINT_KIND_WEIGHT_OVERRIDES: dict[str, float] = {
-    # "ineq": 1e-2,
-}
 
 
 def _plot_trajectory(
@@ -147,49 +136,37 @@ def run_trajectory_dynamics_demo(
         data=data,
     )
     runtime = compiled.runtime
+    nullspace_eq = build_nullspace_equality_reduction(runtime) if _USE_NULLSPACE_EQ else None
+    runtime_for_solve = runtime if nullspace_eq is None else nullspace_eq.runtime
     traj_map = compiled.trajectory_map
     dynamics_fields = tuple(compiled.dynamics_fields)
-    if len(dynamics_fields) == 0:
-        raise SystemExit(
-            "DSL does not request any dynamics get_state field.\n"
-            "Add at least one dynamics term (e.g. field='torque') to plot dynamics trajectory."
-        )
     dt = float(compiled.dt)
     traj_dsl = dsl.get("trajectory", None)
     if not isinstance(traj_dsl, dict):
         raise SystemExit("DSL must contain [trajectory] section.")
-    for term_name, weight in _TERM_WEIGHT_OVERRIDES.items():
-        idx = runtime.set_cost_weight(term_name, weight)
-        print(f"Updated cost weight: term[{idx}] '{term_name}' -> {weight:g}")
-    for attr, value, weight in _TERM_ATTR_WEIGHT_OVERRIDES:
-        idxs = runtime.set_cost_weight_by_attr(attr=attr, value=value, w=weight, require_match=False)
-        if len(idxs) == 0:
-            continue
-        idx_str = ", ".join(str(i) for i in idxs)
-        print(f"Updated cost weight by attr: attr={attr!r}, value={value!r}, terms=[{idx_str}] -> {weight:g}")
-    for kind, weight in _TERM_CONSTRAINT_KIND_WEIGHT_OVERRIDES.items():
-        idxs = runtime.set_cost_weight_by_constraint(kind=kind, w=weight, require_match=False)
-        if len(idxs) == 0:
-            continue
-        idx_str = ", ".join(str(i) for i in idxs)
-        print(f"Updated cost weight by constraint kind: kind={kind!r}, terms=[{idx_str}] -> {weight:g}")
 
     x0 = runtime.pack.get().copy()
-    x_star, _cost, _iters, _rnorm, _dxnorm, _converged = solve_runtime(
-        runtime,
+    x_star_solve, final_cost, iters, residual_norm, step_norm, converged = solve_runtime(
+        runtime_for_solve,
         solver=solver,
         max_iters=max_iters,
         scipy_method=scipy_method,
         scipy_options=_SCIPY_OPTIONS if scipy_options is None else scipy_options,
         ipopt_options=_IPOPT_OPTIONS if ipopt_options is None else ipopt_options,
     )
+    x_star = (
+        np.asarray(x_star_solve, dtype=float).reshape(-1)
+        if nullspace_eq is None
+        else nullspace_eq.lift(x_star_solve)
+    )
+    runtime.pack.apply_dx(x_star - runtime.pack.get().copy())
     print("Optimization completed.")
     print("\tSolver:", solver)
-    print("\tIterations:", _iters)
-    print("\tFinal cost:", _cost)
-    print("\tFinal residual norm:", _rnorm)
-    print("\tFinal step norm:", _dxnorm)
-    print("\tConverged:", _converged)
+    print("\tIterations:", iters)
+    print("\tFinal cost:", final_cost)
+    print("\tFinal residual norm:", residual_norm)
+    print("\tFinal step norm:", step_norm)
+    print("\tConverged:", converged)
 
     steps = int(traj_map.steps)
     q_opt = np.vstack([traj_map.q_at(x_star, k) for k in range(steps)])
@@ -211,15 +188,6 @@ def run_trajectory_dynamics_demo(
     plot_dyn_title = "Joint Torque" if plot_dyn_field == "torque" else f"Joint Dynamics ({plot_dyn_label})"
     plot_dyn = dynamics_traj[plot_dyn_field]
 
-    print("p*:", x_star)
-    for k in range(steps):
-        print(f"q[{k}] =", traj_map.q_at(x_star, k))
-    for k in range(qdot_opt.shape[0]):
-        print(f"qdot[{k}] =", qdot_opt[k])
-    for field, values in dynamics_traj.items():
-        field_name = field
-        for k in range(values.shape[0]):
-            print(f"{field_name}[{k}] =", values[k])
     print("ee* (xyz):\n", ee_opt)
     print(format_solve_report(runtime, x0=x0, x_star=x_star))
     _plot_trajectory(
@@ -237,13 +205,7 @@ def run_trajectory_dynamics_demo(
 
 
 def main() -> int:
-    return run_trajectory_dynamics_demo(
-        solver=_SOLVER,
-        max_iters=1000,
-        scipy_method=_SCIPY_METHOD,
-        scipy_options=_SCIPY_OPTIONS,
-        ipopt_options=_IPOPT_OPTIONS,
-    )
+    return run_trajectory_dynamics_demo()
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -20,6 +20,8 @@ from eiopt.dsl.trajectory import (
 )
 from eiopt import (
     build_term_gradient_matrix,
+    build_term_gradient_matrix_from_stacked,
+    build_term_gradient_matrix_from_terms,
     compile_problem,
     estimate_weights_simplex,
     format_solve_report,
@@ -28,7 +30,16 @@ from eiopt import (
 from eiopt.backends._template import BackendDispatchStateBuilder
 from eiopt.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.solvers import solve_gauss_newton, solve_runtime
-from eiopt.model import Problem, ProblemRuntime, DirectVectorExpr, RuntimeContext, L2Cost, Variable, VariablePack
+from eiopt.model import (
+    Problem,
+    ProblemRuntime,
+    DirectVectorExpr,
+    RuntimeContext,
+    L2Cost,
+    Variable,
+    VariablePack,
+    build_nullspace_equality_reduction,
+)
 
 
 class TestEiOptBasic(unittest.TestCase):
@@ -323,6 +334,19 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(terms_w[0].jacobian, np.array([[1.0]], dtype=float)))
         self.assertTrue(np.allclose(terms_w[1].jacobian, np.array([[3.0]], dtype=float)))
 
+        r_stack, J_stack = runtime.linearize_stacked_terms(weighted=True)
+        self.assertTrue(np.allclose(r_stack, np.array([2.0, 6.0], dtype=float)))
+        self.assertTrue(np.allclose(J_stack, np.array([[1.0], [3.0]], dtype=float)))
+
+        r_sel, J_sel = runtime.linearize_stacked_terms(weighted=False, term_indices=[1])
+        self.assertTrue(np.allclose(r_sel, np.array([2.0], dtype=float)))
+        self.assertTrue(np.allclose(J_sel, np.array([[1.0]], dtype=float)))
+
+        r_layout, J_layout, layout = runtime.linearize_stacked_terms_with_layout(weighted=False)
+        self.assertTrue(np.allclose(r_layout, np.array([2.0, 2.0], dtype=float)))
+        self.assertTrue(np.allclose(J_layout, np.array([[1.0], [1.0]], dtype=float)))
+        self.assertEqual([(s.term_index, s.row_start, s.row_stop) for s in layout], [(0, 0, 1), (1, 1, 2)])
+
     def test_runtime_linearize_constraint_terms(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
@@ -351,6 +375,251 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertEqual([t.name for t in ineq_terms], ["ineq_term"])
         self.assertTrue(np.allclose(eq_terms[0].residual, np.array([2.0], dtype=float)))
         self.assertTrue(np.allclose(ineq_terms[0].residual, np.array([2.0], dtype=float)))
+
+    def test_build_nullspace_equality_reduction_and_solve(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "get_state",
+                        "name": "eq_sum",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "demo",
+                            "owner_name": "sys",
+                            "dtype": "vec",
+                            "field": "eq1",
+                        },
+                        "jac": {"var": "x"},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "x_reg", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        def build_state(x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            x = np.asarray(x_all, dtype=float).reshape(-1)
+            req = [] if required is None else list(required)
+            out: dict[StateKey, object] = {}
+            for key in req:
+                if key.owner.owner_type != "demo" or key.owner.owner_name != "sys":
+                    continue
+                if key.field == "eq1":
+                    out[key] = np.array([x[0] + x[1] - 1.0], dtype=float)
+                    continue
+                if key.field == "eq1_J_x":
+                    out[key] = np.array([[1.0, 1.0]], dtype=float)
+            return out
+
+        runtime = compile_problem(dsl, build_state=build_state)
+        reduction = build_nullspace_equality_reduction(runtime)
+
+        self.assertEqual(reduction.eq_term_indices, (0,))
+        self.assertEqual(reduction.objective_term_indices, (1,))
+        self.assertEqual(reduction.runtime.pack.n_total, 1)
+        selected = reduction.runtime.linearize_terms(weighted=False, term_indices=[1])
+        self.assertEqual([t.term_index for t in selected], [1])
+        with self.assertRaisesRegex(ValueError, "global problem indexing"):
+            reduction.runtime.linearize_terms(weighted=False, term_indices=[0])
+
+        z0 = reduction.runtime.pack.get().copy()
+        x0 = reduction.lift(z0)
+        self.assertAlmostEqual(float(np.sum(x0)), 1.0, places=10)
+
+        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve_runtime(
+            reduction.runtime,
+            solver="gauss_newton",
+            max_iters=30,
+            tol_r=1e-12,
+            tol_dx=1e-12,
+        )
+        self.assertTrue(converged)
+
+        x_star = reduction.lift(z_star)
+        self.assertTrue(np.allclose(x_star, np.array([0.5, 0.5], dtype=float), atol=1e-8))
+        self.assertTrue(np.allclose(runtime.pack.get(), x_star, atol=1e-12))
+
+        eq_terms = runtime.linearize_constraint_terms(kind="eq", weighted=False)
+        r_eq = np.concatenate([t.residual for t in eq_terms], axis=0)
+        self.assertLess(float(np.linalg.norm(r_eq)), 1e-10)
+
+    def test_nullspace_runtime_linearize_matches_linearize_terms_stacking(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 3, "init": [0.0, 0.0, 0.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "get_state",
+                        "name": "eq_sum",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "demo",
+                            "owner_name": "sys",
+                            "dtype": "vec",
+                            "field": "eq1",
+                        },
+                        "jac": {"var": "x"},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "x_reg", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 2.0},
+                },
+            ],
+        }
+
+        def build_state(x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            x = np.asarray(x_all, dtype=float).reshape(-1)
+            req = [] if required is None else list(required)
+            out: dict[StateKey, object] = {}
+            for key in req:
+                if key.owner.owner_type != "demo" or key.owner.owner_name != "sys":
+                    continue
+                if key.field == "eq1":
+                    out[key] = np.array([x[0] + x[1] - 1.0], dtype=float)
+                    continue
+                if key.field == "eq1_J_x":
+                    out[key] = np.array([[1.0, 1.0, 0.0]], dtype=float)
+            return out
+
+        runtime = compile_problem(dsl, build_state=build_state)
+        reduction = build_nullspace_equality_reduction(runtime)
+        reduced = reduction.runtime
+
+        r_fast, J_fast = reduced.linearize()
+        terms = reduced.linearize_terms(weighted=True)
+        r_terms = np.concatenate([np.asarray(t.residual, dtype=float).reshape(-1) for t in terms], axis=0)
+        J_terms = np.vstack([np.asarray(t.jacobian, dtype=float) for t in terms])
+
+        self.assertTrue(np.allclose(r_fast, r_terms, atol=1e-12))
+        self.assertTrue(np.allclose(J_fast, J_terms, atol=1e-12))
+
+    def test_build_nullspace_equality_reduction_rejects_nonlinear_eq_by_default(self) -> None:
+        x_var = Variable(name="x", x=np.array([1.0], dtype=float))
+        pack = VariablePack([x_var])
+
+        def eq_value(ctx: RuntimeContext) -> np.ndarray:
+            x = float(ctx.pack.vars[0].x[0])
+            return np.array([x * x - 1.0], dtype=float)
+
+        def eq_blocks(ctx: RuntimeContext):
+            x = float(ctx.pack.vars[0].x[0])
+            return [np.array([[2.0 * x]], dtype=float)]
+
+        def obj_value(ctx: RuntimeContext) -> np.ndarray:
+            x = float(ctx.pack.vars[0].x[0])
+            return np.array([x], dtype=float)
+
+        def obj_blocks(_ctx: RuntimeContext):
+            return [np.array([[1.0]], dtype=float)]
+
+        eq_expr = DirectVectorExpr(name="eq_nonlin", vars=[x_var], fn_value=eq_value, fn_blocks=eq_blocks)
+        obj_expr = DirectVectorExpr(name="x_reg", vars=[x_var], fn_value=obj_value, fn_blocks=obj_blocks)
+        problem = Problem(
+            variables=pack,
+            terms=[(eq_expr, L2Cost()), (obj_expr, L2Cost())],
+            term_attrs=[{"constraint": "eq", "constraint_kind": "eq", "is_constraint": True}, {}],
+        )
+        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+
+        with self.assertRaisesRegex(ValueError, "linearity check failed"):
+            _ = build_nullspace_equality_reduction(
+                runtime,
+                linearity_samples=2,
+                linearity_step=1e-3,
+            )
+
+        reduction = build_nullspace_equality_reduction(
+            runtime,
+            check_linearity=False,
+        )
+        self.assertEqual(reduction.eq_term_indices, (0,))
+
+    def test_build_nullspace_equality_reduction_rejects_non_eq_term_indices(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {"type": "get_var", "name": "eq_x", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "obj_x", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with self.assertRaisesRegex(ValueError, "constraint.kind='eq'"):
+            _ = build_nullspace_equality_reduction(runtime, eq_term_indices=[1])
+
+    def test_build_nullspace_equality_reduction_manual_switch(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "get_state",
+                        "name": "eq_sum",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "demo",
+                            "owner_name": "sys",
+                            "dtype": "vec",
+                            "field": "eq1",
+                        },
+                        "jac": {"var": "x"},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "x_reg", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        def build_state(x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            x = np.asarray(x_all, dtype=float).reshape(-1)
+            req = [] if required is None else list(required)
+            out: dict[StateKey, object] = {}
+            for key in req:
+                if key.owner.owner_type != "demo" or key.owner.owner_name != "sys":
+                    continue
+                if key.field == "eq1":
+                    out[key] = np.array([x[0] + x[1] - 1.0], dtype=float)
+                    continue
+                if key.field == "eq1_J_x":
+                    out[key] = np.array([[1.0, 1.0]], dtype=float)
+            return out
+
+        runtime = compile_problem(dsl, build_state=build_state)
+        use_nullspace = False
+        reduction_none = build_nullspace_equality_reduction(runtime) if use_nullspace else None
+        runtime_for_solve = runtime if reduction_none is None else reduction_none.runtime
+        self.assertIs(runtime_for_solve, runtime)
+
+        reduction = build_nullspace_equality_reduction(runtime)
+        self.assertIsNotNone(reduction)
+        assert reduction is not None
+        self.assertEqual(reduction.runtime.pack.n_total, 1)
+
+        with self.assertRaisesRegex(TypeError, "enabled"):
+            _ = build_nullspace_equality_reduction(
+                runtime,
+                enabled=False,  # type: ignore[call-arg]
+                eq_term_indices=[0],
+            )
 
     def test_runtime_collect_state_traj_helper(self) -> None:
         dsl = {
@@ -431,7 +700,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
             _ = runtime.collect_state_traj(
                 owner_type="total_joint",
                 owner_name="robot",
@@ -451,7 +720,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "deprecated dtype alias"):
+        with self.assertRaisesRegex(ValueError, "unsupported dtype alias"):
             _ = runtime.collect_state_traj(
                 owner_type="total_joint",
                 owner_name="robot",
@@ -511,11 +780,74 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertEqual(term_indices, [0, 1])
         self.assertTrue(np.allclose(A, np.array([[-1.0, 1.0]], dtype=float)))
 
+        r_stack, J_stack, layout = runtime.linearize_stacked_terms_with_layout(weighted=False)
+        A_from_stacked, idx_from_stacked = build_term_gradient_matrix_from_stacked(
+            r_stack,
+            J_stack,
+            layout,
+            n_total=int(runtime.pack.n_total),
+        )
+        self.assertTrue(np.allclose(A_from_stacked, A))
+        self.assertEqual(idx_from_stacked, term_indices)
+
         w, info = estimate_weights_simplex(A, return_info=True)
         self.assertTrue(np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6))
         self.assertAlmostEqual(float(np.sum(w)), 1.0, places=8)
         self.assertTrue(bool(info["converged"]))
         self.assertLess(float(info["objective"]), 1e-12)
+
+    def test_ioc_matrix_reduced_runtime_matches_from_terms(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "get_state",
+                        "name": "eq_sum",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "demo",
+                            "owner_name": "sys",
+                            "dtype": "vec",
+                            "field": "eq1",
+                        },
+                        "jac": {"var": "x"},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "x_reg", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        def build_state(x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            x = np.asarray(x_all, dtype=float).reshape(-1)
+            req = [] if required is None else list(required)
+            out: dict[StateKey, object] = {}
+            for key in req:
+                if key.owner.owner_type != "demo" or key.owner.owner_name != "sys":
+                    continue
+                if key.field == "eq1":
+                    out[key] = np.array([x[0] + x[1] - 1.0], dtype=float)
+                    continue
+                if key.field == "eq1_J_x":
+                    out[key] = np.array([[1.0, 1.0]], dtype=float)
+            return out
+
+        runtime = compile_problem(dsl, build_state=build_state)
+        reduced = build_nullspace_equality_reduction(runtime).runtime
+
+        A_fast, idx_fast = build_term_gradient_matrix(reduced, weighted=False)
+        terms = reduced.linearize_terms(weighted=False)
+        A_ref, idx_ref = build_term_gradient_matrix_from_terms(
+            terms,
+            n_total=int(reduced.pack.n_total),
+        )
+        self.assertEqual(idx_fast, idx_ref)
+        self.assertTrue(np.allclose(A_fast, A_ref))
 
     def test_format_solve_report_includes_diagnostics(self) -> None:
         dsl = {
@@ -730,7 +1062,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
             _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_uses_torque_d1_field(self) -> None:
@@ -778,7 +1110,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "deprecated dtype alias"):
+        with self.assertRaisesRegex(ValueError, "unsupported dtype alias"):
             _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_rejects_dtau_alias(self) -> None:
@@ -801,7 +1133,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
             _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_state_schema_dynamics_field_aliases(self) -> None:
@@ -824,11 +1156,11 @@ class TestEiOptBasic(unittest.TestCase):
             "dtau2",
             "tau_diff2",
         ):
-            with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+            with self.assertRaisesRegex(ValueError, "unsupported field alias"):
                 _ = canonical_field_name(legacy)
         self.assertEqual(canonical_field_name("torque_d1_J_p"), "torque_d1_J_p")
         for legacy_jac in ("dtau_J_p", "tau_diff_J_p", "torque_diff2_J_p"):
-            with self.assertRaisesRegex(ValueError, "deprecated field alias"):
+            with self.assertRaisesRegex(ValueError, "unsupported field alias"):
                 _ = canonical_field_name(legacy_jac)
 
     def test_stack_get_state_uses_torque_d1_field(self) -> None:
@@ -861,6 +1193,63 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertEqual({k.k for k in torque_d1_keys}, {0, 1})
         self.assertEqual({k.k for k in torque_d1_jac_keys}, {0, 1})
 
+    def test_stack_get_state_supports_last_range(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "stack",
+                        "range": {"k0": 0, "k1": "last"},
+                        "inner": {
+                            "type": "get_state",
+                            "key": {
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_DYNAMICS,
+                                "field": "torque_d1",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        torque_d1_keys = [k for k in runtime.required if k.field == "torque_d1"]
+        torque_d1_jac_keys = [k for k in runtime.required if k.field == "torque_d1_J_p"]
+        self.assertEqual({k.k for k in torque_d1_keys}, {0, 1, 2})
+        self.assertEqual({k.k for k in torque_d1_jac_keys}, {0, 1, 2})
+
+    def test_get_state_builder_supports_last_index(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "key": {
+                            "k": "last",
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "torque",
+                        },
+                        "jac": {"var": "q"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        torque_keys = [k for k in runtime.required if k.field == "torque"]
+        torque_jac_keys = [k for k in runtime.required if k.field == "torque_J_q"]
+        self.assertEqual({k.k for k in torque_keys}, {2})
+        self.assertEqual({k.k for k in torque_jac_keys}, {2})
+
     def test_get_var_expr_reads_pack(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
         pack = VariablePack([q_var])
@@ -890,6 +1279,24 @@ class TestEiOptBasic(unittest.TestCase):
         expected_J = np.zeros((2, 6), dtype=float)
         expected_J[:, 2:4] = np.eye(2, dtype=float)
         self.assertTrue(np.allclose(J1, expected_J))
+
+    def test_get_var_expr_supports_last_index(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "variables": [{"name": "q", "dim": 6, "init": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "q_last", "var": "q", "k": "last"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+        self.assertTrue(np.allclose(r, np.array([5.0, 6.0], dtype=float)))
+        expected_J = np.zeros((2, 6), dtype=float)
+        expected_J[:, 4:6] = np.eye(2, dtype=float)
+        self.assertTrue(np.allclose(J, expected_J))
 
     def test_get_named_expr_value_single(self) -> None:
         dsl = {
@@ -1268,6 +1675,40 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(r, traj.q_at(p, 1)))
         self.assertTrue(np.allclose(J, traj.dqdp_at(1)))
 
+    def test_get_traj_var_expr_slices_by_last(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.1},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 1,
+                "num_ctrl_points": 2,
+                "q_dim": 2,
+            },
+            "variables": [
+                {"name": "p", "dim": 4, "init": [1.0, 2.0, 3.0, 4.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {"type": "get_traj_var", "name": "q_traj_last", "var": "p", "k": "last"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+
+        traj = build_trajectory_map(
+            dsl["trajectory"],
+            default_steps=3,
+            default_q_dim=2,
+        )
+        p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
+
+        self.assertTrue(np.allclose(r, traj.q_at(p, 2)))
+        self.assertTrue(np.allclose(J, traj.dqdp_at(2)))
+
     def test_time_diff_expr_on_traj_var(self) -> None:
         dsl = {
             "time": {"N": 2, "dt": 0.1},
@@ -1374,6 +1815,135 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(r, np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0], dtype=float)))
         self.assertEqual(J.shape, (6, 2))
         self.assertTrue(np.allclose(J, 0.0))
+
+    def test_variable_init_fill_expands_to_dim(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 3, "init": {"fill": 2.0}}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+        self.assertTrue(np.allclose(r, np.array([2.0, 2.0, 2.0], dtype=float)))
+        self.assertTrue(np.allclose(J, np.eye(3, dtype=float)))
+
+    def test_variable_init_scalar_requires_fill(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 3, "init": 2.0}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "init = \\{ fill = <value> \\}"):
+            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+    def test_sub_expr_with_const_fill(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 3, "init": [0.0, 0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": {"fill": 1.0}},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+        self.assertTrue(np.allclose(r, np.array([-1.0, -1.0, -1.0], dtype=float)))
+        self.assertTrue(np.allclose(J, np.eye(3, dtype=float)))
+
+    def test_sub_expr_with_const_repeat_fill_and_inferred_segment_dim(self) -> None:
+        dsl = {
+            "time": {"N": 1, "dt": 0.1},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "a": {"type": "get_traj_var", "var": "p"},
+                        "b": {"type": "const_repeat", "var": "p", "value": {"fill": 1.0}},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+        self.assertTrue(np.allclose(r, np.array([-1.0, -1.0, -1.0, -1.0], dtype=float)))
+        self.assertTrue(np.allclose(J, np.array([[1.0, 0.0], [0.0, 1.0], [2.0, 0.0], [0.0, 2.0]], dtype=float)))
+
+    def test_sub_expr_with_const_fill_infers_q_dim_from_bspline_trajectory(self) -> None:
+        dsl = {
+            "time": {"N": 10, "dt": 0.1},
+            "trajectory": {
+                "type": "bspline",
+                "var": "p",
+                "degree": 4,
+                "num_ctrl_points": 6,
+            },
+            "variables": [{"name": "p", "dim": 12, "init": {"fill": 0.0}}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "a": {
+                            "type": "get_traj_var",
+                            "var": "p",
+                            "derivative_order": 1,
+                            "derivative_wrt": "time",
+                            "k": 0,
+                        },
+                        "b": {"type": "const", "var": "p", "value": {"fill": 1.0}},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        r, J = runtime.linearize()
+        self.assertEqual(r.shape, (2,))
+        self.assertTrue(np.allclose(r, np.array([-1.0, -1.0], dtype=float)))
+        self.assertEqual(J.shape[0], 2)
+
+    def test_sub_expr_with_scalar_const_requires_fill(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 3, "init": [0.0, 0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": 1.0},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "value = \\{ fill = <value> \\}"):
+            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_build_trajectory_maps_with_derivatives_linear_uses_finite_difference(self) -> None:
         traj_dsl = {
