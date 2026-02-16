@@ -8,10 +8,10 @@ import unittest
 
 import numpy as np
 
-from eiopt import solve_runtime
 from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, make_jac_key, make_key
 from eiopt.core.trajectory import TrajectoryMap
-from eiopt.model import build_nullspace_equality_reduction
+from eiopt.optimize.reductions import build_nullspace_equality_reduction
+from eiopt.optimize.solvers import solve
 
 
 def _ensure_robokots_state_stub() -> None:
@@ -38,9 +38,10 @@ def _ensure_robokots_state_stub() -> None:
 
 
 _ensure_robokots_state_stub()
-_kots_mod = importlib.import_module("eiopt.backends.kots")
-KotsTrajectoryStateBuilder = _kots_mod.KotsTrajectoryStateBuilder
-compile_kots_trajectory_problem = _kots_mod.compile_kots_trajectory_problem
+_kots_state_mod = importlib.import_module("eiopt.backends.state.kots")
+_kots_opt_mod = importlib.import_module("eiopt.optimize_backends.kots")
+KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
+compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem
 
 
 class _FakeKotsModel:
@@ -189,13 +190,13 @@ def _traj_map_from_rows(rows: list[list[float]]) -> TrajectoryMap:
 
 class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
     def test_kots_state_field_name_keeps_canonical_torque_derivative_orders(self) -> None:
-        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_d1")
-        self.assertEqual(_kots_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_d2")
+        self.assertEqual(_kots_state_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_d1")
+        self.assertEqual(_kots_state_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_d2")
         with self.assertRaisesRegex(ValueError, "unsupported field alias"):
-            _ = _kots_mod.KotsStateBuilder._state_field_name("tau_diff2")
+            _ = _kots_state_mod.KotsStateBuilder._state_field_name("tau_diff2")
 
     def test_kots_state_ref_backend_fallback_uses_torque_diff_for_derivative(self) -> None:
-        original_state_type = _kots_mod.StateType
+        original_state_type = _kots_state_mod.StateType
 
         class _StrictStateType:
             def __init__(self, owner_type: str, owner_name: str, field: str, frame: str | None) -> None:
@@ -206,9 +207,9 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 self.field = field
                 self.frame = frame
 
-        _kots_mod.StateType = _StrictStateType
+        _kots_state_mod.StateType = _StrictStateType
         try:
-            builder = _kots_mod.KotsStateBuilder(
+            builder = _kots_state_mod.KotsStateBuilder(
                 _FakeKotsModel(),
                 data={},
                 dynamics_fields=("torque_d1",),
@@ -223,7 +224,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             state_ref = builder._resolve_state_ref(key)
             self.assertEqual(getattr(state_ref, "field", None), "torque_diff1")
         finally:
-            _kots_mod.StateType = original_state_type
+            _kots_state_mod.StateType = original_state_type
 
     def test_compile_kots_trajectory_problem_builds_runtime_bundle(self) -> None:
         model = _FakeKotsModel()
@@ -336,7 +337,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         runtime_for_solve = reduction.runtime
         self.assertIs(runtime_for_solve, reduction.runtime)
 
-        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve_runtime(
+        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime_for_solve,
             solver="gauss_newton",
             max_iters=30,

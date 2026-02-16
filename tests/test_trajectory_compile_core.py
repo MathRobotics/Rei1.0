@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from eiopt.dsl.trajectory_compile import prepare_trajectory_problem_dsl
+from eiopt.optimize.dsl.trajectory_compile import prepare_trajectory_problem_dsl
 
 
 class TestTrajectoryCompileCore(unittest.TestCase):

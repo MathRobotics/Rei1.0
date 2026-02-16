@@ -43,8 +43,8 @@ def _ensure_pinocchio_stub() -> None:
 
 
 _ensure_pinocchio_stub()
-_pin_mod = importlib.import_module("eiopt.backends.pinocchio")
-compile_pinocchio_trajectory_problem = _pin_mod.compile_pinocchio_trajectory_problem
+_pin_opt_mod = importlib.import_module("eiopt.optimize_backends.pinocchio")
+compile_pinocchio_trajectory_problem = _pin_opt_mod.compile_pinocchio_trajectory_problem
 
 
 class _FakePinModel:

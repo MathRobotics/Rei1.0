@@ -13,33 +13,35 @@ from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
 from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_KINEMATICS, DYNAMICS_FIELDS, canonical_field_name, jac_field
 from eiopt.core.time_grid import TimeGrid
 from eiopt.core.trajectory import TrajectoryMap
-from eiopt.dsl.trajectory import (
+from eiopt.optimize.dsl import (
     build_trajectory_map,
     build_trajectory_map_with_derivative,
     build_trajectory_maps_with_derivatives,
 )
-from eiopt import (
-    build_term_gradient_matrix,
-    build_term_gradient_matrix_from_stacked,
-    build_term_gradient_matrix_from_terms,
-    compile_problem,
-    estimate_weights_simplex,
+from eiopt.optimize.builder import compile_nls_problem
+from eiopt.optimize.report import (
     format_solve_report,
     get_named_expr_value,
 )
-from eiopt.backends._template import BackendDispatchStateBuilder
-from eiopt.expr.nodes import GetStateExpr, GetVarExpr
-from eiopt.solvers import solve_gauss_newton, solve_runtime
-from eiopt.model import (
-    Problem,
-    ProblemRuntime,
+from eiopt.optimize.simplex_weight_solver import estimate_weights_simplex
+from eiopt.optimize.term_gradient_matrix import (
+    build_term_gradient_matrix,
+    build_term_gradient_matrix_from_stacked,
+    build_term_gradient_matrix_from_terms,
+)
+from eiopt.backends.state.template import BackendDispatchStateBuilder
+from eiopt.core.expr.nodes import GetStateExpr, GetVarExpr
+from eiopt.core.expr.types import (
     DirectVectorExpr,
     RuntimeContext,
-    L2Cost,
     Variable,
     VariablePack,
-    build_nullspace_equality_reduction,
 )
+from eiopt.optimize.costs import L2Cost
+from eiopt.optimize.problem import NLSProblem
+from eiopt.optimize.reductions import build_nullspace_equality_reduction
+from eiopt.optimize.runtime import NLSRuntime
+from eiopt.optimize.solvers import solve, solve_gauss_newton
 
 
 class TestEiOptBasic(unittest.TestCase):
@@ -55,8 +57,8 @@ class TestEiOptBasic(unittest.TestCase):
             return [np.array([[1.0]], dtype=float)]
 
         expr = DirectVectorExpr(name="x_minus_3", vars=[x_var], fn_value=value, fn_blocks=blocks)
-        problem = Problem(variables=pack, terms=[(expr, L2Cost())])
-        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+        problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
         x0 = pack.get().copy()
         x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(runtime, max_iters=5, tol_r=1e-14, tol_dx=1e-14)
@@ -81,10 +83,10 @@ class TestEiOptBasic(unittest.TestCase):
             return [np.array([[1.0]], dtype=float)]
 
         expr = DirectVectorExpr(name="x_minus_2_5", vars=[x_var], fn_value=value, fn_blocks=blocks)
-        problem = Problem(variables=pack, terms=[(expr, L2Cost())])
-        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+        problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_runtime(
+        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime,
             solver="gauss_newton",
             max_iters=5,
@@ -106,11 +108,11 @@ class TestEiOptBasic(unittest.TestCase):
             return [np.array([[1.0]], dtype=float)]
 
         expr = DirectVectorExpr(name="x_identity", vars=[x_var], fn_value=value, fn_blocks=blocks)
-        problem = Problem(variables=pack, terms=[(expr, L2Cost())])
-        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+        problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
         with self.assertRaisesRegex(ValueError, "Unknown solver"):
-            _ = solve_runtime(runtime, solver="unknown_solver")
+            _ = solve(runtime, solver="unknown_solver")
 
     def test_runtime_set_cost_weight_updates_specific_term_and_invalidates_cache(self) -> None:
         dsl = {
@@ -127,7 +129,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r0, _J0 = runtime.linearize()
         self.assertTrue(np.allclose(r0, np.array([2.0, 4.0], dtype=float)))
 
@@ -152,7 +154,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(ValueError, "multiple terms matched"):
             runtime.set_cost_weight("dup", 3.0)
 
@@ -167,7 +169,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(TypeError, "does not support runtime weight updates"):
             runtime.set_cost_weight("plain", 3.0)
 
@@ -192,7 +194,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         self.assertEqual(runtime.find_term_indices(attr="is_constraint", value=True), [0])
         self.assertEqual(runtime.find_term_indices(attr="group", value="constraint"), [1])
         self.assertEqual(runtime.term_attrs("constraint_term").get("is_constraint"), True)
@@ -221,7 +223,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r0, _J0 = runtime.linearize()
         self.assertTrue(np.allclose(r0, np.array([2.0, 4.0, 2.0], dtype=float)))
 
@@ -243,7 +245,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(ValueError, "no term matched"):
             runtime.set_cost_weight_by_attr(attr="group", value="constraint", w=3.0)
 
@@ -268,7 +270,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         self.assertEqual(runtime.find_constraint_term_indices(), [0, 1])
         self.assertEqual(runtime.find_constraint_term_indices(kind="eq"), [0])
         self.assertEqual(runtime.find_constraint_term_indices(kind="ineq"), [1])
@@ -292,7 +294,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         idxs = runtime.set_cost_weight_by_constraint(kind="ineq", w=9.0)
         self.assertEqual(idxs, [1])
 
@@ -316,7 +318,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         terms_raw = runtime.linearize_terms(weighted=False)
         terms_w = runtime.linearize_terms(weighted=True)
 
@@ -367,7 +369,7 @@ class TestEiOptBasic(unittest.TestCase):
                 },
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         eq_terms = runtime.linearize_constraint_terms(kind="eq", weighted=False)
         ineq_terms = runtime.linearize_constraint_terms(kind="ineq", weighted=False)
@@ -417,7 +419,7 @@ class TestEiOptBasic(unittest.TestCase):
                     out[key] = np.array([[1.0, 1.0]], dtype=float)
             return out
 
-        runtime = compile_problem(dsl, build_state=build_state)
+        runtime = compile_nls_problem(dsl, build_state=build_state)
         reduction = build_nullspace_equality_reduction(runtime)
 
         self.assertEqual(reduction.eq_term_indices, (0,))
@@ -432,7 +434,7 @@ class TestEiOptBasic(unittest.TestCase):
         x0 = reduction.lift(z0)
         self.assertAlmostEqual(float(np.sum(x0)), 1.0, places=10)
 
-        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve_runtime(
+        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             reduction.runtime,
             solver="gauss_newton",
             max_iters=30,
@@ -490,7 +492,7 @@ class TestEiOptBasic(unittest.TestCase):
                     out[key] = np.array([[1.0, 1.0, 0.0]], dtype=float)
             return out
 
-        runtime = compile_problem(dsl, build_state=build_state)
+        runtime = compile_nls_problem(dsl, build_state=build_state)
         reduction = build_nullspace_equality_reduction(runtime)
         reduced = reduction.runtime
 
@@ -523,12 +525,12 @@ class TestEiOptBasic(unittest.TestCase):
 
         eq_expr = DirectVectorExpr(name="eq_nonlin", vars=[x_var], fn_value=eq_value, fn_blocks=eq_blocks)
         obj_expr = DirectVectorExpr(name="x_reg", vars=[x_var], fn_value=obj_value, fn_blocks=obj_blocks)
-        problem = Problem(
+        problem = NLSProblem(
             variables=pack,
             terms=[(eq_expr, L2Cost()), (obj_expr, L2Cost())],
             term_attrs=[{"constraint": "eq", "constraint_kind": "eq", "is_constraint": True}, {}],
         )
-        runtime = ProblemRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+        runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
         with self.assertRaisesRegex(ValueError, "linearity check failed"):
             _ = build_nullspace_equality_reduction(
@@ -558,7 +560,7 @@ class TestEiOptBasic(unittest.TestCase):
                 },
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(ValueError, "constraint.kind='eq'"):
             _ = build_nullspace_equality_reduction(runtime, eq_term_indices=[1])
 
@@ -603,7 +605,7 @@ class TestEiOptBasic(unittest.TestCase):
                     out[key] = np.array([[1.0, 1.0]], dtype=float)
             return out
 
-        runtime = compile_problem(dsl, build_state=build_state)
+        runtime = compile_nls_problem(dsl, build_state=build_state)
         use_nullspace = False
         reduction_none = build_nullspace_equality_reduction(runtime) if use_nullspace else None
         runtime_for_solve = runtime if reduction_none is None else reduction_none.runtime
@@ -643,7 +645,7 @@ class TestEiOptBasic(unittest.TestCase):
                 out[key] = np.array([float(key.k), float(key.k) + 10.0], dtype=float)
             return out
 
-        runtime = compile_problem(dsl, build_state=build_state)
+        runtime = compile_nls_problem(dsl, build_state=build_state)
         traj = runtime.collect_state_traj(
             owner_type="demo",
             owner_name="thing",
@@ -677,7 +679,7 @@ class TestEiOptBasic(unittest.TestCase):
                 out[key] = np.array([float(key.k)], dtype=float)
             return out
 
-        runtime = compile_problem(dsl, build_state=build_state)
+        runtime = compile_nls_problem(dsl, build_state=build_state)
         traj = runtime.collect_state_traj(
             owner_type="total_joint",
             owner_name="robot",
@@ -699,7 +701,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(ValueError, "unsupported field alias"):
             _ = runtime.collect_state_traj(
                 owner_type="total_joint",
@@ -719,7 +721,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(ValueError, "unsupported dtype alias"):
             _ = runtime.collect_state_traj(
                 owner_type="total_joint",
@@ -739,7 +741,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(KeyError, "missing required keys"):
             _ = runtime.collect_state_traj(
                 owner_type="demo",
@@ -773,7 +775,7 @@ class TestEiOptBasic(unittest.TestCase):
                 },
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         A, term_indices = build_term_gradient_matrix(runtime, weighted=False)
         self.assertEqual(A.shape, (1, 2))
@@ -837,7 +839,7 @@ class TestEiOptBasic(unittest.TestCase):
                     out[key] = np.array([[1.0, 1.0]], dtype=float)
             return out
 
-        runtime = compile_problem(dsl, build_state=build_state)
+        runtime = compile_nls_problem(dsl, build_state=build_state)
         reduced = build_nullspace_equality_reduction(runtime).runtime
 
         A_fast, idx_fast = build_term_gradient_matrix(reduced, weighted=False)
@@ -859,7 +861,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         report = format_solve_report(runtime)
         self.assertIn("Diagnostics:", report)
         self.assertIn("||J^T r||", report)
@@ -879,7 +881,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(ValueError, "must be 'eq' or 'ineq'"):
-            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+            _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_expr_reads_cache(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
@@ -939,7 +941,7 @@ class TestEiOptBasic(unittest.TestCase):
         def build_state(_x_all: np.ndarray, *, pack=None, time=None, required=None):
             return {}
 
-        runtime = compile_problem(dsl, build_state=build_state)
+        runtime = compile_nls_problem(dsl, build_state=build_state)
         fields = {k.field for k in runtime.required}
         self.assertIn("pos", fields)
         self.assertIn(jac_field("pos", var="q"), fields)
@@ -1011,7 +1013,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         fields = {k.field for k in runtime.required}
         self.assertIn("pos", fields)
         self.assertIn(jac_field("pos", var="p"), fields)
@@ -1040,7 +1042,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(ValueError, "Multiple variables exist"):
-            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+            _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_rejects_tau_alias(self) -> None:
         dsl = {
@@ -1063,7 +1065,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(ValueError, "unsupported field alias"):
-            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+            _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_uses_torque_d1_field(self) -> None:
         dsl = {
@@ -1085,7 +1087,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         fields = {k.field for k in runtime.required}
         self.assertIn("torque_d1", fields)
         self.assertIn("torque_d1_J_q", fields)
@@ -1111,7 +1113,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(ValueError, "unsupported dtype alias"):
-            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+            _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_rejects_dtau_alias(self) -> None:
         dsl = {
@@ -1134,7 +1136,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(ValueError, "unsupported field alias"):
-            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+            _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_state_schema_dynamics_field_aliases(self) -> None:
         self.assertIn("torque", DYNAMICS_FIELDS)
@@ -1187,7 +1189,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         torque_d1_keys = [k for k in runtime.required if k.field == "torque_d1"]
         torque_d1_jac_keys = [k for k in runtime.required if k.field == "torque_d1_J_p"]
         self.assertEqual({k.k for k in torque_d1_keys}, {0, 1})
@@ -1217,7 +1219,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         torque_d1_keys = [k for k in runtime.required if k.field == "torque_d1"]
         torque_d1_jac_keys = [k for k in runtime.required if k.field == "torque_d1_J_p"]
         self.assertEqual({k.k for k in torque_d1_keys}, {0, 1, 2})
@@ -1244,7 +1246,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         torque_keys = [k for k in runtime.required if k.field == "torque"]
         torque_jac_keys = [k for k in runtime.required if k.field == "torque_J_q"]
         self.assertEqual({k.k for k in torque_keys}, {2})
@@ -1291,7 +1293,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
         self.assertTrue(np.allclose(r, np.array([5.0, 6.0], dtype=float)))
         expected_J = np.zeros((2, 6), dtype=float)
@@ -1313,7 +1315,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         x_now = get_named_expr_value(runtime, name="x_now")
         self.assertTrue(np.allclose(x_now, np.array([1.5, -2.0], dtype=float)))
 
@@ -1333,7 +1335,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         with self.assertRaisesRegex(ValueError, "multiple named Expr values matched"):
             _ = get_named_expr_value(runtime, name="x_k")
 
@@ -1357,7 +1359,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         traj = build_trajectory_map(
@@ -1398,7 +1400,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         traj = build_trajectory_map(
@@ -1438,7 +1440,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         traj_d1 = build_trajectory_map_with_derivative(
@@ -1483,7 +1485,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         maps = build_trajectory_maps_with_derivatives(
@@ -1531,7 +1533,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         maps = build_trajectory_maps_with_derivatives(
@@ -1662,7 +1664,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         traj = build_trajectory_map(
@@ -1696,7 +1698,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         traj = build_trajectory_map(
@@ -1735,7 +1737,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         traj = build_trajectory_map(
@@ -1777,7 +1779,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         q = np.array([0.0, 0.0, 1.0, 2.0, 3.0, 6.0], dtype=float).reshape(3, 2)
@@ -1809,7 +1811,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
 
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
         self.assertTrue(np.allclose(r, np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0], dtype=float)))
@@ -1826,7 +1828,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
         self.assertTrue(np.allclose(r, np.array([2.0, 2.0, 2.0], dtype=float)))
         self.assertTrue(np.allclose(J, np.eye(3, dtype=float)))
@@ -1842,7 +1844,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(ValueError, "init = \\{ fill = <value> \\}"):
-            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+            _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_sub_expr_with_const_fill(self) -> None:
         dsl = {
@@ -1858,7 +1860,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
         self.assertTrue(np.allclose(r, np.array([-1.0, -1.0, -1.0], dtype=float)))
         self.assertTrue(np.allclose(J, np.eye(3, dtype=float)))
@@ -1890,7 +1892,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
         self.assertTrue(np.allclose(r, np.array([-1.0, -1.0, -1.0, -1.0], dtype=float)))
         self.assertTrue(np.allclose(J, np.array([[1.0, 0.0], [0.0, 1.0], [2.0, 0.0], [0.0, 2.0]], dtype=float)))
@@ -1922,7 +1924,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        runtime = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
         self.assertEqual(r.shape, (2,))
         self.assertTrue(np.allclose(r, np.array([-1.0, -1.0], dtype=float)))
@@ -1943,7 +1945,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         with self.assertRaisesRegex(ValueError, "value = \\{ fill = <value> \\}"):
-            _ = compile_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+            _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_build_trajectory_maps_with_derivatives_linear_uses_finite_difference(self) -> None:
         traj_dsl = {
@@ -2297,6 +2299,50 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertTrue(np.allclose(out[key_rot], np.array([2.0, 2.0], dtype=float)))
         self.assertTrue(np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float)))
         self.assertEqual(builder.resolve_calls, 2)
+
+    def test_dispatch_state_builder_registered_route_fields(self) -> None:
+        class DummyDispatchBuilder(BackendDispatchStateBuilder):
+            def __init__(self):
+                super().__init__(model=None, data=None, q_var="q")
+                self.register_handler(
+                    dtype=DTYPE_KINEMATICS,
+                    owner_type="link",
+                    field="pos",
+                    handler=self._handle_any,
+                )
+                self.register_value_and_jac(
+                    dtype=DTYPE_DYNAMICS,
+                    owner_type="total_joint",
+                    field="torque",
+                    value_handler=self._handle_any,
+                    jac_handler=self._handle_any,
+                )
+
+            def _resolve_state_ref(self, key: StateKey):
+                del key
+                return None
+
+            def _handle_any(self, q: np.ndarray, key: StateKey, state_ref):
+                del q, key, state_ref
+                return np.zeros((1,), dtype=float)
+
+        builder = DummyDispatchBuilder()
+        self.assertEqual(
+            builder.registered_route_fields(dtype=DTYPE_DYNAMICS, owner_type="total_joint"),
+            {"torque", "torque_J_q"},
+        )
+        self.assertEqual(
+            builder.registered_route_fields(dtype=DTYPE_KINEMATICS, owner_type="link"),
+            {"pos"},
+        )
+        self.assertEqual(
+            builder.registered_route_fields(dtype=DTYPE_KINEMATICS, owner_type="total_joint"),
+            set(),
+        )
+        with self.assertRaisesRegex(ValueError, "dtype must be non-empty"):
+            _ = builder.registered_route_fields(dtype="")
+        with self.assertRaisesRegex(ValueError, "owner_type must be non-empty"):
+            _ = builder.registered_route_fields(owner_type="")
 
 
 if __name__ == "__main__":

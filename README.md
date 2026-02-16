@@ -2,6 +2,16 @@
 
 `eiopt` は `RoboKots/robokots/inward` を元にした、backend 非依存の最小 NLS(非線形最小二乗)ユーティリティです。
 
+## Layered Namespaces
+
+現在の canonical namespace は以下です。
+
+- `eiopt.optimize`: 最適化責務の API 入口（`compile_nls_problem`, `solve` など）
+- `eiopt.backends.state`: backend の state builder 入口
+- `eiopt.optimize_backends`: optimize と backend を接続する compile helper
+
+旧 namespace / alias (`eiopt.dsl`, `eiopt.model`, `eiopt.solvers`, `eiopt.expr` など) は削除済みです。
+
 ## Backend との接続点
 
 backend(kots / pinocchio 等) と `eiopt` を繋ぐ唯一の接続点は `StateCache` が呼ぶ `build_state()` です。
@@ -30,69 +40,58 @@ backend 側で実装すべき最小要件は `build_state()` だけです。
 最適化問題は TOML で定義します（JSON は使用しません）。読み込みは `load_problem_toml()` を使います。
 
 ```python
-from eiopt import compile_problem, load_problem_toml
+from eiopt.optimize.builder import compile_nls_problem, load_problem_toml
 
 dsl = load_problem_toml("examples/dsl/basic.toml")
-runtime = compile_problem(dsl, build_state=build_state)
+runtime = compile_nls_problem(dsl, build_state=build_state)
 ```
 
 サンプルは `examples/dsl/basic.toml` を参照してください。
 
 ## Examples の実行
 
-examples は `eiopt` を import するので、以下のどちらかで実行してください。
+現在の examples は canonical API の最小サンプルに絞っています。
 
 ```bash
 # (推奨) インストールして実行
 python -m pip install -e .
-python examples/main.py
+python examples/01_minimize_quadratic.py
+python examples/02_get_state_minimal.py
+python examples/03_toml_problem.py
+python examples/04_pinocchio_ik.py   # 要: pinocchio
+python examples/05_robokots_ik.py    # 要: robokots
+python examples/06_pinocchio_trajectory_dynamics.py  # 要: pinocchio
+python examples/07_robokots_trajectory_dynamics.py   # 要: robokots
 ```
 
 ```bash
 # インストールせずに実行（repo 直下から）
-PYTHONPATH=. python examples/main.py
+PYTHONPATH=. python examples/01_minimize_quadratic.py
+PYTHONPATH=. python examples/02_get_state_minimal.py
+PYTHONPATH=. python examples/03_toml_problem.py
+PYTHONPATH=. python examples/04_pinocchio_ik.py
+PYTHONPATH=. python examples/05_robokots_ik.py
+PYTHONPATH=. python examples/06_pinocchio_trajectory_dynamics.py
+PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py
 ```
 
-Pinocchio 例（ロボティクス Pinocchio bindings が必要）:
+Pinocchio / RoboKots のサンプルは optional dependency が必要です。
 
 ```bash
-PYTHONPATH=. python examples/main_pinocchio.py
+uv sync --group pinocchio
+uv sync --group kots
 ```
 
-Pinocchio 軌道最適化の最小例:
-
-```bash
-PYTHONPATH=. python examples/main_pinocchio_traj.py
-```
-
-引数つきの CLI 版:
-
-```bash
-PYTHONPATH=. python examples/cli/main_pinocchio.py --help
-```
-
-RoboKots 例（`robokots` と互換 `mathrobo` が必要）:
-
-```bash
-PYTHONPATH=. python examples/main_robokots.py
-```
-
-RoboKots 軌道最適化例（線形な `p -> q(k)` マップ）:
-
-```bash
-PYTHONPATH=. python examples/main_robokots_traj.py
-```
-
-※ この例は `matplotlib` を使って軌道を描画します。
+各サンプルの目的は `examples/README.md` を参照してください。
 
 ### Kots 軌道問題の高レベルビルダー
 
-`eiopt.backends.kots.compile_kots_trajectory_problem()` を使うと、
-軌道マップ生成・導関数マップ生成・`p` 変数次元チェック・`KotsTrajectoryStateBuilder` 構築・`compile_problem()` までを一括で実行できます。
+`eiopt.optimize_backends.kots.compile_kots_trajectory_problem()` を使うと、
+軌道マップ生成・導関数マップ生成・`p` 変数次元チェック・`KotsTrajectoryStateBuilder` 構築・`compile_nls_problem()` までを一括で実行できます。
 この関数は入力 DSL オブジェクトを破壊的に書き換えません。
 
 ```python
-from eiopt.backends.kots import compile_kots_trajectory_problem
+from eiopt.optimize_backends.kots import compile_kots_trajectory_problem
 
 compiled = compile_kots_trajectory_problem(
     dsl,
@@ -107,7 +106,7 @@ traj_map = compiled.trajectory_map
 Pinocchio 側にも同様の helper があります。
 
 ```python
-from eiopt.backends.pinocchio import compile_pinocchio_trajectory_problem
+from eiopt.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
 
 compiled = compile_pinocchio_trajectory_problem(
     dsl,
@@ -123,9 +122,8 @@ traj_map = compiled.trajectory_map
 `compile_kots_trajectory_problem()` の後段で backend 非依存 API を適用します。
 
 ```python
-from eiopt.model import (
-    build_nullspace_equality_reduction,
-)
+from eiopt.optimize.reductions import build_nullspace_equality_reduction
+from eiopt.optimize.solvers import solve
 
 use_nullspace = True
 nullspace_eq = (
@@ -138,7 +136,7 @@ nullspace_eq = (
     else None
 )
 runtime_for_solve = runtime if nullspace_eq is None else nullspace_eq.runtime
-x_star_solve, *_ = solve_runtime(runtime_for_solve)
+x_star_solve, *_ = solve(runtime_for_solve)
 x_star = x_star_solve if nullspace_eq is None else nullspace_eq.lift(x_star_solve)
 ```
 
@@ -152,12 +150,18 @@ x_star, cost, iters, rnorm, dxnorm, converged = solve_gauss_newton(runtime)
 
 ### ソルバ切替（gauss_newton / scipy / cyipopt）
 
-`solve_runtime()` でソルバを切り替えられます。`scipy` と `cyipopt` は optional dependency です。
+`solve()` でソルバを切り替えられます。`scipy` と `cyipopt` は optional dependency です。
+
+```bash
+python -m pip install -e ".[solver-scipy]"      # scipy solver を使う場合
+python -m pip install -e ".[solver-cyipopt]"    # cyipopt solver を使う場合
+python -m pip install -e ".[solvers]"           # 両方入れる場合
+```
 
 ```python
-from eiopt import solve_runtime
+from eiopt.optimize.solvers import solve
 
-x_star, cost, iters, rnorm, dxnorm, converged = solve_runtime(
+x_star, cost, iters, rnorm, dxnorm, converged = solve(
     runtime,
     solver="scipy_minimize",  # "gauss_newton" | "scipy_minimize" | "cyipopt"
     max_iters=1000,
@@ -167,7 +171,7 @@ x_star, cost, iters, rnorm, dxnorm, converged = solve_runtime(
 
 ### 実行時に特定 term の重みだけ変更
 
-`compile_problem()` 後に、term index または `expr.name` を指定して重みを変更できます。
+`compile_nls_problem()` 後に、term index または `expr.name` を指定して重みを変更できます。
 （対象コストは `scalar_weight` / `diag_weight` など `set_weight()` を持つもの）
 
 ```python
@@ -440,9 +444,13 @@ num_ctrl_points = 6
 最小コード例（DSL から生成）:
 
 ```python
-from eiopt import compile_problem
-from eiopt.backends.kots import KotsTrajectoryStateBuilder
-from eiopt.dsl import build_trajectory_map, build_trajectory_maps_with_derivatives, default_steps_from_time
+from eiopt.backends.state.kots import KotsTrajectoryStateBuilder
+from eiopt.optimize.builder import compile_nls_problem
+from eiopt.optimize.dsl import (
+    build_trajectory_map,
+    build_trajectory_maps_with_derivatives,
+    default_steps_from_time,
+)
 
 traj = build_trajectory_map(
     dsl["trajectory"],
@@ -465,12 +473,11 @@ builder = KotsTrajectoryStateBuilder(
     p_var="p",
     dynamics_fields=("torque", "torque_d1"),  # 例: 明示指定する場合
 )
-runtime = compile_problem(dsl, build_state=builder.build_state)
+runtime = compile_nls_problem(dsl, build_state=builder.build_state)
 ```
 
-DSL 側では `get_state.jac.var = "p"` を指定します。実例は
-`examples/dsl/kots_traj_pos.toml` と `examples/main_robokots_traj.py` を参照してください。
-`kots_traj_pos.toml` の `time.N` を増やすとステップ数を増やせます。
+DSL 側では `get_state.jac.var = "p"` を指定します。
+最小の `get_state` 実行例は `examples/02_get_state_minimal.py` を参照してください。
 終端タスクの `k` には数値の代わりに `"last"` を使うと、`time.N` 変更時の修正が不要です。
 
 `type = "linear"` の場合は `trajectory.linear.A`（または `trajectory.A`）と

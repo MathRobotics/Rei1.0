@@ -7,46 +7,16 @@ init = [0.0, 0.0]
 
 [terms.expr]
 type = "sub"
-
-[terms.expr.a]
-type = "get_state"
-name = "ee_pos"
-
-[terms.expr.a.key]
-k = 0
-owner_type = "link"
-owner_name = "ee"
-dtype = "kinematics"
-field = "pos"
-
-[terms.expr.a.jac]
-var = "q"
-
-[terms.expr.b]
-type = "const"
-var = "q"
-name = "target_pos"
-value = [3.0, 4.0, 0.0]
-
-[terms.cost]
-type = "l2"
-
-[[terms]]
-
-[terms.expr]
-type = "sub"
+name = "q_minus_target"
 
 [terms.expr.a]
 type = "get_var"
-name = "joint_q"
 var = "q"
 
 [terms.expr.b]
 type = "const"
 var = "q"
-name = "q_nom"
-value = [0.0, 0.0]
+value = [0.5, -1.2]
 
 [terms.cost]
-type = "scalar_weight"
-w = 1e-6
+type = "l2"

@@ -5,10 +5,20 @@ description = "Optimization utilities (ported from RoboKots inward)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "cyipopt>=1.6.1",
     "matplotlib>=3.10.8",
     "numpy>=2.0",
+]
+
+[project.optional-dependencies]
+solver-scipy = [
     "scipy>=1.17.0",
+]
+solver-cyipopt = [
+    "cyipopt>=1.6.1",
+]
+solvers = [
+    "scipy>=1.17.0",
+    "cyipopt>=1.6.1",
 ]
 
 [build-system]

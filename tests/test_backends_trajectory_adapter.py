@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.trajectory_adapter import compile_trajectory_problem_with_adapter
+from eiopt.optimize_backends.trajectory_adapter import compile_trajectory_problem_with_adapter
 
 
 class _NoopStateBuilder:
