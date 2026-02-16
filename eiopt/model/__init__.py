@@ -6,6 +6,7 @@ from .nullspace import (
     NullspaceEqualityReduction,
     build_nullspace_equality_reduction,
 )
+from .matrix_scaling import scale_matrix_with_projection_svd
 from .runtime import LinearizedTerm, ProblemRuntime, StackedTermSlice
 from .term import (
     Variable,
@@ -30,6 +31,7 @@ __all__ = [
     "NullspaceReducedRuntime",
     "NullspaceEqualityReduction",
     "build_nullspace_equality_reduction",
+    "scale_matrix_with_projection_svd",
     "Variable",
     "pack",
     "total_dim",

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..core.state_cache import StateKey
+from .matrix_scaling import scale_matrix_with_projection_svd
 from .runtime import LinearizedTerm, ProblemRuntime, StackedTermSlice
 from .term import Variable, VariablePack
 
@@ -295,6 +296,7 @@ def build_nullspace_equality_reduction(
     objective_term_indices: Iterable[int] | None = None,
     required: Iterable[StateKey] | None = None,
     z_var_name: str = "z_nullspace",
+    use_scaling: bool = True,
     svd_rtol: float = 1e-10,
     feasibility_tol: float = 1e-8,
     check_linearity: bool = True,
@@ -308,6 +310,7 @@ def build_nullspace_equality_reduction(
         raise TypeError(
             "build_nullspace_equality_reduction: runtime must be ProblemRuntime."
         )
+    use_scaling_b = bool(use_scaling)
     svd_rtol_f = float(svd_rtol)
     if svd_rtol_f < 0.0:
         raise ValueError(
@@ -415,16 +418,26 @@ def build_nullspace_equality_reduction(
                 f"under linearized model (||A x + c||={feas_norm:.3e}, tol={feasibility_tol_f:.3e})."
             )
 
-        _u, svals, vt = np.linalg.svd(A_eq, full_matrices=True)
-        if svals.size == 0:
-            rank = 0
+        if use_scaling_b:
+            row_basis, rank = scale_matrix_with_projection_svd(A_eq.T, svd_rtol=svd_rtol_f)
+            if rank <= 0:
+                Z = np.eye(n_full, dtype=float)
+            elif rank < n_full:
+                q, _ = np.linalg.qr(row_basis, mode="complete")
+                Z = np.asarray(q[:, rank:], dtype=float)
+            else:
+                Z = np.zeros((n_full, 0), dtype=float)
         else:
-            threshold = svd_rtol_f * max(A_eq.shape) * float(svals[0])
-            rank = int(np.sum(svals > threshold))
-        if rank < n_full:
-            Z = np.asarray(vt[rank:, :], dtype=float).T
-        else:
-            Z = np.zeros((n_full, 0), dtype=float)
+            _u, svals, vt = np.linalg.svd(A_eq, full_matrices=True)
+            if svals.size == 0:
+                rank = 0
+            else:
+                threshold = svd_rtol_f * max(A_eq.shape) * float(svals[0])
+                rank = int(np.sum(svals > threshold))
+            if rank < n_full:
+                Z = np.asarray(vt[rank:, :], dtype=float).T
+            else:
+                Z = np.zeros((n_full, 0), dtype=float)
 
         if bool(check_linearity) and linearity_samples_i > 0 and linearity_step_f > 0.0:
             x_restore = np.asarray(runtime.pack.get(), dtype=float).reshape(-1).copy()
