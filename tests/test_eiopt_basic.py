@@ -876,6 +876,45 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertIn("svd(J)", report)
         self.assertIn("active terms", report)
 
+    def test_format_solve_report_includes_kkt(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "term_x", "var": "x"},
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        report = format_solve_report(
+            runtime,
+            include_kkt=True,
+            solve_summary={
+                "converged": True,
+                "iters": 7,
+                "cost0": 1.0,
+                "cost": 0.1,
+                "rnorm": 0.2,
+                "dxnorm": 0.3,
+            },
+            trajectory_summary={
+                "steps": 11,
+                "dt": 0.05,
+                "p_dim": 8,
+                "dynamics_fields": ("torque",),
+            },
+        )
+        self.assertIn("KKT:", report)
+        self.assertIn("stationarity_inf=", report)
+        self.assertIn("Solve:", report)
+        self.assertIn("converged=True", report)
+        self.assertIn("Trajectory:", report)
+        self.assertIn("steps=11", report)
+
+        with self.assertRaisesRegex(ValueError, "pass `required`"):
+            _ = format_solve_report(runtime, include_kkt=True, kkt_kwargs={"required": []})
+
     def test_constraint_kind_validation(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [1.0]}],

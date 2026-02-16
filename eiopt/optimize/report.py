@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -158,6 +158,60 @@ def get_named_expr_value(
     return np.asarray(matches[0].value, dtype=float).reshape(-1).copy()
 
 
+def _append_kkt_report(lines: list[str], out: KKTCheckResult) -> None:
+    lines.append("")
+    lines.append("KKT:")
+    lines.append(f"- ok={out.ok} | message={out.message}")
+    lines.append(
+        f"- stationarity_inf={out.stationarity_inf:.3e} | "
+        f"eq_violation_inf={out.eq_violation_inf:.3e} | "
+        f"ineq_violation_inf={out.ineq_violation_inf:.3e}"
+    )
+    lines.append(
+        f"- complementarity_inf={out.complementarity_inf:.3e} | "
+        f"dual_violation_inf={out.dual_violation_inf:.3e} | "
+        f"active_ineq_rows={int(out.n_active_ineq_rows)}/{int(out.n_ineq_rows)}"
+    )
+
+
+def _append_solve_summary(lines: list[str], summary: Mapping[str, Any]) -> None:
+    parts: list[str] = []
+    if "converged" in summary:
+        parts.append(f"converged={bool(summary['converged'])}")
+    if "iters" in summary:
+        parts.append(f"iters={int(summary['iters'])}")
+    if "cost0" in summary:
+        parts.append(f"cost0={float(summary['cost0']):.3e}")
+    if "cost" in summary:
+        parts.append(f"cost={float(summary['cost']):.3e}")
+    if "rnorm" in summary:
+        parts.append(f"rnorm={float(summary['rnorm']):.3e}")
+    if "dxnorm" in summary:
+        parts.append(f"dxnorm={float(summary['dxnorm']):.3e}")
+    if len(parts) == 0:
+        return
+    lines.append("Solve:")
+    lines.append(f"- {' '.join(parts)}")
+    lines.append("")
+
+
+def _append_trajectory_summary(lines: list[str], summary: Mapping[str, Any]) -> None:
+    parts: list[str] = []
+    if "steps" in summary:
+        parts.append(f"steps={int(summary['steps'])}")
+    if "dt" in summary:
+        parts.append(f"dt={float(summary['dt']):g}")
+    if "p_dim" in summary:
+        parts.append(f"p_dim={int(summary['p_dim'])}")
+    if "dynamics_fields" in summary:
+        parts.append(f"dynamics_fields={summary['dynamics_fields']}")
+    if len(parts) == 0:
+        return
+    lines.append("Trajectory:")
+    lines.append(f"- {' '.join(parts)}")
+    lines.append("")
+
+
 def format_solve_report(
     runtime: NLSRuntime,
     *,
@@ -169,15 +223,21 @@ def format_solve_report(
     include_vars: bool = True,
     include_named: bool = True,
     include_diagnostics: bool = True,
+    include_kkt: bool = False,
+    kkt_kwargs: Mapping[str, Any] | None = None,
+    solve_summary: Mapping[str, Any] | None = None,
+    trajectory_summary: Mapping[str, Any] | None = None,
     active_tol: float = 1e-10,
     name_blacklist: set[str] | None = None,
 ) -> str:
     """Format a concise post-solve report of objective terms and expression values.
 
     The report has three sections:
+      - Solve/trajectory summary (optional)
       - Variables (x0 / x* if provided)
       - Term residuals and per-term cost contributions (after cost weighting)
       - Diagnostics (`||J^T r||`, `rank(J)`, singular values, active terms)
+      - KKT residual checks (optional)
       - Named expression values (skipping default/generic names by default)
     """
 
@@ -190,6 +250,12 @@ def format_solve_report(
     runtime.update_state_if_needed(required=required_list)
 
     lines: list[str] = []
+
+    if solve_summary is not None:
+        _append_solve_summary(lines, solve_summary)
+
+    if trajectory_summary is not None:
+        _append_trajectory_summary(lines, trajectory_summary)
 
     if include_vars:
         x_star_vec = np.asarray(x_star if x_star is not None else pack.get(), dtype=float).reshape(-1)
@@ -286,6 +352,17 @@ def format_solve_report(
         lines.append(f"- rank(J)={rank}/{int(J_all.shape[1])} (rows={int(J_all.shape[0])})")
         lines.append(f"- svd(J)={svals_str}")
         lines.append(f"- active terms (||r_w||>{float(active_tol):.1e}): {active_str}")
+
+    if include_kkt:
+        kwargs_local: dict[str, Any] = {} if kkt_kwargs is None else dict(kkt_kwargs)
+        if "required" in kwargs_local:
+            raise ValueError("format_solve_report: pass `required` via function argument, not via kkt_kwargs.")
+        kkt_out = check_kkt_conditions(
+            runtime,
+            required=required_list,
+            **kwargs_local,
+        )
+        _append_kkt_report(lines, kkt_out)
 
     if include_named:
         lines.append("")
