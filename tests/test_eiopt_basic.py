@@ -61,8 +61,14 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
         x0 = pack.get().copy()
-        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(runtime, max_iters=5, tol_r=1e-14, tol_dx=1e-14)
+        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(
+            runtime,
+            max_iters=5,
+            tol_r=1e-14,
+            tol_dx=1e-14,
+        )
         self.assertTrue(converged)
+        self.assertGreaterEqual(cost0, cost)
         self.assertLess(cost, 1e-20)
         self.assertAlmostEqual(float(x_star[0]), 3.0, places=10)
         self.assertAlmostEqual(float(x_var.x[0]), 3.0, places=10)
@@ -86,7 +92,7 @@ class TestEiOptBasic(unittest.TestCase):
         problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve(
+        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime,
             solver="gauss_newton",
             max_iters=5,
@@ -94,6 +100,7 @@ class TestEiOptBasic(unittest.TestCase):
             tol_dx=1e-14,
         )
         self.assertTrue(converged)
+        self.assertGreaterEqual(cost0, cost)
         self.assertLess(cost, 1e-20)
         self.assertAlmostEqual(float(x_star[0]), 2.5, places=10)
 
@@ -434,7 +441,7 @@ class TestEiOptBasic(unittest.TestCase):
         x0 = reduction.lift(z0)
         self.assertAlmostEqual(float(np.sum(x0)), 1.0, places=10)
 
-        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve(
+        z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             reduction.runtime,
             solver="gauss_newton",
             max_iters=30,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,14 @@ _DSL_PATH = _EXAMPLES_DIR / "dsl" / "pinocchio_traj_dynamics.toml"
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Pinocchio trajectory dynamics example.")
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Plot series declared in term.attrs.plot.",
+    )
+    args = parser.parse_args()
+
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _DSL_PATH.is_file():
@@ -42,7 +51,7 @@ def main() -> None:
     runtime = compiled.runtime
 
     x0 = runtime.pack.get().copy()
-    x_star, cost, iters, rnorm, dxnorm, converged = solve(
+    x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
         max_iters=400,
@@ -73,7 +82,11 @@ def main() -> None:
     print("=== 06_pinocchio_trajectory_dynamics ===")
     print(f"dsl={_DSL_PATH}")
     print(f"model={_MODEL_PATH}")
-    print(f"converged={converged} iters={iters} cost={cost:.3e} rnorm={rnorm:.3e} dxnorm={dxnorm:.3e}")
+    print(
+        f"converged={converged} iters={iters} "
+        f"cost0={initial_cost:.3e} cost={cost:.3e} "
+        f"rnorm={rnorm:.3e} dxnorm={dxnorm:.3e}"
+    )
     print(f"steps={steps} dt={compiled.dt:g} p_dim={compiled.trajectory_map.p_dim} dynamics_fields={compiled.dynamics_fields}")
     print(f"q(0)={q_traj[0]}")
     print(f"q(T)={q_traj[-1]}")
@@ -81,6 +94,19 @@ def main() -> None:
     print(f"dq/dt(T)={qdotT}")
     print(f"max|torque|={float(np.max(np.abs(tau_traj))):.3e}")
     print(format_solve_report(runtime, x0=x0, x_star=x_star))
+
+    if args.plot:
+        from eiopt.optimize.plot import plot_term_attrs
+
+        fig, _ax, series = plot_term_attrs(
+            runtime,
+            title="06_pinocchio_trajectory_dynamics",
+        )
+        del fig
+        print(f"plotted series={len(series)} from term.attrs.plot")
+        import matplotlib.pyplot as plt
+
+        plt.savefig("trajectory.png", dpi=200)
 
 
 if __name__ == "__main__":

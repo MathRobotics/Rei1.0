@@ -33,11 +33,21 @@ def _ensure_pinocchio_stub() -> None:
         del model, data
         return None
 
+    def computeGeneralizedGravity(model, data, q):
+        del model, data, q
+        return np.zeros((1,), dtype=float)
+
+    def rnea(model, data, q, v, a):
+        del model, data, q, v
+        return 3.0 * np.asarray(a, dtype=float).reshape(-1)
+
     pin.ReferenceFrame = _ReferenceFrame
     pin.buildModelFromUrdf = buildModelFromUrdf
     pin.computeFrameJacobian = computeFrameJacobian
     pin.forwardKinematics = forwardKinematics
     pin.updateFramePlacements = updateFramePlacements
+    pin.computeGeneralizedGravity = computeGeneralizedGravity
+    pin.rnea = rnea
 
     sys.modules["pinocchio"] = pin
 
@@ -139,6 +149,62 @@ class TestPinocchioTrajectoryCompileMock(unittest.TestCase):
         r, J = compiled.runtime.linearize()
         self.assertTrue(np.allclose(r, np.array([-1.0, -2.0], dtype=float)))
         self.assertTrue(np.allclose(J, np.eye(2, dtype=float)))
+
+    def test_compile_pinocchio_trajectory_problem_torque_uses_trajectory_dynamics(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.5},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 3,
+                "q_dim": 1,
+                "A": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 3, "init": [0.0, 0.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque_mid",
+                        "key": {
+                            "k": 1,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": "dynamics",
+                            "field": "torque",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_pinocchio_trajectory_problem(
+            dsl,
+            model=_FakePinModel(),
+            data=_FakePinData(),
+            fields=("pos",),
+        )
+        self.assertEqual(compiled.model_order, 3)
+        self.assertEqual(sorted(compiled.trajectory_derivative_maps.keys()), [0, 1, 2])
+
+        runtime = compiled.runtime
+        x_target = np.array([0.0, 1.0, 0.0], dtype=float)
+        runtime.pack.apply_dx(x_target - runtime.pack.get())
+
+        terms = runtime.linearize_terms(weighted=False)
+        self.assertEqual(len(terms), 1)
+        r = terms[0].residual
+        J = terms[0].jacobian
+        self.assertFalse(np.allclose(r, np.zeros_like(r)))
+        self.assertFalse(np.allclose(J, np.zeros_like(J)))
 
 
 if __name__ == "__main__":

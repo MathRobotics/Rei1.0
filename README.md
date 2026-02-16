@@ -142,10 +142,11 @@ x_star = x_star_solve if nullspace_eq is None else nullspace_eq.lift(x_star_solv
 
 ### solve_gauss_newton の返り値
 
-`solve_gauss_newton()` は最適化後の全決定変数ベクトル（`VariablePack` の順）も返します。
+`solve_gauss_newton()` は最適化後の全決定変数ベクトル（`VariablePack` の順）と
+初期コスト (`initial_cost`) も返します。
 
 ```python
-x_star, cost, iters, rnorm, dxnorm, converged = solve_gauss_newton(runtime)
+x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve_gauss_newton(runtime)
 ```
 
 ### ソルバ切替（gauss_newton / scipy / cyipopt）
@@ -161,7 +162,7 @@ python -m pip install -e ".[solvers]"           # 両方入れる場合
 ```python
 from eiopt.optimize.solvers import solve
 
-x_star, cost, iters, rnorm, dxnorm, converged = solve(
+x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
     runtime,
     solver="scipy_minimize",  # "gauss_newton" | "scipy_minimize" | "cyipopt"
     max_iters=1000,
@@ -282,6 +283,57 @@ from eiopt import get_named_expr_value
 
 ee_traj = get_named_expr_value(runtime, name="ee_pos_traj")
 ```
+
+### `term.attrs` ベースで時系列を描画
+
+`term.attrs.plot` に可視化メタデータを置くと、DSL から描画対象を宣言できます。
+描画責務は `eiopt.optimize` 側に閉じており、core/backend の責務分離を維持できます。
+
+```toml
+[[terms]]
+[terms.expr]
+type = "sub"
+name = "torque_reg"
+
+[terms.expr.a]
+type = "get_state"
+
+[terms.expr.a.key]
+k = "last"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque"
+
+[terms.expr.a.jac]
+var = "p"
+
+[terms.expr.b]
+type = "const"
+var = "p"
+value = { fill = 0.0 }
+
+[terms.cost]
+type = "scalar_weight"
+w = 1e-4
+
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_torque"
+# key.* を省略した場合、同 term 内の最初の get_state から推定します
+k0 = 0
+k1 = "last"
+```
+
+```python
+from eiopt import collect_plot_series_from_term_attrs, plot_term_attrs
+
+series = collect_plot_series_from_term_attrs(runtime)
+fig, ax, _series = plot_term_attrs(runtime, title="Trajectory diagnostics")
+```
+
+`plot` は dict 1 件だけでなく list も受け付けます。
+同一 term に複数の時系列を設定したい場合は `attrs.plot = [{...}, {...}]` を使ってください。
 
 ### 最小テンプレート
 

@@ -337,7 +337,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         runtime_for_solve = reduction.runtime
         self.assertIs(runtime_for_solve, reduction.runtime)
 
-        z_star, _cost, _iters, _rnorm, _dxnorm, converged = solve(
+        z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime_for_solve,
             solver="gauss_newton",
             max_iters=30,

@@ -56,8 +56,9 @@ class TestNamespaceLayering(unittest.TestCase):
         problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        x_star, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(runtime, max_iters=8)
+        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(runtime, max_iters=8)
         self.assertTrue(converged)
+        self.assertGreaterEqual(cost0, cost)
         self.assertLess(cost, 1e-20)
         self.assertAlmostEqual(float(x_star[0]), 1.0, places=10)
 

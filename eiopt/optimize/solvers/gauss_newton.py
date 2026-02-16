@@ -33,21 +33,25 @@ def solve_gauss_newton(
     ls_min_step: float = 1e-8,
     ls_max_iters: int = 12,
     on_iter: Callable[[int, float, float], None] | None = None,
-) -> tuple[Array, float, int, float, float, bool]:
+) -> tuple[Array, float, float, int, float, float, bool]:
     """Minimal Gauss-Newton loop for a `NLSRuntime`.
 
     Returns:
-      (x_star, cost, iters, rnorm, dxnorm, converged)
+      (x_star, initial_cost, cost, iters, rnorm, dxnorm, converged)
     """
 
     rnorm = float("inf")
     dxnorm = float("inf")
     converged = False
 
+    req = runtime.required_list(required)
+    r_init, _J_init = runtime.linearize(required=req)
+    initial_cost = float(r_init @ r_init)
+
     variables = runtime.pack
 
     for k in range(int(max_iters)):
-        r_all, J_all = runtime.linearize(required=required)
+        r_all, J_all = runtime.linearize(required=req)
         rnorm = float(np.linalg.norm(r_all))
 
         if on_iter is not None:
@@ -57,7 +61,7 @@ def solve_gauss_newton(
             converged = True
             x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
             cost = float(r_all @ r_all)
-            return x_star, cost, k, rnorm, 0.0, converged
+            return x_star, initial_cost, cost, k, rnorm, 0.0, converged
 
         cost_cur = float(r_all @ r_all)
         lhs = J_all.T @ J_all
@@ -80,7 +84,7 @@ def solve_gauss_newton(
                 converged = True
                 x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
                 cost = float(r_all @ r_all)
-                return x_star, cost, k, rnorm, dxnorm, converged
+                return x_star, initial_cost, cost, k, rnorm, dxnorm, converged
 
             variables.apply_dx(dx)
             continue
@@ -104,7 +108,7 @@ def solve_gauss_newton(
         for _ in range(max_ls):
             x_trial = x_cur + step * dx
             _set_variables_x(variables, x_trial)
-            r_trial, _ = runtime.linearize(required=required)
+            r_trial, _ = runtime.linearize(required=req)
             cost_trial = float(r_trial @ r_trial)
 
             if cost_trial < best_cost:
@@ -131,18 +135,18 @@ def solve_gauss_newton(
             converged = True
             x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
             cost = float(best_cost)
-            return x_star, cost, k, rnorm, dxnorm_eff, converged
+            return x_star, initial_cost, cost, k, rnorm, dxnorm_eff, converged
 
         if not accepted and dxnorm_eff == 0.0:
             x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
             cost = float(best_cost)
-            return x_star, cost, k, rnorm, dxnorm_eff, converged
+            return x_star, initial_cost, cost, k, rnorm, dxnorm_eff, converged
 
-    r_all, _J_all = runtime.linearize(required=required)
+    r_all, _J_all = runtime.linearize(required=req)
     rnorm = float(np.linalg.norm(r_all))
     x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
     cost = float(r_all @ r_all)
-    return x_star, cost, int(max_iters), rnorm, dxnorm, converged
+    return x_star, initial_cost, cost, int(max_iters), rnorm, dxnorm, converged
 
 
 __all__ = [

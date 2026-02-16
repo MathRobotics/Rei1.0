@@ -56,11 +56,11 @@ def _infer_model_order(model: Any) -> int:
             pass
     order_attr = getattr(model, "order_", None)
     if order_attr is None:
-        return 1
+        return 3
     try:
         return max(1, int(order_attr))
     except Exception:
-        return 1
+        return 3
 
 
 def _base_field_name(field: str) -> str:

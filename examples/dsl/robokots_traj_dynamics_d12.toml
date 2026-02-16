@@ -41,6 +41,10 @@ value = [1.57, 0.0]
 type = "scalar_weight"
 w = 100.0
 
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_q"
+
 [[terms]]
 [terms.expr]
 type = "sub"
@@ -154,6 +158,14 @@ var = "p"
 type = "scalar_weight"
 w = 1e-4
 
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_torque"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque"
+
 [[terms]]
 [terms.expr]
 type = "stack"
@@ -180,6 +192,14 @@ var = "p"
 type = "scalar_weight"
 w = 5e-5
 
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_torque_d1"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque_d1"
+
 [[terms]]
 [terms.expr]
 type = "stack"
@@ -205,3 +225,11 @@ var = "p"
 [terms.cost]
 type = "scalar_weight"
 w = 1e-5
+
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_torque_d2"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque_d2"

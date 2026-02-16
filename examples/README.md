@@ -16,12 +16,14 @@ Pinocchio / RoboKots 例は追加依存が必要です。
 uv sync --group pinocchio
 PYTHONPATH=. python examples/04_pinocchio_ik.py
 PYTHONPATH=. python examples/06_pinocchio_trajectory_dynamics.py
+PYTHONPATH=. python examples/06_pinocchio_trajectory_dynamics.py --plot
 ```
 
 ```bash
 uv sync --group kots
 PYTHONPATH=. python examples/05_robokots_ik.py
 PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py
+PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py --plot
 ```
 
 ## ファイル一覧
@@ -38,8 +40,10 @@ PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py
   - RoboKots の `KotsStateBuilder` を使った最小 IK（`get_state(pos)`）
 - `06_pinocchio_trajectory_dynamics.py`
   - Pinocchio の trajectory 最適化（決定変数 `p`）に dynamics(`torque`) 正則化を加えた例
+  - `--plot` で DSL の `term.attrs.plot` を使って時系列を描画
 - `07_robokots_trajectory_dynamics.py`
   - RoboKots の trajectory 最適化（決定変数 `p`）に dynamics(`torque`, `torque_d1`, `torque_d2`) 正則化を加えた例
+  - `--plot` で DSL の `term.attrs.plot` を使って時系列を描画
 - `dsl/basic.toml`
   - 最小 TOML 問題定義
 - `dsl/ik_pos.toml`

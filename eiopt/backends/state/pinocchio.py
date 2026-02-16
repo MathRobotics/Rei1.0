@@ -295,18 +295,57 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
             value_fn=lambda ref: self._frame_value("frame", ref),
         )
 
+    def _pin_nv(self, *, default: int) -> int:
+        raw = getattr(self.model, "nv", None)
+        if raw is None:
+            return int(default)
+        try:
+            return int(raw)
+        except Exception:
+            return int(default)
+
+    def _torque_value_with_motion(
+        self,
+        *,
+        q_vec: Array,
+        v_vec: Array,
+        a_vec: Array,
+    ) -> Array:
+        q_use = np.asarray(q_vec, dtype=float).reshape(-1)
+        nv = self._pin_nv(default=int(q_use.size))
+        v_use = np.asarray(v_vec, dtype=float).reshape(-1)
+        a_use = np.asarray(a_vec, dtype=float).reshape(-1)
+        if v_use.size != nv:
+            raise ValueError(
+                "PinocchioStateBuilder: velocity size mismatch for torque computation. "
+                f"Expected nv={nv}, got {v_use.size}."
+            )
+        if a_use.size != nv:
+            raise ValueError(
+                "PinocchioStateBuilder: acceleration size mismatch for torque computation. "
+                f"Expected nv={nv}, got {a_use.size}."
+            )
+
+        if hasattr(pin, "rnea"):
+            tau = pin.rnea(self.model, self.data, q_use, v_use, a_use)
+            return _as_dyn_vec(tau)
+
+        if hasattr(pin, "computeGeneralizedGravity"):
+            tau = pin.computeGeneralizedGravity(self.model, self.data, q_use)
+            return _as_dyn_vec(tau)
+
+        raise ValueError("PinocchioStateBuilder: torque computation requires rnea or computeGeneralizedGravity.")
+
     def _torque_value(self, q: Array) -> Array:
         q_vec = np.asarray(q, dtype=float).reshape(-1)
-        if hasattr(pin, "computeGeneralizedGravity"):
-            tau = pin.computeGeneralizedGravity(self.model, self.data, q_vec)
-            return _as_dyn_vec(tau)
-        if hasattr(pin, "rnea"):
-            nv = int(getattr(self.model, "nv", q_vec.size))
-            v = np.zeros((nv,), dtype=float)
-            a = np.zeros((nv,), dtype=float)
-            tau = pin.rnea(self.model, self.data, q_vec, v, a)
-            return _as_dyn_vec(tau)
-        raise ValueError("PinocchioStateBuilder: torque computation requires computeGeneralizedGravity or rnea.")
+        nv = self._pin_nv(default=int(q_vec.size))
+        v0 = np.zeros((nv,), dtype=float)
+        a0 = np.zeros((nv,), dtype=float)
+        return self._torque_value_with_motion(
+            q_vec=q_vec,
+            v_vec=v0,
+            a_vec=a0,
+        )
 
     def _handle_torque(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del key, state_ref
@@ -415,6 +454,8 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
                     )
                 self.trajectory_derivative_maps[order] = traj
         self._validate_derivative_maps()
+        self._active_step_k: int | None = None
+        self._active_motion: Array | None = None
 
         super().__init__(
             model,
@@ -462,6 +503,110 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
         n = int(np.asarray(q, dtype=float).reshape(-1).size)
         return np.eye(n, dtype=float)
 
+    def _compose_motion_and_jac(self, p: Array, *, k: int) -> tuple[Array, Array]:
+        p_vec = np.asarray(p, dtype=float).reshape(-1)
+        dof = int(self.trajectory_map.q_dim)
+        p_dim = int(self.trajectory_map.p_dim)
+        motion = np.zeros((3 * dof,), dtype=float)
+        dmotion_dp = np.zeros((3 * dof, p_dim), dtype=float)
+
+        for deriv_order in (0, 1, 2):
+            traj = self.trajectory_derivative_maps.get(deriv_order, None)
+            if traj is None:
+                continue
+            q_r = np.asarray(traj.q_at(p_vec, k), dtype=float).reshape(-1)
+            J_r = np.asarray(traj.dqdp_at(k), dtype=float)
+            if q_r.size != dof:
+                raise ValueError(
+                    "PinocchioTrajectoryStateBuilder: derivative map q size mismatch. "
+                    f"order={deriv_order}, expected {dof}, got {q_r.size}."
+                )
+            if J_r.shape != (dof, p_dim):
+                raise ValueError(
+                    "PinocchioTrajectoryStateBuilder: derivative map jacobian shape mismatch. "
+                    f"order={deriv_order}, expected {(dof, p_dim)}, got {J_r.shape}."
+                )
+
+            s = int(deriv_order * dof)
+            e = int(s + dof)
+            motion[s:e] = q_r
+            dmotion_dp[s:e, :] = J_r
+
+        return motion, dmotion_dp
+
+    def _active_motion_triplet(self, *, q: Array, key: StateKey) -> tuple[Array, Array, Array]:
+        q_vec = np.asarray(q, dtype=float).reshape(-1)
+        dof = int(q_vec.size)
+
+        if self._active_step_k is None or self._active_motion is None:
+            nv = self._pin_nv(default=dof)
+            return q_vec, np.zeros((nv,), dtype=float), np.zeros((nv,), dtype=float)
+
+        if int(self._active_step_k) != int(getattr(key, "k", -1)):
+            raise RuntimeError(
+                "PinocchioTrajectoryStateBuilder: active step mismatch while evaluating dynamics. "
+                f"active_k={self._active_step_k}, key.k={getattr(key, 'k', None)}."
+            )
+
+        motion = np.asarray(self._active_motion, dtype=float).reshape(-1)
+        expected = int(3 * dof)
+        if motion.size != expected:
+            raise ValueError(
+                "PinocchioTrajectoryStateBuilder: active motion size mismatch. "
+                f"Expected {expected}, got {motion.size}."
+            )
+
+        q_use = motion[0:dof].copy()
+        dq_use = motion[dof : 2 * dof].copy()
+        ddq_use = motion[2 * dof : 3 * dof].copy()
+        return q_use, dq_use, ddq_use
+
+    def _torque_from_motion(self, motion: Array, *, dof: int) -> Array:
+        m = np.asarray(motion, dtype=float).reshape(-1)
+        if m.size != 3 * int(dof):
+            raise ValueError(
+                "PinocchioTrajectoryStateBuilder: motion size mismatch for torque computation. "
+                f"Expected {3 * int(dof)}, got {m.size}."
+            )
+        q_use = m[0:dof]
+        dq_use = m[dof : 2 * dof]
+        ddq_use = m[2 * dof : 3 * dof]
+        return self._torque_value_with_motion(
+            q_vec=q_use,
+            v_vec=dq_use,
+            a_vec=ddq_use,
+        )
+
+    def _handle_torque(self, q: Array, key: StateKey, state_ref: Any) -> Array:
+        del state_ref
+        q_use, dq_use, ddq_use = self._active_motion_triplet(q=q, key=key)
+        return self._torque_value_with_motion(
+            q_vec=q_use,
+            v_vec=dq_use,
+            a_vec=ddq_use,
+        )
+
+    def _handle_torque_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
+        del state_ref
+        q_use, dq_use, ddq_use = self._active_motion_triplet(q=q, key=key)
+        dof = int(q_use.size)
+        motion0 = np.concatenate([q_use, dq_use, ddq_use], axis=0)
+        y0 = self._torque_from_motion(motion0, dof=dof)
+        m = int(y0.size)
+        n = int(motion0.size)
+        J = np.zeros((m, n), dtype=float)
+        if n == 0:
+            return J
+
+        eps = float(self.finite_diff_eps)
+        for i in range(n):
+            h = eps * max(1.0, abs(float(motion0[i])))
+            mp = motion0.copy()
+            mp[i] += h
+            yp = self._torque_from_motion(mp, dof=dof)
+            J[:, i] = (yp - y0) / h
+        return J
+
     def _chain_param_jac(
         self,
         J_raw: Array,
@@ -469,6 +614,7 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
         key: StateKey,
         jacobian_wrt: str | None,
         dqdp_k: Array,
+        dmotiondp_k: Array,
     ) -> Array:
         Jm = np.asarray(J_raw, dtype=float)
         if Jm.ndim != 2:
@@ -483,9 +629,11 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
         if wrt == STATE_JACOBIAN_VAR:
             if Jm.shape[1] == dqdp_k.shape[0]:
                 return Jm @ dqdp_k
+            if Jm.shape[1] == dmotiondp_k.shape[0]:
+                return Jm @ dmotiondp_k
             raise ValueError(
                 "PinocchioTrajectoryStateBuilder: Jacobian chain mismatch. "
-                f"J_raw has shape {Jm.shape}, dqdp has shape {dqdp_k.shape}."
+                f"J_raw has shape {Jm.shape}, dqdp has shape {dqdp_k.shape}, dmotiondp has shape {dmotiondp_k.shape}."
             )
 
         raise ValueError(
@@ -574,6 +722,9 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
         for k in sorted(grouped.keys()):
             q_k = np.asarray(self.trajectory_map.q_at(p, k), dtype=float).reshape(-1)
             dqdp_k = np.asarray(self.trajectory_map.dqdp_at(k), dtype=float)
+            motion_k, dmotiondp_k = self._compose_motion_and_jac(p, k=k)
+            self._active_step_k = int(k)
+            self._active_motion = np.asarray(motion_k, dtype=float).reshape(-1)
             self._update_kinematics(q_k)
 
             for key, entry in grouped[k]:
@@ -585,8 +736,12 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
                         key=key,
                         jacobian_wrt=entry.jacobian_wrt,
                         dqdp_k=dqdp_k,
+                        dmotiondp_k=dmotiondp_k,
                     )
                 out[key] = value
+
+        self._active_step_k = None
+        self._active_motion = None
 
         return out
 

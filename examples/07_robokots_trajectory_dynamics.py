@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import numpy as np
 
+from eiopt.optimize.kkt import check_kkt_conditions
 from eiopt.optimize.builder import load_problem_toml
 from eiopt.optimize.dsl import build_trajectory_map_with_derivative
 from eiopt.optimize.report import format_solve_report
@@ -26,6 +28,14 @@ _ORDER = 5
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="RoboKots trajectory dynamics example.")
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Plot series declared in term.attrs.plot.",
+    )
+    args = parser.parse_args()
+
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _DSL_PATH.is_file():
@@ -42,13 +52,17 @@ def main() -> None:
     runtime = compiled.runtime
 
     x0 = runtime.pack.get().copy()
-    x_star, cost, iters, rnorm, dxnorm, converged = solve(
+    x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
         max_iters=500,
         tol_dx=1e-8,
     )
     runtime.pack.apply_dx(x_star - runtime.pack.get().copy())
+    kkt_check = check_kkt_conditions(
+        runtime,
+        stationarity_tol=1e-6,
+    )
 
     steps = int(compiled.trajectory_map.steps)
     q_traj = np.vstack([compiled.trajectory_map.q_at(x_star, k) for k in range(steps)])
@@ -88,7 +102,18 @@ def main() -> None:
     print("=== 07_robokots_trajectory_dynamics ===")
     print(f"dsl={_DSL_PATH}")
     print(f"model={_MODEL_PATH} (order={_ORDER})")
-    print(f"converged={converged} iters={iters} cost={cost:.3e} rnorm={rnorm:.3e} dxnorm={dxnorm:.3e}")
+    print(
+        f"converged={converged} iters={iters} "
+        f"cost0={initial_cost:.3e} cost={cost:.3e} "
+        f"rnorm={rnorm:.3e} dxnorm={dxnorm:.3e}"
+    )
+    print(
+        f"kkt_ok={kkt_check.ok} "
+        f"stationarity_inf={kkt_check.stationarity_inf:.3e} "
+        f"eq_inf={kkt_check.eq_violation_inf:.3e} "
+        f"ineq_inf={kkt_check.ineq_violation_inf:.3e}"
+    )
+    print(f"kkt_check={kkt_check.message}")
     print(f"steps={steps} dt={compiled.dt:g} p_dim={compiled.trajectory_map.p_dim} dynamics_fields={compiled.dynamics_fields}")
     print(f"q(0)={q_traj[0]}")
     print(f"q(T)={q_traj[-1]}")
@@ -98,6 +123,19 @@ def main() -> None:
     print(f"max|torque_d1|={float(np.max(np.abs(tau_d1))):.3e}")
     print(f"max|torque_d2|={float(np.max(np.abs(tau_d2))):.3e}")
     print(format_solve_report(runtime, x0=x0, x_star=x_star))
+
+    if args.plot:
+        from eiopt.optimize.plot import plot_term_attrs
+
+        fig, _ax, series = plot_term_attrs(
+            runtime,
+            title="07_robokots_trajectory_dynamics",
+        )
+        del fig
+        print(f"plotted series={len(series)} from term.attrs.plot")
+        import matplotlib.pyplot as plt
+
+        plt.savefig("trajectory.png", dpi=200)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..core.state_cache import StateKey
+from .kkt import KKTCheckResult, check_kkt_conditions
 from .runtime import NLSRuntime
 
 Array = np.ndarray

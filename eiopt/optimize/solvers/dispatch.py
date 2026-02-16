@@ -11,7 +11,7 @@ from .gauss_newton import solve_gauss_newton
 from .nls import nls
 
 Array = np.ndarray
-SolveResult = tuple[Array, float, int, float, float, bool]
+SolveResult = tuple[Array, float, float, int, float, float, bool]
 IterCallback = Callable[[int, float, float], None]
 
 
@@ -107,6 +107,7 @@ def solve_scipy_minimize(
     req = runtime.required_list(required)
     objective = _RuntimeObjective(runtime, required=req)
     n_total = int(x0.size)
+    initial_cost, _grad0, _rnorm0 = objective.eval(x0)
 
     options_local: dict[str, Any] = {} if options is None else dict(options)
     if max_iters is not None and "maxiter" not in options_local:
@@ -156,7 +157,7 @@ def solve_scipy_minimize(
         last_dxnorm = float(np.linalg.norm(x_star - x0))
     converged = bool(getattr(result, "success", False))
 
-    return x_star.copy(), float(cost), iters, float(rnorm), float(last_dxnorm), converged
+    return x_star.copy(), float(initial_cost), float(cost), iters, float(rnorm), float(last_dxnorm), converged
 
 
 def solve_cyipopt_minimize(
@@ -182,6 +183,7 @@ def solve_cyipopt_minimize(
     req = runtime.required_list(required)
     objective = _RuntimeObjective(runtime, required=req)
     n_total = int(x0.size)
+    initial_cost, _grad0, _rnorm0 = objective.eval(x0)
 
     options_local: dict[str, Any] = {} if options is None else dict(options)
     if max_iters is not None and "max_iter" not in options_local:
@@ -240,7 +242,7 @@ def solve_cyipopt_minimize(
         last_dxnorm = float(np.linalg.norm(x_star - x0))
     converged = bool(getattr(result, "success", False))
 
-    return x_star.copy(), float(cost), iters, float(rnorm), float(last_dxnorm), converged
+    return x_star.copy(), float(initial_cost), float(cost), iters, float(rnorm), float(last_dxnorm), converged
 
 
 def solve(
