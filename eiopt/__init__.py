@@ -20,15 +20,20 @@ from .optimize import (
     collect_plot_series_from_term_attrs,
     compile_nls_problem,
     estimate_weights_simplex,
+    format_ioc_report,
     format_solve_report,
     get_named_expr_value,
+    IocPreparationResult,
+    IocTermInfo,
     load_problem_toml,
     nls,
     plot_term_attrs,
+    prepare_ioc_weights,
     solve,
     solve_cyipopt_minimize,
     solve_gauss_newton,
     solve_scipy_minimize,
+    split_terms_by_component,
 )
 
 __all__ = [
@@ -56,4 +61,9 @@ __all__ = [
     "build_term_gradient_matrix_from_stacked",
     "build_term_gradient_matrix_from_terms",
     "estimate_weights_simplex",
+    "IocTermInfo",
+    "IocPreparationResult",
+    "prepare_ioc_weights",
+    "format_ioc_report",
+    "split_terms_by_component",
 ]

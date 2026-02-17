@@ -13,6 +13,9 @@ name = "p"
 init = { fill = 0.0 }
 
 [[terms]]
+[terms.constraint]
+kind = "eq"
+
 [terms.expr]
 type = "sub"
 name = "q_init"
@@ -46,6 +49,9 @@ type = "state_traj"
 name = "joint_q"
 
 [[terms]]
+[terms.constraint]
+kind = "eq"
+
 [terms.expr]
 type = "sub"
 name = "q_terminal"
@@ -75,6 +81,8 @@ type = "scalar_weight"
 w = 100.0
 
 [[terms]]
+[terms.constraint]
+kind = "eq"
 [terms.expr]
 type = "sub"
 name = "qdot_init"
@@ -98,6 +106,9 @@ type = "scalar_weight"
 w = 100.0
 
 [[terms]]
+[terms.constraint]
+kind = "eq"
+
 [terms.expr]
 type = "sub"
 name = "qdot_terminal"
@@ -130,7 +141,7 @@ derivative_wrt = "time"
 
 [terms.cost]
 type = "scalar_weight"
-w = 1e-3
+w = 1e-4
 
 [[terms]]
 [terms.expr]
@@ -190,7 +201,7 @@ var = "p"
 
 [terms.cost]
 type = "scalar_weight"
-w = 5e-5
+w = 1e-4
 
 [terms.attrs.plot]
 type = "state_traj"

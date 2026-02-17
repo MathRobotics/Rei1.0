@@ -73,6 +73,8 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if self.dynamics_owner_type == "":
             raise ValueError("KotsStateBuilder: dynamics_owner_type must be non-empty.")
         self._needs_dynamics_update = False
+        self._model_dof_cache: int | None = None
+        self._model_order_cache: int | None = None
 
         family_map = {spec.field: spec for spec in KOTS_DEFAULT_FIELD_FAMILIES}
         selected_fields = [spec.field for spec in KOTS_DEFAULT_FIELD_FAMILIES] if fields is None else [str(f) for f in fields]
@@ -119,9 +121,9 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
                     jacobian_wrt=STATE_JACOBIAN_VAR,
                 )
 
-    def _update_dynamics_if_available(self) -> None:
+    def _update_dynamics_if_available(self) -> bool:
         if not self._needs_dynamics_update:
-            return
+            return False
         for name in ("dynamics", "compute_dynamics", "update_dynamics"):
             fn = getattr(self.model, name, None)
             if not callable(fn):
@@ -130,7 +132,8 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
                 fn()
             except TypeError:
                 continue
-            return
+            return True
+        return False
 
     def _update_kinematics(self, q: Array) -> None:
         q_vec = np.asarray(q, dtype=float).reshape(-1)
@@ -148,19 +151,32 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             )
 
         self.model.import_motions(motion)
+        if self._needs_dynamics_update:
+            if self._update_dynamics_if_available():
+                return
+
         self.model.kinematics()
-        self._update_dynamics_if_available()
+        if self._needs_dynamics_update:
+            self._update_dynamics_if_available()
 
     def _model_dof(self) -> int:
+        if self._model_dof_cache is not None:
+            return int(self._model_dof_cache)
         dof_fn = getattr(self.model, "dof", None)
         if callable(dof_fn):
-            return int(dof_fn())
+            dof = int(dof_fn())
+            self._model_dof_cache = dof
+            return dof
         robot = getattr(self.model, "robot_", None)
         if robot is not None and hasattr(robot, "dof"):
-            return int(getattr(robot, "dof"))
+            dof = int(getattr(robot, "dof"))
+            self._model_dof_cache = dof
+            return dof
         raise ValueError("KotsStateBuilder: unable to resolve model dof.")
 
     def _model_order(self) -> int:
+        if self._model_order_cache is not None:
+            return int(self._model_order_cache)
         order_fn = getattr(self.model, "order", None)
         if callable(order_fn):
             order = int(order_fn())
@@ -168,6 +184,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             order = int(getattr(self.model, "order_", 1))
         if order < 1:
             raise ValueError(f"KotsStateBuilder: model order must be >= 1, got {order}.")
+        self._model_order_cache = int(order)
         return order
 
     def _expand_coordinate_motion(self, q: Array, *, dof: int, order: int) -> Array:
@@ -356,6 +373,14 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             self._raise_missing_state_key(state_ref=state_ref, cause=e)
         if J.ndim != 2:
             raise ValueError(f"Kots Jacobian must be 2D, got shape {J.shape}.")
+
+        # Fast path: if one axis matches motion-space dimension, avoid an extra
+        # state_info() call just for orientation inference.
+        n_motion = int(self._model_dof() * self._model_order())
+        if J.shape[1] == n_motion:
+            return J
+        if J.shape[0] == n_motion:
+            return J.T
 
         m = int(self._value_from_single_state_ref(state_ref).size)
         if J.shape[0] == m:

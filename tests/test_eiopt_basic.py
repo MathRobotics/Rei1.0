@@ -23,6 +23,10 @@ from eiopt.optimize.report import (
     format_solve_report,
     get_named_expr_value,
 )
+from eiopt.optimize.ioc import (
+    format_ioc_report,
+    prepare_ioc_weights,
+)
 from eiopt.optimize.simplex_weight_solver import estimate_weights_simplex
 from eiopt.optimize.term_gradient_matrix import (
     build_term_gradient_matrix,
@@ -804,6 +808,131 @@ class TestEiOptBasic(unittest.TestCase):
         self.assertAlmostEqual(float(np.sum(w)), 1.0, places=8)
         self.assertTrue(bool(info["converged"]))
         self.assertLess(float(info["objective"]), 1e-12)
+
+    def test_prepare_ioc_weights_basic(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "t1",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [1.0]},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "t2",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [-1.0]},
+                    },
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+        out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
+        self.assertEqual(out.active_mode, "residual")
+        self.assertEqual(tuple(out.term_indices), (0, 1))
+        self.assertTrue(np.allclose(out.gradient_matrix, np.array([[-1.0, 1.0]], dtype=float)))
+        self.assertEqual(tuple(out.active_objective_indices), (0, 1))
+        self.assertEqual(tuple(out.active_gradient_objective_indices), (0, 1))
+        self.assertEqual(tuple(out.active_residual_objective_indices), (0, 1))
+        self.assertTrue(np.allclose(out.estimated_weights, np.array([0.5, 0.5], dtype=float), atol=1e-6))
+        self.assertIsNone(out.doc_weights_normalized)
+        self.assertIsNotNone(out.solve_info)
+
+        report = format_ioc_report(out)
+        self.assertIn("A shape=", report)
+        self.assertIn("estimated weights:", report)
+
+    def test_prepare_ioc_weights_respects_constraints_and_doc_weights(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "x_keep", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 2.0},
+                },
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_to_1",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [1.0]},
+                    },
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "sub",
+                        "name": "eq_x_half",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [0.5]},
+                    },
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+        out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
+        self.assertEqual(out.active_mode, "residual")
+        self.assertEqual(tuple(out.active_objective_indices), (1, 2))
+        self.assertEqual(tuple(out.active_gradient_objective_indices), (1, 2))
+        self.assertEqual(tuple(out.active_residual_objective_indices), (1, 2))
+        self.assertTrue(np.allclose(out.estimated_weights, np.array([0.0, 0.0, 1.0], dtype=float)))
+        self.assertIsNotNone(out.doc_weights_normalized)
+        self.assertTrue(
+            np.allclose(out.doc_weights_normalized, np.array([0.0, 0.2, 0.8], dtype=float))
+        )
+
+        report = format_ioc_report(out, include_term_details=True)
+        self.assertIn("term[1] x_to_1", report)
+
+    def test_prepare_ioc_weights_reports_residual_vs_gradient_activity(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "const", "name": "const_active", "var": "x", "value": [1.0]},
+                    "cost": {"type": "scalar_weight", "w": 3.0},
+                },
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_to_1",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [1.0]},
+                    },
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+        out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
+        self.assertEqual(out.active_mode, "residual")
+        self.assertEqual(tuple(out.active_objective_indices), (0, 1))
+        self.assertEqual(tuple(out.active_gradient_objective_indices), (1,))
+        self.assertEqual(tuple(out.active_residual_objective_indices), (0, 1))
+        self.assertTrue(np.allclose(out.doc_weights_normalized, np.array([0.75, 0.25], dtype=float)))
+        self.assertIsNotNone(out.doc_weights_normalized_residual_active)
+        self.assertTrue(
+            np.allclose(
+                out.doc_weights_normalized_residual_active,
+                np.array([0.75, 0.25], dtype=float),
+            )
+        )
+
+        report = format_ioc_report(out, include_term_details=True)
+        self.assertIn("note: residual-active terms can differ", report)
+        self.assertIn("||r_w||=", report)
 
     def test_ioc_matrix_reduced_runtime_matches_from_terms(self) -> None:
         dsl = {

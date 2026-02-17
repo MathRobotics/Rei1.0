@@ -7,21 +7,11 @@ import numpy as np
 
 from ...core.expr.types import Variable, VariablePack
 from ...core.state_cache import StateKey
+from .._xops import set_pack_x
 from .matrix_scaling import scale_matrix_with_projection_svd
 from ..runtime import LinearizedTerm, NLSRuntime, StackedTermSlice
 
 Array = np.ndarray
-
-
-def _set_pack_x(pack: VariablePack, x: Array) -> None:
-    x_target = np.asarray(x, dtype=float).reshape(-1)
-    x_cur = np.asarray(pack.get(), dtype=float).reshape(-1)
-    if x_target.shape != x_cur.shape:
-        raise ValueError(f"_set_pack_x: shape mismatch {x_target.shape} vs {x_cur.shape}.")
-    if np.array_equal(x_target, x_cur):
-        return
-    pack.apply_dx(x_target - x_cur)
-
 
 def _normalize_term_indices(*, n_terms: int, term_indices: Iterable[int] | None) -> tuple[int, ...]:
     if term_indices is None:
@@ -93,7 +83,7 @@ class NullspaceReducedRuntime:
 
         x_cur = np.asarray(self.full_runtime.pack.get(), dtype=float).reshape(-1)
         z0 = self.project(x_cur)
-        _set_pack_x(self._pack, z0)
+        set_pack_x(self._pack, z0)
         self._sync_full_from_reduced()
 
     @property
@@ -129,7 +119,7 @@ class NullspaceReducedRuntime:
     def _sync_full_from_reduced(self) -> None:
         z = np.asarray(self._pack.get(), dtype=float).reshape(-1)
         x = self.lift(z)
-        _set_pack_x(self.full_runtime.pack, x)
+        set_pack_x(self.full_runtime.pack, x)
 
     def update_state_if_needed(self, *, required: Iterable[StateKey] | None = None) -> None:
         req = self.required_list(required)
@@ -452,7 +442,7 @@ def build_nullspace_equality_reduction(
                         continue
                     direction = direction / norm_dir
                     x_trial = np.asarray(x_restore + step_norm * direction, dtype=float).reshape(-1)
-                    _set_pack_x(runtime.pack, x_trial)
+                    set_pack_x(runtime.pack, x_trial)
                     trial_terms = runtime.linearize_terms(
                         required=req,
                         weighted=False,
@@ -484,7 +474,7 @@ def build_nullspace_equality_reduction(
                             f"tol={residual_tol:.3e}."
                         )
             finally:
-                _set_pack_x(runtime.pack, x_restore)
+                set_pack_x(runtime.pack, x_restore)
 
     reduced_runtime = NullspaceReducedRuntime(
         full_runtime=runtime,

@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from ...core.state_cache import StateKey
+from .._xops import as_vec, set_runtime_x
 from ..runtime import NLSRuntime
 from .gauss_newton import solve_gauss_newton
 from .nls import nls
@@ -13,22 +14,6 @@ from .nls import nls
 Array = np.ndarray
 SolveResult = tuple[Array, float, float, int, float, float, bool]
 IterCallback = Callable[[int, float, float], None]
-
-
-def _as_vec(x: Array | Any, *, expected_size: int, name: str) -> Array:
-    v = np.asarray(x, dtype=float).reshape(-1)
-    if v.size != int(expected_size):
-        raise ValueError(f"{name}: expected size={int(expected_size)}, got size={v.size}.")
-    return v
-
-
-def _set_runtime_x(runtime: NLSRuntime, x: Array) -> None:
-    pack = runtime.pack
-    x_new = _as_vec(x, expected_size=int(pack.n_total), name="x")
-    x_cur = np.asarray(pack.get(), dtype=float).reshape(-1)
-    if np.array_equal(x_cur, x_new):
-        return
-    pack.apply_dx(x_new - x_cur)
 
 
 class _RuntimeObjective:
@@ -46,13 +31,13 @@ class _RuntimeObjective:
         self._last_rnorm: float = float("inf")
 
     def eval(self, x: Array) -> tuple[float, Array, float]:
-        x_vec = _as_vec(x, expected_size=int(self.runtime.pack.n_total), name="x")
+        x_vec = as_vec(x, expected_size=int(self.runtime.pack.n_total), name="x")
         if self._last_x is not None and np.array_equal(self._last_x, x_vec):
             if self._last_grad is None:
                 raise RuntimeError("internal error: gradient cache is missing.")
             return self._last_cost, self._last_grad, self._last_rnorm
 
-        _set_runtime_x(self.runtime, x_vec)
+        set_runtime_x(self.runtime, x_vec, name="x")
         r_all, J_all = self.runtime.linearize(required=self.required)
         r = np.asarray(r_all, dtype=float).reshape(-1)
         J = np.asarray(J_all, dtype=float)
@@ -70,7 +55,7 @@ class _RuntimeObjective:
 
 def _extract_x_from_callback_arg(xk: Any, *, size: int) -> Array | None:
     try:
-        return _as_vec(xk, expected_size=size, name="callback.x")
+        return as_vec(xk, expected_size=size, name="callback.x")
     except Exception:
         pass
 
@@ -78,7 +63,7 @@ def _extract_x_from_callback_arg(xk: Any, *, size: int) -> Array | None:
     if x_attr is None:
         return None
     try:
-        return _as_vec(x_attr, expected_size=size, name="callback.x")
+        return as_vec(x_attr, expected_size=size, name="callback.x")
     except Exception:
         return None
 
@@ -148,7 +133,7 @@ def solve_scipy_minimize(
         options=options_local,
     )
 
-    x_star = _as_vec(getattr(result, "x", x0), expected_size=n_total, name="result.x")
+    x_star = as_vec(getattr(result, "x", x0), expected_size=n_total, name="result.x")
     cost, _grad, rnorm = objective.eval(x_star)
     iters = int(getattr(result, "nit", iter_count))
     if iters <= 0:
@@ -233,7 +218,7 @@ def solve_cyipopt_minimize(
         kwargs.pop("callback", None)
         result = minimize_ipopt(**kwargs)
 
-    x_star = _as_vec(getattr(result, "x", x0), expected_size=n_total, name="result.x")
+    x_star = as_vec(getattr(result, "x", x0), expected_size=n_total, name="result.x")
     cost, _grad, rnorm = objective.eval(x_star)
     iters = int(getattr(result, "nit", iter_count))
     if iters <= 0:

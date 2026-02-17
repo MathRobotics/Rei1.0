@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from .dsl_ops import find_const_expr, find_var_dsl, iter_nodes, rewrite_get_state_owner_name
+from .dsl_ops import (
+    find_const_expr,
+    find_var_dsl,
+    iter_nodes,
+    rewrite_get_state_owner_name,
+    split_terms_by_component,
+)
 from .environment import DslBuildEnv
 from .io import load_problem_toml
 from .trajectory import (
@@ -21,6 +27,7 @@ __all__ = [
     "rewrite_get_state_owner_name",
     "find_const_expr",
     "find_var_dsl",
+    "split_terms_by_component",
     "build_trajectory_map",
     "build_trajectory_map_with_derivative",
     "build_trajectory_maps_with_derivatives",

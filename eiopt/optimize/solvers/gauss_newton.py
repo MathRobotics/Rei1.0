@@ -1,24 +1,14 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable
+from typing import Callable, Iterable
 
 import numpy as np
 
 from ...core.state_cache import StateKey
+from .._xops import apply_pack_dx, set_pack_x
 from ..runtime import NLSRuntime
 
 Array = np.ndarray
-
-
-def _set_variables_x(variables: Any, x_new: Array) -> None:
-    x_target = np.asarray(x_new, dtype=float).reshape(-1)
-    x_cur = np.asarray(variables.get(), dtype=float).reshape(-1)
-    if x_target.shape != x_cur.shape:
-        raise ValueError(f"_set_variables_x: shape mismatch {x_target.shape} vs {x_cur.shape}.")
-    if np.array_equal(x_target, x_cur):
-        return
-    variables.apply_dx(x_target - x_cur)
-
 
 def solve_gauss_newton(
     runtime: NLSRuntime,
@@ -86,7 +76,7 @@ def solve_gauss_newton(
                 cost = float(r_all @ r_all)
                 return x_star, initial_cost, cost, k, rnorm, dxnorm, converged
 
-            variables.apply_dx(dx)
+            apply_pack_dx(variables, dx, name="dx")
             continue
 
         beta = float(ls_beta)
@@ -107,7 +97,7 @@ def solve_gauss_newton(
 
         for _ in range(max_ls):
             x_trial = x_cur + step * dx
-            _set_variables_x(variables, x_trial)
+            set_pack_x(variables, x_trial, name="x")
             r_trial, _ = runtime.linearize(required=req)
             cost_trial = float(r_trial @ r_trial)
 
@@ -123,7 +113,7 @@ def solve_gauss_newton(
             if step < min_step:
                 break
 
-        _set_variables_x(variables, best_x)
+        set_pack_x(variables, best_x, name="x")
         dx_eff = np.asarray(best_x - x_cur, dtype=float).reshape(-1)
         dxnorm_eff = float(np.linalg.norm(dx_eff))
         dxnorm = dxnorm_eff

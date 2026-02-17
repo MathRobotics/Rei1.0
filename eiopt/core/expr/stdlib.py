@@ -7,6 +7,7 @@ import numpy as np
 from .registry import ExprRegister
 from .nodes import (
     ConstantExpr,
+    ComponentExpr,
     RepeatConstantExpr,
     GetStateExpr,
     GetVarExpr,
@@ -40,6 +41,7 @@ def register_stdlib(expr_register: ExprRegister) -> None:
     expr_register.register_expr("stack", build_stack)
     expr_register.register_expr("hinge", build_hinge)
     expr_register.register_expr("time_diff", build_time_diff)
+    expr_register.register_expr("component", build_component)
 
 
 def _default_var_name(ctx, *, preferred: str = "q") -> str:
@@ -579,6 +581,36 @@ def build_stack(ctx, dsl):
 def build_hinge(ctx, dsl):
     base = ctx.build_expr(dsl["base"])
     return HingeExpr(name=dsl.get("name", "hinge"), base=base)
+
+
+def build_component(ctx, dsl):
+    base = ctx.build_expr(dsl["base"])
+    segment_dim_raw = dsl.get("segment_dim", None)
+    if segment_dim_raw is None:
+        raise ValueError("component: segment_dim is required.")
+    try:
+        segment_dim = int(segment_dim_raw)
+    except Exception as e:
+        raise ValueError(f"component: segment_dim must be an integer, got {segment_dim_raw!r}.") from e
+    if segment_dim <= 0:
+        raise ValueError(f"component: segment_dim must be > 0, got {segment_dim}.")
+
+    index_raw = dsl.get("index", dsl.get("component", None))
+    if index_raw is None:
+        raise ValueError("component: index is required.")
+    try:
+        index = int(index_raw)
+    except Exception as e:
+        raise ValueError(f"component: index must be an integer, got {index_raw!r}.") from e
+    if index < 0 or index >= segment_dim:
+        raise ValueError(f"component: index must be in [0, {segment_dim - 1}], got {index}.")
+
+    return ComponentExpr(
+        name=dsl.get("name", "component"),
+        base=base,
+        segment_dim=segment_dim,
+        index=index,
+    )
 
 
 def build_time_diff(ctx, dsl):

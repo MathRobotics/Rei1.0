@@ -1085,7 +1085,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             )
         )
 
-        self.assertEqual(model.kinematics_calls, 2)
+        self.assertEqual(model.kinematics_calls, 0)
         self.assertEqual(model.dynamics_calls, 2)
 
     def test_second_torque_derivative_value_and_jac_chain(self) -> None:

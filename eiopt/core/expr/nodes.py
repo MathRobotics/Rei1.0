@@ -353,6 +353,51 @@ class StackExpr:
 
 
 @dataclass
+class ComponentExpr:
+    """Select one component from vectors stacked as (..., segment_dim)."""
+
+    name: str
+    base: Expr
+    segment_dim: int
+    index: int
+
+    @property
+    def vars(self):
+        return self.base.vars
+
+    def deps(self):
+        return self.base.deps()
+
+    def eval(self, ctx: RuntimeContext):
+        y, blocks = self.base.eval(ctx)
+        y = np.asarray(y, dtype=float).reshape(-1)
+
+        seg = int(self.segment_dim)
+        idx = int(self.index)
+        if seg <= 0:
+            raise ValueError(f"{self.name}: segment_dim must be > 0, got {seg}.")
+        if idx < 0 or idx >= seg:
+            raise ValueError(f"{self.name}: index must be in [0, {seg - 1}], got {idx}.")
+        if y.size % seg != 0:
+            raise ValueError(
+                f"{self.name}: base size {y.size} is not divisible by segment_dim={seg}."
+            )
+
+        steps = int(y.size // seg)
+        y2 = y.reshape(steps, seg)[:, idx].reshape(-1)
+
+        blocks2 = []
+        for B in blocks:
+            Bm = np.asarray(B, dtype=float)
+            if Bm.ndim != 2 or Bm.shape[0] != y.size:
+                raise ValueError(
+                    f"{self.name}: block row mismatch. base size={y.size}, block shape={Bm.shape}."
+                )
+            blocks2.append(Bm.reshape(steps, seg, Bm.shape[1])[:, idx, :].reshape(steps, Bm.shape[1]))
+        return y2, blocks2
+
+
+@dataclass
 class HingeExpr:
     name: str
     base: Expr
