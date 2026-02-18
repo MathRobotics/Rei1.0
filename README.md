@@ -22,6 +22,17 @@ backend(kots / pinocchio 等) と `eiopt` を繋ぐ唯一の接続点は `StateC
   - `time`: `TimeGrid`
 - `required`: 今回必要な `StateKey` の集合（これだけ計算すると速い）。`None` は「全部計算」。
 
+複数 backend を同時利用したい場合は `eiopt.backends.state.composite.CompositeStateBuilder` で
+`build_state()` を合成できます（例: ロボット状態 provider + カメラ状態 provider）。
+
+```python
+from eiopt.backends.state.composite import CompositeStateBuilder
+from eiopt.optimize.builder import compile_nls_problem
+
+state_builder = CompositeStateBuilder([robot_provider, camera_provider])
+runtime = compile_nls_problem(dsl, build_state=state_builder.build_state)
+```
+
 ## Backend の最小要件
 
 backend 側で実装すべき最小要件は `build_state()` だけです。
@@ -58,6 +69,7 @@ python -m pip install -e .
 python examples/01_minimize_quadratic.py
 python examples/02_get_state_minimal.py
 python examples/03_toml_problem.py
+python examples/08_camera_calibration.py
 python examples/04_pinocchio_ik.py   # 要: pinocchio
 python examples/05_robokots_ik.py    # 要: robokots
 python examples/06_pinocchio_trajectory_dynamics.py  # 要: pinocchio
@@ -69,6 +81,7 @@ python examples/07_robokots_trajectory_dynamics.py   # 要: robokots
 PYTHONPATH=. python examples/01_minimize_quadratic.py
 PYTHONPATH=. python examples/02_get_state_minimal.py
 PYTHONPATH=. python examples/03_toml_problem.py
+PYTHONPATH=. python examples/08_camera_calibration.py
 PYTHONPATH=. python examples/04_pinocchio_ik.py
 PYTHONPATH=. python examples/05_robokots_ik.py
 PYTHONPATH=. python examples/06_pinocchio_trajectory_dynamics.py
@@ -83,6 +96,9 @@ uv sync --group kots
 ```
 
 各サンプルの目的は `examples/README.md` を参照してください。
+補足として、`examples/dsl/robokots_traj_dynamics_d12_per_joint.toml` は
+`examples/dsl/robokots_traj_dynamics_d12.toml` の per-joint 版で、
+`expr.type="component"` と `terms.attrs.joint_component` を使った可視化・解析向け DSL です。
 
 ### Kots 軌道問題の高レベルビルダー
 
@@ -117,6 +133,12 @@ compiled = compile_pinocchio_trajectory_problem(
 runtime = compiled.runtime
 traj_map = compiled.trajectory_map
 ```
+
+trajectory 前提を置かない backend の compile helper は
+`eiopt.optimize_backends.problem_adapter.compile_problem_with_adapter()` で実装できます。
+`dsl` 準備・state builder 構築・runtime 検証の 3 段を adapter に分離できます。
+
+camera calibration 向けには `eiopt.optimize_backends.vision.compile_camera_calibration_problem()` も利用できます。
 
 等式制約 (`constraint.kind="eq"`) を零空間で消去した reduced 問題を作る場合は、
 `compile_kots_trajectory_problem()` の後段で backend 非依存 API を適用します。
@@ -372,6 +394,61 @@ type = "l2"
 - `field`: 量の名前（例: `"pos"`, `"rot"`, `"vel"`, `"acc"`, `"momentum"`, `"force"`, `"torque"`）
 - `frame`: 座標系（推奨: `"world"` / `"local"`）
 - `rel_frame`: 相対量が必要なときの相手フレーム（任意）
+
+### Camera calibration 向けの最小キー設計（`dtype="vision"`）
+
+camera calibration の最小雛形では、次のキー設計を推奨します。
+
+- `dtype = "vision"`
+- `owner_type = "camera"`
+- `owner_name = "cam0"`（カメラ名）
+- `field = "reproj" | "intrinsics" | "extrinsics"`（必要に応じて拡張）
+
+### Camera calibration DSL の canonical 形式
+
+`compile_camera_calibration_problem()` は top-level `vision` セクションを canonical 入力として扱います。
+`owner_name` と `observations` は必須です。
+
+```toml
+[vision]
+p_var = "theta"            # 既定
+owner_type = "camera"      # 既定
+owner_name = "cam0"        # 必須
+field = "reproj"           # 既定
+k = 0                      # 既定
+term_name = "camera_reproj_error"  # 既定
+observations = [0.1, 0.2, 0.3]     # 必須
+```
+
+この形式では、`compile_camera_calibration_problem()` が再投影誤差 term を標準形で自動生成/置換します。
+対象パラメータ変数は `vision.p_var`（既定 `theta`）と一致する必要があります。
+
+Python helper:
+
+```python
+from eiopt.core.state_schema import vision_key, vision_jac_key
+
+key = vision_key(k=0, owner_name="cam0", field="reproj")
+key_j = vision_jac_key(k=0, owner_name="cam0", field="reproj", var="theta")
+```
+
+最小 provider 雛形:
+
+```python
+from eiopt.backends.state.vision import CameraCalibrationStateProvider, VisionFieldHandler
+
+provider = CameraCalibrationStateProvider(
+    model=model,
+    data=data,
+    param_var="theta",
+    field_handlers={
+        "reproj": VisionFieldHandler(
+            value_handler=reproj_value_fn,
+            jac_handler=reproj_jac_fn,
+        ),
+    },
+)
+```
 
 ### Jacobian の field 命名
 

@@ -18,6 +18,7 @@ from .trajectory import (
     infer_bspline_q_dim_from_var,
 )
 from .trajectory_compile import PreparedTrajectoryProblemDsl, prepare_trajectory_problem_dsl
+from .vision_compile import PreparedVisionCalibrationDsl, prepare_vision_calibration_problem_dsl
 from .variable_utils import expand_variable_init, normalize_variable_dsl, resolve_variable_dim
 
 __all__ = [
@@ -36,6 +37,8 @@ __all__ = [
     "infer_bspline_q_dim_from_var",
     "PreparedTrajectoryProblemDsl",
     "prepare_trajectory_problem_dsl",
+    "PreparedVisionCalibrationDsl",
+    "prepare_vision_calibration_problem_dsl",
     "resolve_variable_dim",
     "expand_variable_init",
     "normalize_variable_dsl",

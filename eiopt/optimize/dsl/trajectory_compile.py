@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from ...core.mapping import mapping_as_dict
 from ...core.trajectory import TrajectoryMap
 from .dsl_ops import find_var_dsl
 from .trajectory import (
@@ -24,15 +25,6 @@ class PreparedTrajectoryProblemDsl:
     trajectory_derivative_maps: dict[int, TrajectoryMap]
     dt: float
     model_order: int
-
-
-def _mapping_as_dict(mapping: Mapping[str, Any], *, where: str) -> dict[str, Any]:
-    if isinstance(mapping, dict):
-        return mapping
-    try:
-        return dict(mapping)
-    except Exception as e:
-        raise TypeError(f"{where} must be a mapping.") from e
 
 
 def _resolve_dt(dsl: Mapping[str, Any], *, default_dt: float | None = None) -> float:
@@ -69,7 +61,7 @@ def _ensure_variables_list(dsl: dict[str, Any]) -> list[dict[str, Any]]:
     for i, entry in enumerate(variables):
         if not isinstance(entry, Mapping):
             raise ValueError(f"DSL variables[{i}] must be a mapping.")
-        out.append(_mapping_as_dict(entry, where=f"dsl.variables[{i}]"))
+        out.append(mapping_as_dict(entry, where=f"dsl.variables[{i}]"))
     dsl["variables"] = out
     return out
 
@@ -78,7 +70,7 @@ def _ensure_variable_entry(dsl: dict[str, Any], *, name: str) -> dict[str, Any]:
     variables = _ensure_variables_list(dsl)
     var_dsl = find_var_dsl(dsl, name=name)
     if var_dsl is not None:
-        return _mapping_as_dict(var_dsl, where=f"dsl.variables[{name!r}]")
+        return mapping_as_dict(var_dsl, where=f"dsl.variables[{name!r}]")
 
     entry = {"name": str(name)}
     variables.append(entry)
@@ -114,11 +106,11 @@ def prepare_trajectory_problem_dsl(
 ) -> PreparedTrajectoryProblemDsl:
     """Prepare a normalized trajectory DSL and derivative maps for backend compile paths."""
 
-    dsl_dict = deepcopy(_mapping_as_dict(dsl, where="dsl"))
+    dsl_dict = deepcopy(mapping_as_dict(dsl, where="dsl"))
     trajectory_dsl_raw = dsl_dict.get("trajectory", None)
     if not isinstance(trajectory_dsl_raw, Mapping):
         raise ValueError("DSL must contain [trajectory] section.")
-    trajectory_dsl = _mapping_as_dict(trajectory_dsl_raw, where="dsl.trajectory")
+    trajectory_dsl = mapping_as_dict(trajectory_dsl_raw, where="dsl.trajectory")
 
     p_var_name = _resolve_p_var_name(trajectory_dsl=trajectory_dsl, p_var=p_var)
 

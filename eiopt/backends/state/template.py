@@ -29,12 +29,14 @@ class BackendDispatchStateBuilder:
         data: Any,
         *,
         q_var: str = "q",
+        allow_nonzero_k: bool = False,
     ) -> None:
         self.model = model
         self.data = data
         self.q_var = str(q_var)
         if self.q_var == "":
             raise ValueError("BackendDispatchStateBuilder: q_var must be non-empty.")
+        self.allow_nonzero_k = bool(allow_nonzero_k)
         self._dispatch: dict[tuple[str, str, str], _DispatchEntry] = {}
         self._state_ref_cache: dict[tuple[int, str, str, str, str, str | None, str | None], Any] = {}
 
@@ -158,7 +160,10 @@ class BackendDispatchStateBuilder:
     def _accept_required_key(self, key: StateKey) -> bool:
         if not isinstance(key, StateKey):
             return False
-        if int(getattr(key, "k", 0)) != 0:
+        k = int(getattr(key, "k", 0))
+        if k < 0:
+            return False
+        if (not self.allow_nonzero_k) and k != 0:
             return False
         dtype = getattr(key, "dtype", None)
         if not isinstance(dtype, str) or dtype == "":
@@ -183,6 +188,14 @@ class BackendDispatchStateBuilder:
         if not isinstance(owner_type, str) or not isinstance(dtype, str) or not isinstance(field, str):
             return None
         return dtype, owner_type, field
+
+    def accepts(self, key: StateKey) -> bool:
+        if not self._accept_required_key(key):
+            return False
+        route = self._route_for_key(key)
+        if route is None:
+            return False
+        return route in self._dispatch
 
     def _extract_q(self, x_all: Array, *, pack: Any = None) -> Array:
         q = np.asarray(x_all, dtype=float).reshape(-1)

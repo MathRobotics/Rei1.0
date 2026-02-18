@@ -20,6 +20,7 @@ OWNER_TYPES: Tuple[str, ...] = ("joint", "link", "total_link", "total_joint", "t
 DTYPE_KINEMATICS = "kinematics"
 DTYPE_DYNAMICS = "dynamics"
 DTYPE_COORD = "coord"
+DTYPE_VISION = "vision"
 
 DEFAULT_ROBOT_NAME: str = "robot"
 
@@ -44,6 +45,9 @@ FORCE_FIELDS: Tuple[str, ...] = ("force",)
 TORQUE_FIELDS: Tuple[str, ...] = ("torque", "torque_d1")
 
 DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
+
+# Vision-like fields (minimal set; backends may extend)
+VISION_FIELDS: Tuple[str, ...] = ("reproj", "intrinsics", "extrinsics")
 
 _TORQUE_D_PATTERN = re.compile(r"^torque_d([0-9]+)$")
 _INVALID_TORQUE_ALIAS_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -216,6 +220,48 @@ def joint_q_jac_key(
         dtype=DTYPE_COORD,
         field="q",
         var=str(var),
+    )
+
+
+def vision_key(
+    *,
+    k: int,
+    owner_type: str = "camera",
+    owner_name: str,
+    field: str,
+    frame: str | None = None,
+    rel_frame: str | None = None,
+) -> StateKey:
+    return make_key(
+        k=int(k),
+        owner_type=str(owner_type),
+        owner_name=str(owner_name),
+        dtype=DTYPE_VISION,
+        field=str(field),
+        frame=frame,
+        rel_frame=rel_frame,
+    )
+
+
+def vision_jac_key(
+    *,
+    k: int,
+    owner_type: str = "camera",
+    owner_name: str,
+    field: str,
+    var: str,
+    frame: str | None = None,
+    rel_frame: str | None = None,
+) -> StateKey:
+    return make_jac_key(
+        k=int(k),
+        owner_type=str(owner_type),
+        owner_name=str(owner_name),
+        dtype=DTYPE_VISION,
+        field=str(field),
+        var=str(var),
+        frame=frame,
+        rel_frame=rel_frame,
     )
 
 

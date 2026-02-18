@@ -5,17 +5,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..backends.state.kots import KotsTrajectoryStateBuilder
-from ..core.state_schema import (
-    DTYPE_DYNAMICS,
-    canonical_dtype_name,
-    canonical_field_name,
-    split_jac_field,
-    torque_derivative_order,
-)
+from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
-from ..optimize.dsl.dsl_ops import iter_nodes
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl
 from ..optimize.runtime import NLSRuntime
+from ._state_field_utils import (
+    canonicalize_unique_fields,
+    required_base_fields_in_order_from_dsl,
+    validate_runtime_field_coverage,
+)
 from .trajectory_adapter import compile_trajectory_problem_with_adapter
 
 
@@ -63,153 +61,14 @@ def _infer_model_order(model: Any) -> int:
         return 1
 
 
-def _base_field_name(field: str) -> str:
-    field_name = canonical_field_name(str(field))
-    try:
-        base, _var = split_jac_field(field_name)
-    except ValueError:
-        return field_name
-    return base
-
-
 def _canonicalize_dynamics_fields(
     dynamics_fields: Sequence[str] | None,
 ) -> tuple[str, ...] | None:
-    if dynamics_fields is None:
-        return None
-    out: list[str] = []
-    seen: set[str] = set()
-    for field_raw in dynamics_fields:
-        field = canonical_field_name(str(field_raw).strip())
-        if field == "":
-            continue
-        if field in seen:
-            continue
-        seen.add(field)
-        out.append(field)
-    if len(out) == 0:
-        raise ValueError("compile_kots_trajectory_problem: dynamics_fields must be non-empty when provided.")
-    return tuple(out)
-
-
-def _registered_dynamics_base_fields(
-    *,
-    builder: KotsTrajectoryStateBuilder,
-    owner_type: str,
-) -> set[str]:
-    fields: set[str] = set()
-    for field in builder.registered_route_fields(
-        dtype=DTYPE_DYNAMICS,
-        owner_type=owner_type,
-    ):
-        fields.add(_base_field_name(field))
-    return fields
-
-
-def _required_dynamics_base_fields_in_order(
-    *,
-    runtime: NLSRuntime,
-    owner_type: str,
-) -> tuple[list[str], set[str]]:
-    requested_fields: list[str] = []
-    requested_seen: set[str] = set()
-    unsupported_owner_types: set[str] = set()
-    for key in runtime.required:
-        if getattr(key, "dtype", None) != DTYPE_DYNAMICS:
-            continue
-        owner = getattr(key, "owner", None)
-        key_owner_type = getattr(owner, "owner_type", None)
-        if key_owner_type != owner_type:
-            unsupported_owner_types.add(str(key_owner_type))
-            continue
-        field = _base_field_name(str(getattr(key, "field", "")))
-        if field in requested_seen:
-            continue
-        requested_seen.add(field)
-        requested_fields.append(field)
-    return requested_fields, unsupported_owner_types
-
-
-def _required_dynamics_base_fields(
-    *,
-    runtime: NLSRuntime,
-    owner_type: str,
-) -> tuple[set[str], set[str]]:
-    requested_fields, unsupported_owner_types = _required_dynamics_base_fields_in_order(
-        runtime=runtime,
-        owner_type=owner_type,
+    return canonicalize_unique_fields(
+        dynamics_fields,
+        where="compile_kots_trajectory_problem",
+        param_name="dynamics_fields",
     )
-    return set(requested_fields), unsupported_owner_types
-
-
-def _explicit_get_state_jac_field_bases(node: Mapping[str, Any]) -> list[str]:
-    jac_entries: list[Mapping[str, Any]] = []
-
-    jac_dsl = node.get("jac", None)
-    if jac_dsl is not None:
-        if not isinstance(jac_dsl, Mapping):
-            raise ValueError("get_state: jac must be a dict when provided.")
-        jac_entries.append(jac_dsl)
-
-    jacs_dsl = node.get("jacs", None)
-    if jacs_dsl is not None:
-        if not isinstance(jacs_dsl, list):
-            raise ValueError("get_state: jacs must be a list[dict] when provided.")
-        for i, item in enumerate(jacs_dsl):
-            if not isinstance(item, Mapping):
-                raise ValueError(f"get_state: jacs[{i}] must be a dict, got {type(item).__name__}.")
-            jac_entries.append(item)
-
-    out: list[str] = []
-    for entry in jac_entries:
-        field_raw = entry.get("field", None)
-        if field_raw is None:
-            continue
-        out.append(_base_field_name(str(field_raw)))
-    return out
-
-
-def _required_dynamics_base_fields_in_order_from_dsl(
-    *,
-    dsl: Mapping[str, Any],
-    owner_type: str,
-) -> tuple[list[str], set[str]]:
-    requested_fields: list[str] = []
-    requested_seen: set[str] = set()
-    unsupported_owner_types: set[str] = set()
-
-    for term in dsl.get("terms", []) or []:
-        if not isinstance(term, Mapping):
-            continue
-        expr = term.get("expr", None)
-        for node in iter_nodes(expr):
-            if node.get("type", None) != "get_state":
-                continue
-            key = node.get("key", None)
-            if not isinstance(key, Mapping):
-                continue
-
-            dtype_name = canonical_dtype_name(str(key.get("dtype", "")))
-            if dtype_name != DTYPE_DYNAMICS:
-                continue
-
-            key_owner_type = str(key.get("owner_type", ""))
-            if key_owner_type != owner_type:
-                unsupported_owner_types.add(key_owner_type)
-                continue
-
-            field = _base_field_name(str(key.get("field", "")))
-            if field not in requested_seen:
-                requested_seen.add(field)
-                requested_fields.append(field)
-
-            for jac_field_base in _explicit_get_state_jac_field_bases(node):
-                if jac_field_base in requested_seen:
-                    continue
-                requested_seen.add(jac_field_base)
-                requested_fields.append(jac_field_base)
-
-    return requested_fields, unsupported_owner_types
 
 
 def _validate_model_order_for_dynamics_fields(
@@ -239,36 +98,18 @@ def _validate_kots_runtime_dynamics_coverage(
     builder: KotsTrajectoryStateBuilder,
     dynamics_owner_type: str,
 ) -> None:
-    requested_fields, unsupported_owner_types = _required_dynamics_base_fields(
+    validate_runtime_field_coverage(
         runtime=runtime,
-        owner_type=dynamics_owner_type,
-    )
-    if unsupported_owner_types:
-        unsupported = ", ".join(sorted(unsupported_owner_types))
-        raise ValueError(
-            "compile_kots_trajectory_problem: DSL contains dynamics keys with unsupported owner_type(s): "
-            f"{unsupported}. Supported owner_type is {dynamics_owner_type!r}."
-        )
-    if len(requested_fields) == 0:
-        return
-
-    registered_fields = _registered_dynamics_base_fields(
         builder=builder,
+        dtype=DTYPE_DYNAMICS,
         owner_type=dynamics_owner_type,
-    )
-    missing_fields = sorted(requested_fields - registered_fields)
-    if len(missing_fields) == 0:
-        return
-
-    requested_str = ", ".join(sorted(requested_fields))
-    registered_str = ", ".join(sorted(registered_fields)) if len(registered_fields) > 0 else "<none>"
-    missing_str = ", ".join(missing_fields)
-    raise ValueError(
-        "compile_kots_trajectory_problem: DSL requests dynamics field(s) that are not registered in "
-        "KotsTrajectoryStateBuilder. "
-        f"Missing: {missing_str}. Requested: {requested_str}. Registered: {registered_str}. "
-        "Add missing entries to `dynamics_fields` (e.g. include 'torque_d1' for first torque derivative), "
-        "or remove corresponding get_state dynamics terms."
+        error_prefix="compile_kots_trajectory_problem",
+        builder_name="KotsTrajectoryStateBuilder",
+        missing_hint=(
+            "Add missing entries to `dynamics_fields` "
+            "(e.g. include 'torque_d1' for first torque derivative), "
+            "or remove corresponding get_state dynamics terms."
+        ),
     )
 
 
@@ -295,8 +136,9 @@ class _KotsTrajectoryCompileAdapter:
         del model, data
         dynamics_fields_use = _canonicalize_dynamics_fields(self.dynamics_fields)
         if dynamics_fields_use is None:
-            requested_fields_order, unsupported_owner_types = _required_dynamics_base_fields_in_order_from_dsl(
+            requested_fields_order, unsupported_owner_types = required_base_fields_in_order_from_dsl(
                 dsl=prepared.dsl,
+                dtype=DTYPE_DYNAMICS,
                 owner_type=self.dynamics_owner_type,
             )
             if unsupported_owner_types:
