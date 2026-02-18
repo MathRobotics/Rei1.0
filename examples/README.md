@@ -8,6 +8,7 @@
 PYTHONPATH=. python examples/01_minimize_quadratic.py
 PYTHONPATH=. python examples/02_get_state_minimal.py
 PYTHONPATH=. python examples/03_toml_problem.py
+PYTHONPATH=. python examples/08_camera_calibration.py
 ```
 
 Pinocchio / RoboKots 例は追加依存が必要です。
@@ -44,6 +45,9 @@ PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py --plot
 - `07_robokots_trajectory_dynamics.py`
   - RoboKots の trajectory 最適化（決定変数 `p`）に dynamics(`torque`, `torque_d1`, `torque_d2`) 正則化を加えた例
   - `--plot` で DSL の `term.attrs.plot` を使って時系列を描画
+- `08_camera_calibration.py`
+  - `dtype="vision"` の camera calibration 例（`--model linear|pinhole`）
+  - `compile_camera_calibration_problem()` と `CameraCalibrationStateProvider` の組み合わせ例
 - `dsl/basic.toml`
   - 最小 TOML 問題定義
 - `dsl/ik_pos.toml`
@@ -52,6 +56,9 @@ PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py --plot
   - Pinocchio の trajectory + dynamics(`torque`) 最適化用 TOML
 - `dsl/robokots_traj_dynamics_d12.toml`
   - RoboKots の trajectory + dynamics(`torque`, `torque_d1`, `torque_d2`) 最適化用 TOML
+- `dsl/robokots_traj_dynamics_d12_per_joint.toml`
+  - `dsl/robokots_traj_dynamics_d12.toml` の per-joint 版（`expr.type="component"` で j0/j1 に分解）
+  - `terms.attrs.joint_component` を付与した可視化・解析向け TOML
 - `models/planar2.urdf`
   - Pinocchio 用の2自由度平面アーム
 - `models/planar2.json`
