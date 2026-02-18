@@ -74,6 +74,7 @@ python examples/04_pinocchio_ik.py   # 要: pinocchio
 python examples/05_robokots_ik.py    # 要: robokots
 python examples/06_pinocchio_trajectory_dynamics.py  # 要: pinocchio
 python examples/07_robokots_trajectory_dynamics.py   # 要: robokots
+python examples/09_kots_vision_composite.py   # 要: robokots
 ```
 
 ```bash
@@ -86,6 +87,7 @@ PYTHONPATH=. python examples/04_pinocchio_ik.py
 PYTHONPATH=. python examples/05_robokots_ik.py
 PYTHONPATH=. python examples/06_pinocchio_trajectory_dynamics.py
 PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py
+PYTHONPATH=. python examples/09_kots_vision_composite.py
 ```
 
 Pinocchio / RoboKots のサンプルは optional dependency が必要です。

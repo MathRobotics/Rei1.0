@@ -25,6 +25,7 @@ uv sync --group kots
 PYTHONPATH=. python examples/05_robokots_ik.py
 PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py
 PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py --plot
+PYTHONPATH=. python examples/09_kots_vision_composite.py
 ```
 
 ## ファイル一覧
@@ -48,6 +49,9 @@ PYTHONPATH=. python examples/07_robokots_trajectory_dynamics.py --plot
 - `08_camera_calibration.py`
   - `dtype="vision"` の camera calibration 例（`--model linear|pinhole`）
   - `compile_camera_calibration_problem()` と `CameraCalibrationStateProvider` の組み合わせ例
+- `09_kots_vision_composite.py`
+  - `CompositeStateBuilder` で `KotsStateBuilder` と `CameraCalibrationStateProvider` を合成する統合例
+  - ロボット位置誤差 (`dtype="kinematics"`) とカメラ再投影誤差 (`dtype="vision"`) を同時最適化
 - `dsl/basic.toml`
   - 最小 TOML 問題定義
 - `dsl/ik_pos.toml`
