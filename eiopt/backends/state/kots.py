@@ -340,6 +340,28 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
                 return value
         return None
 
+    @staticmethod
+    def _state_ref_owner_type(state_ref: Any) -> str | None:
+        value = getattr(state_ref, "owner_type", None)
+        if isinstance(value, str) and value != "":
+            return value
+        return None
+
+    @staticmethod
+    def _state_ref_owner_name(state_ref: Any) -> str | None:
+        value = getattr(state_ref, "owner_name", None)
+        if isinstance(value, str) and value != "":
+            return value
+        return None
+
+    @staticmethod
+    def _state_ref_frame_name(state_ref: Any) -> str | None:
+        for attr in ("frame", "frame_name"):
+            value = getattr(state_ref, attr, None)
+            if isinstance(value, str) and value != "":
+                return value
+        return None
+
     def _raise_missing_state_key(self, *, state_ref: Any, cause: KeyError) -> None:
         data_type = self._state_ref_data_type(state_ref)
         deriv_order = None if data_type is None else self._torque_derivative_order_from_state_data_type(data_type)
@@ -394,13 +416,66 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         return self._value_from_state_ref(state_ref)
 
     def _handle_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del key
         del q
         total_joint_ref = self._as_total_joint_dynamics_state_ref(state_ref)
         if total_joint_ref is not None:
             return self._stack_total_joint_jacobians(total_joint_ref.refs)
 
-        return self._jac_from_single_state_ref(state_ref)
+        J = self._jac_from_single_state_ref(state_ref)
+        return self._rotate_link_kinematics_jacobian_to_world(J=J, key=key, state_ref=state_ref)
+
+    def _link_world_rotation(self, *, state_ref: Any) -> Array | None:
+        owner_type = self._state_ref_owner_type(state_ref)
+        if owner_type != self.owner_type:
+            return None
+
+        owner_name = self._state_ref_owner_name(state_ref)
+        if not isinstance(owner_name, str) or owner_name == "":
+            return None
+
+        frame_name = self._state_ref_frame_name(state_ref) or "world"
+        try:
+            rot_ref = self._make_state_type(
+                owner_type=owner_type,
+                owner_name=owner_name,
+                state_field="rot",
+                frame_name=frame_name,
+            )
+            rot_flat = self._value_from_single_state_ref(rot_ref)
+        except Exception:
+            return None
+
+        if int(rot_flat.size) != 9:
+            return None
+        return np.asarray(rot_flat, dtype=float).reshape(3, 3)
+
+    def _rotate_link_kinematics_jacobian_to_world(
+        self,
+        *,
+        J: Array,
+        key: StateKey,
+        state_ref: Any,
+    ) -> Array:
+        if getattr(key, "dtype", None) != DTYPE_KINEMATICS:
+            return J
+        owner = getattr(key, "owner", None)
+        if getattr(owner, "owner_type", None) != self.owner_type:
+            return J
+
+        rot = self._link_world_rotation(state_ref=state_ref)
+        if rot is None:
+            return J
+
+        rows = int(J.shape[0])
+        if rows % 3 != 0:
+            return J
+
+        # RoboKots reports link Jacobians in the link-local frame.
+        # Convert each 3D block into world-frame coordinates for backend parity.
+        J_world = np.asarray(J, dtype=float).copy()
+        for i in range(0, rows, 3):
+            J_world[i : i + 3, :] = rot @ J_world[i : i + 3, :]
+        return J_world
 
     @staticmethod
     def _as_total_joint_dynamics_state_ref(state_ref: Any) -> _TotalJointDynamicsStateRef | None:

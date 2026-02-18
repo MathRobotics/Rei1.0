@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, make_jac_key, make_key
+from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, DTYPE_KINEMATICS, make_jac_key, make_key
 from eiopt.core.trajectory import TrajectoryMap
 from eiopt.optimize.reductions import build_nullspace_equality_reduction
 from eiopt.optimize.solvers import solve
@@ -182,6 +182,67 @@ class _FakeKotsModelOrder4:
         raise ValueError(f"Unsupported jacobian field: {field!r}")
 
 
+class _FakeKotsModelLinkLocalJacobian:
+    def __init__(self) -> None:
+        self._motion = np.zeros((6,), dtype=float)
+
+    def dof(self) -> int:
+        return 2
+
+    def order(self) -> int:
+        return 3
+
+    def import_motions(self, motion) -> None:
+        self._motion = np.asarray(motion, dtype=float).reshape(-1).copy()
+
+    def kinematics(self) -> None:
+        return None
+
+    @staticmethod
+    def _state_field_name(state_ref) -> str | None:
+        for attr in ("field", "field_", "data_type", "dtype"):
+            value = getattr(state_ref, attr, None)
+            if isinstance(value, str) and value != "":
+                return value
+        return None
+
+    def state_info(self, state_ref):
+        field = self._state_field_name(state_ref)
+        q0 = float(self._motion[0])
+        q1 = float(self._motion[3])
+        theta = q0 + q1
+        c = float(np.cos(theta))
+        s = float(np.sin(theta))
+
+        if field == "rot":
+            return np.array(
+                [
+                    [c, -s, 0.0],
+                    [s, c, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                dtype=float,
+            ).reshape(-1)
+        if field == "pos":
+            return np.array([0.0, 0.0, 0.0], dtype=float)
+        raise ValueError(f"Unsupported field: {field!r}")
+
+    def jacobian(self, state_ref):
+        field = self._state_field_name(state_ref)
+        if field != "pos":
+            raise ValueError(f"Unsupported jacobian field: {field!r}")
+
+        # Local-frame Jacobian for q=[0.3, -0.4] style sample.
+        return np.array(
+            [
+                [-0.3894183423086506, 0.0],
+                [1.921060994002885, 1.0],
+                [0.0, 0.0],
+            ],
+            dtype=float,
+        )
+
+
 def _traj_map_from_rows(rows: list[list[float]]) -> TrajectoryMap:
     A = np.asarray(rows, dtype=float)
     b = np.zeros((A.shape[0],), dtype=float)
@@ -189,6 +250,50 @@ def _traj_map_from_rows(rows: list[list[float]]) -> TrajectoryMap:
 
 
 class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
+    def test_kots_link_pos_jacobian_is_rotated_to_world_frame(self) -> None:
+        model = _FakeKotsModelLinkLocalJacobian()
+        builder = _kots_state_mod.KotsStateBuilder(
+            model,
+            data={},
+            q_var="q",
+            fields=("pos",),
+            dynamics_fields=None,
+        )
+
+        key = make_jac_key(
+            k=0,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+            var="q",
+        )
+        q = np.array([0.3, -0.4], dtype=float)
+        state = builder.build_state(q, required=[key])
+        J_world = np.asarray(state[key], dtype=float)
+
+        theta = float(np.sum(q))
+        c = float(np.cos(theta))
+        s = float(np.sin(theta))
+        rot_world = np.array(
+            [
+                [c, -s, 0.0],
+                [s, c, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=float,
+        )
+        J_local = np.array(
+            [
+                [-0.3894183423086506, 0.0],
+                [1.921060994002885, 1.0],
+                [0.0, 0.0],
+            ],
+            dtype=float,
+        )
+        expected = rot_world @ J_local
+        np.testing.assert_allclose(J_world, expected, rtol=0.0, atol=1e-12)
+
     def test_kots_state_field_name_keeps_canonical_torque_derivative_orders(self) -> None:
         self.assertEqual(_kots_state_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_d1")
         self.assertEqual(_kots_state_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_d2")
