@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 import numpy as np
 
 from ...core.state_cache import StateKey
-from .._xops import apply_pack_dx, set_pack_x
-from ..runtime import NLSRuntime
+from ...problem import LinearizedProblem, as_linearized_problem
 
 Array = np.ndarray
 
 def solve_gauss_newton(
-    runtime: NLSRuntime,
+    problem: Any,
     max_iters: int = 20,
     *,
     required: Iterable[StateKey] | None = None,
+    weighted: bool = True,
+    term_indices: Iterable[int] | None = None,
     tol_r: float = 1e-10,
     tol_dx: float = 1e-12,
     damping: float = 1e-8,
@@ -24,24 +25,28 @@ def solve_gauss_newton(
     ls_max_iters: int = 12,
     on_iter: Callable[[int, float, float], None] | None = None,
 ) -> tuple[Array, float, float, int, float, float, bool]:
-    """Minimal Gauss-Newton loop for a `NLSRuntime`.
+    """Minimal Gauss-Newton loop for a linearized residual problem.
 
     Returns:
       (x_star, initial_cost, cost, iters, rnorm, dxnorm, converged)
     """
 
+    linear_problem: LinearizedProblem = as_linearized_problem(
+        problem,
+        weighted=bool(weighted),
+        term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
+    )
+
     rnorm = float("inf")
     dxnorm = float("inf")
     converged = False
 
-    req = runtime.required_list(required)
-    r_init, _J_init = runtime.linearize(required=req)
+    req = linear_problem.required_list(required)
+    r_init, _J_init = linear_problem.linearize(required=req)
     initial_cost = float(r_init @ r_init)
 
-    variables = runtime.pack
-
     for k in range(int(max_iters)):
-        r_all, J_all = runtime.linearize(required=req)
+        r_all, J_all = linear_problem.linearize(required=req)
         rnorm = float(np.linalg.norm(r_all))
 
         if on_iter is not None:
@@ -49,7 +54,7 @@ def solve_gauss_newton(
 
         if rnorm < tol_r:
             converged = True
-            x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+            x_star = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
             cost = float(r_all @ r_all)
             return x_star, initial_cost, cost, k, rnorm, 0.0, converged
 
@@ -72,11 +77,12 @@ def solve_gauss_newton(
 
             if dxnorm < tol_dx:
                 converged = True
-                x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+                x_star = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
                 cost = float(r_all @ r_all)
                 return x_star, initial_cost, cost, k, rnorm, dxnorm, converged
 
-            apply_pack_dx(variables, dx, name="dx")
+            x_cur = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1)
+            linear_problem.set_point(x_cur + dx)
             continue
 
         beta = float(ls_beta)
@@ -89,7 +95,7 @@ def solve_gauss_newton(
         if max_ls <= 0:
             raise ValueError(f"solve_gauss_newton: ls_max_iters must be > 0, got {max_ls}.")
 
-        x_cur = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+        x_cur = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
         best_x = x_cur.copy()
         best_cost = cost_cur
         step = 1.0
@@ -97,8 +103,8 @@ def solve_gauss_newton(
 
         for _ in range(max_ls):
             x_trial = x_cur + step * dx
-            set_pack_x(variables, x_trial, name="x")
-            r_trial, _ = runtime.linearize(required=req)
+            linear_problem.set_point(x_trial)
+            r_trial, _ = linear_problem.linearize(required=req)
             cost_trial = float(r_trial @ r_trial)
 
             if cost_trial < best_cost:
@@ -113,7 +119,7 @@ def solve_gauss_newton(
             if step < min_step:
                 break
 
-        set_pack_x(variables, best_x, name="x")
+        linear_problem.set_point(best_x)
         dx_eff = np.asarray(best_x - x_cur, dtype=float).reshape(-1)
         dxnorm_eff = float(np.linalg.norm(dx_eff))
         dxnorm = dxnorm_eff
@@ -123,18 +129,18 @@ def solve_gauss_newton(
 
         if dxnorm_eff < tol_dx:
             converged = True
-            x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+            x_star = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
             cost = float(best_cost)
             return x_star, initial_cost, cost, k, rnorm, dxnorm_eff, converged
 
         if not accepted and dxnorm_eff == 0.0:
-            x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+            x_star = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
             cost = float(best_cost)
             return x_star, initial_cost, cost, k, rnorm, dxnorm_eff, converged
 
-    r_all, _J_all = runtime.linearize(required=req)
+    r_all, _J_all = linear_problem.linearize(required=req)
     rnorm = float(np.linalg.norm(r_all))
-    x_star = np.asarray(variables.get(), dtype=float).reshape(-1).copy()
+    x_star = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
     cost = float(r_all @ r_all)
     return x_star, initial_cost, cost, int(max_iters), rnorm, dxnorm, converged
 

@@ -11,7 +11,7 @@ from .dsl.environment import DslBuildEnv
 from .dsl.io import load_problem_toml
 from .dsl.variable_utils import expand_variable_init, resolve_variable_dim
 from ..core.expr.registry import ExprRegister
-from .problem import NLSProblem
+from ..problem import NLSProblem
 from .runtime import NLSRuntime, collect_required as collect_required_from_problem
 from .costs import DiagonalWeightCost, HuberCost, L2Cost, ScalarWeightCost
 

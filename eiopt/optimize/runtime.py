@@ -9,7 +9,7 @@ import numpy as np
 from ..core.expr.types import RuntimeContext, VariablePack
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import canonical_dtype_name, canonical_field_name
-from .problem import NLSProblem
+from ..problem import NLSProblem
 
 Array = np.ndarray
 

@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.expr.types import VariablePack
+from .core.expr.types import VariablePack
 
 Array = np.ndarray
 

@@ -6,7 +6,7 @@ from typing import Any, Optional
 import numpy as np
 
 from ..core.expr.types import Expr, VariablePack
-from .costs import Cost
+from ..optimize.costs import Cost
 
 Array = np.ndarray
 
@@ -143,6 +143,7 @@ class NLSProblem:
     def cost_value(self, *, ctx: Any = None, time: Any = None, required: Any = None) -> float:
         r_all, _ = self.linearize(ctx=ctx, time=time, required=required)
         return float(r_all @ r_all)
+
 
 __all__ = [
     "NLSProblem",

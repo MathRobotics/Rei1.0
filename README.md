@@ -1,16 +1,34 @@
 # EiOpt
 
-`eiopt` は `RoboKots/robokots/inward` を元にした、backend 非依存の最小 NLS(非線形最小二乗)ユーティリティです。
+`eiopt` は `RoboKots/robokots/inward` を元にした、capability 指向の数値問題ツールキットです。
 
 ## Layered Namespaces
 
 現在の canonical namespace は以下です。
 
 - `eiopt.optimize`: 最適化責務の API 入口（`compile_nls_problem`, `solve` など）
+- `eiopt.equations`: 方程式系 problem capability の入口（`RuntimeStationaritySource` など）
+- `eiopt.flow`: フロー/制約/射影 problem capability の入口
 - `eiopt.backends.state`: backend の state builder 入口
 - `eiopt.optimize_backends`: optimize と backend を接続する compile helper
 
 旧 namespace / alias (`eiopt.dsl`, `eiopt.model`, `eiopt.solvers`, `eiopt.expr` など) は削除済みです。
+
+## Capability Adapters
+
+Problem は capability 単位で扱えます。既存 runtime から能力を取り出す入口は以下です。
+
+```python
+from eiopt import (
+    as_linear_equation_problem,
+    as_constraint_problem,
+    as_project_problem,
+)
+
+eq_problem = as_linear_equation_problem(runtime)
+constraint_problem = as_constraint_problem(runtime, kind="eq")
+project_problem = as_project_problem(runtime)  # 既定は恒等射影
+```
 
 ## 削除済み Import Path
 
@@ -80,6 +98,8 @@ python -m pip install -e .
 python examples/01_minimize_quadratic.py
 python examples/02_get_state_minimal.py
 python examples/03_toml_problem.py
+python examples/10_stationarity_ioc.py
+python examples/11_forward_then_inverse_ioc.py
 python examples/08_camera_calibration.py
 python examples/04_pinocchio_ik.py   # 要: pinocchio
 python examples/05_robokots_ik.py    # 要: robokots
@@ -93,6 +113,8 @@ python examples/09_kots_vision_composite.py   # 要: robokots
 PYTHONPATH=. python examples/01_minimize_quadratic.py
 PYTHONPATH=. python examples/02_get_state_minimal.py
 PYTHONPATH=. python examples/03_toml_problem.py
+PYTHONPATH=. python examples/10_stationarity_ioc.py
+PYTHONPATH=. python examples/11_forward_then_inverse_ioc.py
 PYTHONPATH=. python examples/08_camera_calibration.py
 PYTHONPATH=. python examples/04_pinocchio_ik.py
 PYTHONPATH=. python examples/05_robokots_ik.py
@@ -259,7 +281,7 @@ ineq_constraint_idxs = runtime.find_constraint_term_indices(kind="ineq")
 runtime.set_cost_weight_by_constraint(kind="ineq", w=1e-1)
 ```
 
-### term別線形化と IOC 行列
+### term別線形化と Stationarity 行列
 
 termごとの線形化結果は `runtime.linearize_terms()` で取得できます。`weighted=False` を使うと未加重の `r_i, J_i` を取り出せます。
 
@@ -286,13 +308,37 @@ for s in layout:
     print(s.term_index, s.name, r_i.shape, J_i.shape)
 ```
 
-IOC用に `A = [J_0^T r_0, ..., J_n^T r_n]` を作るヘルパーも使えます。
+Stationarity 方程式の解法用に `A = [J_0^T r_0, ..., J_n^T r_n]` を作るヘルパーも使えます。
 
 ```python
-from eiopt import build_term_gradient_matrix, estimate_weights_simplex
+from eiopt import build_term_gradient_matrix, solve_simplex_min_norm
 
 A, term_indices = build_term_gradient_matrix(runtime, weighted=False)
-w_hat = estimate_weights_simplex(A)  # w>=0, sum(w)=1
+w_hat = solve_simplex_min_norm(A)  # w>=0, sum(w)=1
+```
+
+Stationarity の組み立ては `RuntimeStationaritySource` と純関数群を組み合わせます。
+
+```python
+from eiopt import (
+    RuntimeStationaritySource,
+    filter_stationarity_contributions,
+    build_stationarity_gradient_matrix,
+    select_active_stationarity_indices,
+    build_reference_simplex_init,
+    solve_simplex_min_norm,
+)
+
+source = RuntimeStationaritySource(runtime)
+x_opt = runtime.pack.get().copy()
+source.set_point(x_opt)
+contrib_all = source.term_contributions(required=source.required_list(None))
+contrib = filter_stationarity_contributions(contrib_all, include_constraints=True)
+
+A_col, term_indices = build_stationarity_gradient_matrix(contrib, n_total=source.n_total)
+active_idx, *_ = select_active_stationarity_indices(contrib, mode="residual")
+x0 = build_reference_simplex_init(contrib, active_idx)
+w_hat = solve_simplex_min_norm(A_col[:, active_idx], x0=x0)
 ```
 
 ### state の時系列一括取得

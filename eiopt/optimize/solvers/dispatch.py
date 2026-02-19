@@ -6,8 +6,8 @@ from typing import Any
 import numpy as np
 
 from ...core.state_cache import StateKey
-from .._xops import as_vec, set_runtime_x
-from ..runtime import NLSRuntime
+from ...problem import LinearizedProblem, as_linearized_problem
+from ...xops import as_vec
 from .gauss_newton import solve_gauss_newton
 from .nls import nls
 
@@ -16,14 +16,14 @@ SolveResult = tuple[Array, float, float, int, float, float, bool]
 IterCallback = Callable[[int, float, float], None]
 
 
-class _RuntimeObjective:
+class _LinearizedObjective:
     def __init__(
         self,
-        runtime: NLSRuntime,
+        problem: LinearizedProblem,
         *,
         required: Iterable[StateKey] | None = None,
     ) -> None:
-        self.runtime = runtime
+        self.problem = problem
         self.required = None if required is None else list(required)
         self._last_x: Array | None = None
         self._last_cost: float = float("nan")
@@ -31,14 +31,14 @@ class _RuntimeObjective:
         self._last_rnorm: float = float("inf")
 
     def eval(self, x: Array) -> tuple[float, Array, float]:
-        x_vec = as_vec(x, expected_size=int(self.runtime.pack.n_total), name="x")
+        x_vec = as_vec(x, expected_size=int(self.problem.n_total), name="x")
         if self._last_x is not None and np.array_equal(self._last_x, x_vec):
             if self._last_grad is None:
                 raise RuntimeError("internal error: gradient cache is missing.")
             return self._last_cost, self._last_grad, self._last_rnorm
 
-        set_runtime_x(self.runtime, x_vec, name="x")
-        r_all, J_all = self.runtime.linearize(required=self.required)
+        self.problem.set_point(x_vec)
+        r_all, J_all = self.problem.linearize(required=self.required)
         r = np.asarray(r_all, dtype=float).reshape(-1)
         J = np.asarray(J_all, dtype=float)
 
@@ -84,11 +84,24 @@ def _as_options_mapping(value: Any, *, where: str) -> Mapping[str, Any] | None:
         raise TypeError(f"{where}: options['backend_options'] must be a mapping or None.")
     return dict(value)
 
+def _normalize_term_indices_option(raw: Any) -> tuple[int, ...] | None:
+    if raw is None:
+        return None
+    if isinstance(raw, (str, bytes)):
+        raise TypeError("term_indices must be an iterable of integers, not a string.")
+    try:
+        vals = tuple(int(v) for v in raw)
+    except Exception as e:  # pragma: no cover
+        raise TypeError("term_indices must be an iterable of integers or None.") from e
+    return vals
+
 
 def solve_scipy_minimize(
-    runtime: NLSRuntime,
+    problem: Any,
     *,
     required: Iterable[StateKey] | None = None,
+    weighted: bool = True,
+    term_indices: Iterable[int] | None = None,
     method: str = "L-BFGS-B",
     max_iters: int | None = 200,
     tol: float | None = None,
@@ -96,7 +109,7 @@ def solve_scipy_minimize(
     options: Mapping[str, Any] | None = None,
     on_iter: IterCallback | None = None,
 ) -> SolveResult:
-    """Solve `||r(x)||^2` from a `NLSRuntime` via scipy.optimize.minimize."""
+    """Solve `||r(x)||^2` via scipy.optimize.minimize."""
 
     try:
         from scipy.optimize import minimize
@@ -105,9 +118,14 @@ def solve_scipy_minimize(
             "solve_scipy_minimize requires scipy. Install scipy and re-run."
         ) from e
 
-    x0 = np.asarray(runtime.pack.get(), dtype=float).reshape(-1).copy()
-    req = runtime.required_list(required)
-    objective = _RuntimeObjective(runtime, required=req)
+    linear_problem = as_linearized_problem(
+        problem,
+        weighted=bool(weighted),
+        term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
+    )
+    x0 = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
+    req = linear_problem.required_list(required)
+    objective = _LinearizedObjective(linear_problem, required=req)
     n_total = int(x0.size)
     initial_cost, _grad0, _rnorm0 = objective.eval(x0)
 
@@ -163,16 +181,18 @@ def solve_scipy_minimize(
 
 
 def solve_cyipopt_minimize(
-    runtime: NLSRuntime,
+    problem: Any,
     *,
     required: Iterable[StateKey] | None = None,
+    weighted: bool = True,
+    term_indices: Iterable[int] | None = None,
     max_iters: int | None = 200,
     tol: float | None = None,
     bounds: Any = None,
     options: Mapping[str, Any] | None = None,
     on_iter: IterCallback | None = None,
 ) -> SolveResult:
-    """Solve `||r(x)||^2` from a `NLSRuntime` via cyipopt.minimize_ipopt."""
+    """Solve `||r(x)||^2` via cyipopt.minimize_ipopt."""
 
     try:
         from cyipopt import minimize_ipopt
@@ -181,9 +201,14 @@ def solve_cyipopt_minimize(
             "solve_cyipopt_minimize requires cyipopt. Install cyipopt and re-run."
         ) from e
 
-    x0 = np.asarray(runtime.pack.get(), dtype=float).reshape(-1).copy()
-    req = runtime.required_list(required)
-    objective = _RuntimeObjective(runtime, required=req)
+    linear_problem = as_linearized_problem(
+        problem,
+        weighted=bool(weighted),
+        term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
+    )
+    x0 = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
+    req = linear_problem.required_list(required)
+    objective = _LinearizedObjective(linear_problem, required=req)
     n_total = int(x0.size)
     initial_cost, _grad0, _rnorm0 = objective.eval(x0)
 
@@ -280,16 +305,18 @@ def _parse_liteopt_gd_result(
 
 
 def solve_liteopt_gd(
-    runtime: NLSRuntime,
+    problem: Any,
     *,
     required: Iterable[StateKey] | None = None,
+    weighted: bool = True,
+    term_indices: Iterable[int] | None = None,
     max_iters: int | None = 200,
     step_size: float = 1e-3,
     tol_grad: float = 1e-4,
     options: Mapping[str, Any] | None = None,
     on_iter: IterCallback | None = None,
 ) -> SolveResult:
-    """Solve `||r(x)||^2` from a `NLSRuntime` via liteopt.gd."""
+    """Solve `||r(x)||^2` via liteopt.gd."""
 
     try:
         import liteopt
@@ -298,9 +325,14 @@ def solve_liteopt_gd(
             "solve_liteopt_gd requires liteopt. Install liteopt and re-run."
         ) from e
 
-    x0 = np.asarray(runtime.pack.get(), dtype=float).reshape(-1).copy()
-    req = runtime.required_list(required)
-    objective = _RuntimeObjective(runtime, required=req)
+    linear_problem = as_linearized_problem(
+        problem,
+        weighted=bool(weighted),
+        term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
+    )
+    x0 = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
+    req = linear_problem.required_list(required)
+    objective = _LinearizedObjective(linear_problem, required=req)
     n_total = int(x0.size)
     initial_cost, _grad0, _rnorm0 = objective.eval(x0)
 
@@ -359,7 +391,7 @@ def solve_liteopt_gd(
 
 
 def solve(
-    runtime: NLSRuntime,
+    problem: Any,
     *,
     solver: str = "gauss_newton",
     required: Iterable[StateKey] | None = None,
@@ -385,11 +417,15 @@ def solve(
 
     key = str(solver).strip().lower()
     opts = _merge_options(options)
+    weighted = bool(opts.get("weighted", True))
+    term_indices = _normalize_term_indices_option(opts.get("term_indices", None))
 
     if key in {"gauss_newton", "gauss-newton", "gn"}:
         return solve_gauss_newton(
-            runtime,
+            problem,
             required=required,
+            weighted=weighted,
+            term_indices=term_indices,
             max_iters=int(opts.get("max_iters", 200)),
             tol_r=float(opts.get("tol_r", 1e-10)),
             tol_dx=float(opts.get("tol_dx", 1e-12)),
@@ -404,8 +440,10 @@ def solve(
     if key in {"scipy", "scipy_minimize", "minimize", "scipy.optimize.minimize"}:
         tol = opts.get("tol", None)
         return solve_scipy_minimize(
-            runtime,
+            problem,
             required=required,
+            weighted=weighted,
+            term_indices=term_indices,
             method=str(opts.get("method", "L-BFGS-B")),
             max_iters=int(opts.get("max_iters", 200)),
             tol=(None if tol is None else float(tol)),
@@ -417,8 +455,10 @@ def solve(
     if key in {"cyipopt", "ipopt", "minimize_ipopt", "cyipopt.minimize_ipopt"}:
         tol = opts.get("tol", None)
         return solve_cyipopt_minimize(
-            runtime,
+            problem,
             required=required,
+            weighted=weighted,
+            term_indices=term_indices,
             max_iters=int(opts.get("max_iters", 200)),
             tol=(None if tol is None else float(tol)),
             bounds=opts.get("bounds", None),
@@ -428,8 +468,10 @@ def solve(
 
     if key in {"liteopt", "liteopt_gd", "gd", "liteopt.gd"}:
         return solve_liteopt_gd(
-            runtime,
+            problem,
             required=required,
+            weighted=weighted,
+            term_indices=term_indices,
             max_iters=int(opts.get("max_iters", 200)),
             step_size=float(opts.get("step_size", 1e-3)),
             tol_grad=float(opts.get("tol_grad", 1e-4)),

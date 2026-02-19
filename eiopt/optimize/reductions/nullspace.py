@@ -7,7 +7,7 @@ import numpy as np
 
 from ...core.expr.types import Variable, VariablePack
 from ...core.state_cache import StateKey
-from .._xops import set_pack_x
+from ...xops import set_pack_x
 from .matrix_scaling import scale_matrix_with_projection_svd
 from ..runtime import LinearizedTerm, NLSRuntime, StackedTermSlice
 
