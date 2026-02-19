@@ -122,13 +122,10 @@ class TestVisionCalibrationMock:
         x_star, initial_cost, cost, _iters, _rnorm, _dxnorm, converged = solve(
             compiled.runtime,
             solver="gauss_newton",
-            max_iters=16,
-            gn_damping=0.0,
-            gn_line_search=False,
+            options={"max_iters": 16, "damping": 0.0, "line_search": False},
         )
 
         assert converged
         assert initial_cost > 0.0
         assert cost < 1e-20
         np.testing.assert_allclose(x_star, theta_true, rtol=0.0, atol=1e-10)
-

@@ -87,10 +87,8 @@ class TestVisionPinholeModel:
         x_star, _cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
             compiled.runtime,
             solver="gauss_newton",
-            max_iters=40,
-            gn_damping=1e-8,
+            options={"max_iters": 40, "damping": 1e-8},
         )
         assert converged
         assert cost < 1e-16
         np.testing.assert_allclose(x_star, theta_true, rtol=0.0, atol=1e-8)
-

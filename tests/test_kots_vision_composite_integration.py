@@ -208,13 +208,10 @@ class TestKotsVisionCompositeIntegration:
         x_star, _cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime,
             solver="gauss_newton",
-            max_iters=20,
-            gn_damping=0.0,
-            gn_line_search=False,
+            options={"max_iters": 20, "damping": 0.0, "line_search": False},
         )
 
         assert converged
         assert cost < 1e-20
         np.testing.assert_allclose(x_star, q_true, rtol=0.0, atol=1e-10)
         assert model.kinematics_calls > 0
-

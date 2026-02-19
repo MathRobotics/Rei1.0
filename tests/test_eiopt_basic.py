@@ -98,9 +98,41 @@ class TestEiOptBasic:
         x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime,
             solver="gauss_newton",
-            max_iters=5,
-            tol_r=1e-14,
-            tol_dx=1e-14,
+            options={"max_iters": 5, "tol_r": 1e-14, "tol_dx": 1e-14},
+        )
+        assert converged
+        assert cost0 >= cost
+        assert cost < 1e-20
+        assert float(x_star[0]) == pytest.approx(2.5, rel=0.0, abs=10 ** (-(10)))
+
+    def test_solve_runtime_dispatches_gauss_newton_with_options(self) -> None:
+        x_var = Variable(name="x", x=np.array([0.0], dtype=float))
+        pack = VariablePack([x_var])
+
+        def value(ctx: RuntimeContext) -> np.ndarray:
+            x = float(ctx.pack.vars[0].x[0])
+            return np.array([x - 2.5], dtype=float)
+
+        def blocks(ctx: RuntimeContext):
+            return [np.array([[1.0]], dtype=float)]
+
+        expr = DirectVectorExpr(name="x_minus_2_5", vars=[x_var], fn_value=value, fn_blocks=blocks)
+        problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+
+        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
+            runtime,
+            solver="gauss_newton",
+            options={
+                "max_iters": 5,
+                "tol_r": 1e-14,
+                "tol_dx": 1e-14,
+                "damping": 1e-8,
+                "line_search": True,
+                "ls_beta": 0.5,
+                "ls_min_step": 1e-8,
+                "ls_max_iters": 12,
+            },
         )
         assert converged
         assert cost0 >= cost
@@ -447,9 +479,7 @@ class TestEiOptBasic:
         z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             reduction.runtime,
             solver="gauss_newton",
-            max_iters=30,
-            tol_r=1e-12,
-            tol_dx=1e-12,
+            options={"max_iters": 30, "tol_r": 1e-12, "tol_dx": 1e-12},
         )
         assert converged
 

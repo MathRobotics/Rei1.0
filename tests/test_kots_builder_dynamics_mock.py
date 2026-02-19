@@ -439,9 +439,7 @@ class TestKotsTrajectoryDynamicsMock:
         z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime_for_solve,
             solver="gauss_newton",
-            max_iters=30,
-            tol_r=1e-12,
-            tol_dx=1e-12,
+            options={"max_iters": 30, "tol_r": 1e-12, "tol_dx": 1e-12},
         )
         assert converged
         p_star = reduction.lift(z_star)
