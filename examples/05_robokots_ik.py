@@ -8,7 +8,7 @@ from eiopt.optimize.solvers import solve
 
 try:
     from robokots.kots import Kots
-    from eiopt.backends.state.kots import KotsStateBuilder
+    from eiopt.backends.state.robotics.kots import KotsStateBuilder
 except ImportError as e:  # pragma: no cover
     raise SystemExit(
         "This example requires RoboKots.\n"

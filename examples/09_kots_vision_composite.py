@@ -5,8 +5,8 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.composite import CompositeStateBuilder
-from eiopt.backends.state.vision import CameraCalibrationStateProvider, VisionFieldHandler
+from eiopt.backends.state.dispatch.composite import CompositeStateBuilder
+from eiopt.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
 from eiopt.core.state_schema import DTYPE_KINEMATICS, make_key
 from eiopt.optimize.builder import compile_nls_problem
 from eiopt.optimize.report import format_solve_report
@@ -14,7 +14,7 @@ from eiopt.optimize.solvers import solve
 
 try:
     from robokots.kots import Kots
-    from eiopt.backends.state.kots import KotsStateBuilder
+    from eiopt.backends.state.robotics.kots import KotsStateBuilder
 except ImportError as e:  # pragma: no cover
     raise SystemExit(
         "This example requires RoboKots.\n"

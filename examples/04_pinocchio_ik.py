@@ -8,7 +8,7 @@ from eiopt.optimize.solvers import solve
 
 try:
     import pinocchio as pin
-    from eiopt.backends.state.pinocchio import PinocchioStateBuilder
+    from eiopt.backends.state.robotics.pinocchio import PinocchioStateBuilder
 except ImportError as e:  # pragma: no cover
     raise SystemExit(
         "This example requires the robotics Pinocchio bindings.\n"
