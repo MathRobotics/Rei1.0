@@ -12,6 +12,17 @@
 
 旧 namespace / alias (`eiopt.dsl`, `eiopt.model`, `eiopt.solvers`, `eiopt.expr` など) は削除済みです。
 
+## 削除済み Import Path
+
+以下の旧フラット import path は削除済みです。canonical path を使用してください。
+
+- `eiopt.backends.state.template` -> `eiopt.backends.state.dispatch.template`
+- `eiopt.backends.state.composite` -> `eiopt.backends.state.dispatch.composite`
+- `eiopt.backends.state.spatial` -> `eiopt.backends.state.robotics.spatial`
+- `eiopt.backends.state.kots` -> `eiopt.backends.state.robotics.kots`
+- `eiopt.backends.state.pinocchio` -> `eiopt.backends.state.robotics.pinocchio`
+- `eiopt.backends.state.vision_pinhole` -> `eiopt.backends.state.vision.pinhole`
+
 ## Backend との接続点
 
 backend(kots / pinocchio 等) と `eiopt` を繋ぐ唯一の接続点は `StateCache` が呼ぶ `build_state()` です。
@@ -22,11 +33,11 @@ backend(kots / pinocchio 等) と `eiopt` を繋ぐ唯一の接続点は `StateC
   - `time`: `TimeGrid`
 - `required`: 今回必要な `StateKey` の集合（これだけ計算すると速い）。`None` は「全部計算」。
 
-複数 backend を同時利用したい場合は `eiopt.backends.state.composite.CompositeStateBuilder` で
+複数 backend を同時利用したい場合は `eiopt.backends.state.dispatch.composite.CompositeStateBuilder` で
 `build_state()` を合成できます（例: ロボット状態 provider + カメラ状態 provider）。
 
 ```python
-from eiopt.backends.state.composite import CompositeStateBuilder
+from eiopt.backends.state.dispatch.composite import CompositeStateBuilder
 from eiopt.optimize.builder import compile_nls_problem
 
 state_builder = CompositeStateBuilder([robot_provider, camera_provider])
@@ -437,7 +448,7 @@ key_j = vision_jac_key(k=0, owner_name="cam0", field="reproj", var="theta")
 最小 provider 雛形:
 
 ```python
-from eiopt.backends.state.vision import CameraCalibrationStateProvider, VisionFieldHandler
+from eiopt.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
 
 provider = CameraCalibrationStateProvider(
     model=model,
@@ -575,7 +586,7 @@ num_ctrl_points = 6
 最小コード例（DSL から生成）:
 
 ```python
-from eiopt.backends.state.kots import KotsTrajectoryStateBuilder
+from eiopt.backends.state.robotics.kots import KotsTrajectoryStateBuilder
 from eiopt.optimize.builder import compile_nls_problem
 from eiopt.optimize.dsl import (
     build_trajectory_map,

@@ -5,7 +5,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-from ...core.state_cache import StateKey
+from ....core.state_cache import StateKey
 
 Array = np.ndarray
 

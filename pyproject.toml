@@ -1,7 +1,7 @@
 [project]
 name = "eiopt"
 version = "0.1.0"
-description = "Optimization utilities (ported from RoboKots inward)"
+description = "Optimization utilities"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

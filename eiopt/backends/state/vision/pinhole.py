@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from .vision import VisionFieldHandler
+from .provider import VisionFieldHandler
 
 Array = np.ndarray
 

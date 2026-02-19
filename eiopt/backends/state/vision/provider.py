@@ -6,9 +6,9 @@ from typing import Any, Callable
 
 import numpy as np
 
-from ...core.state_cache import StateKey
-from ...core.state_schema import DTYPE_VISION
-from .template import BackendDispatchStateBuilder, DispatchHandler
+from ....core.state_cache import StateKey
+from ....core.state_schema import DTYPE_VISION
+from ..dispatch.template import BackendDispatchStateBuilder, DispatchHandler
 
 Array = np.ndarray
 ModelUpdateFn = Callable[[Array, Any, Any], None]
@@ -144,6 +144,7 @@ class CameraCalibrationStateProvider(BackendDispatchStateBuilder):
 
 
 __all__ = [
+    "ModelUpdateFn",
     "VisionFieldHandler",
     "CameraCalibrationStateProvider",
 ]

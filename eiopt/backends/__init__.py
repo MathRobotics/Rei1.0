@@ -1,11 +1,10 @@
 """Backend integrations.
 
-Only backend state builders live under this namespace:
+Backend state builders live under this namespace, organized by subpackage:
 
-- ``eiopt.backends.state.template``
-- ``eiopt.backends.state.spatial``
-- ``eiopt.backends.state.kots``
-- ``eiopt.backends.state.pinocchio``
+- ``eiopt.backends.state.dispatch.*``
+- ``eiopt.backends.state.robotics.*``
+- ``eiopt.backends.state.vision.*``
 """
 
 from __future__ import annotations

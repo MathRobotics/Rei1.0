@@ -7,8 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from ...core.state_cache import StateKey
-from ...core.state_schema import (
+from ....core.state_cache import StateKey
+from ....core.state_schema import (
     DYNAMICS_FIELDS,
     DTYPE_COORD,
     DTYPE_DYNAMICS,
@@ -18,14 +18,14 @@ from ...core.state_schema import (
     torque_derivative_field,
     torque_derivative_order,
 )
-from ...core.trajectory import TrajectoryMap
-from .template import BackendDispatchStateBuilder
+from ....core.trajectory import TrajectoryMap
+from ..dispatch.template import BackendDispatchStateBuilder
 
 try:
     from robokots.core.state import StateType
 except ImportError as e:  # pragma: no cover
     raise ImportError(
-        "`eiopt.backends.state.kots` requires the robotics RoboKots bindings. "
+        "`eiopt.backends.state.robotics.kots` requires the robotics RoboKots bindings. "
         "Install RoboKots (e.g. via github) and retry."
     ) from e
 

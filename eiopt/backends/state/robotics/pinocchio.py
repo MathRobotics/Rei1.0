@@ -6,23 +6,23 @@ from typing import Any
 
 import numpy as np
 
-from ...core.state_cache import StateKey
-from ...core.state_schema import (
+from ....core.state_cache import StateKey
+from ....core.state_schema import (
     DTYPE_COORD,
     DTYPE_DYNAMICS,
     DTYPE_KINEMATICS,
     canonical_field_name,
     split_jac_field,
 )
-from ...core.trajectory import TrajectoryMap
+from ....core.trajectory import TrajectoryMap
 from .spatial import Jacobian6Order, linear_part_from_jacobian6
-from .template import BackendDispatchStateBuilder
+from ..dispatch.template import BackendDispatchStateBuilder
 
 try:
     import pinocchio as pin
 except ImportError as e:  # pragma: no cover
     raise ImportError(
-        "`eiopt.backends.state.pinocchio` requires the robotics Pinocchio bindings. "
+        "`eiopt.backends.state.robotics.pinocchio` requires the robotics Pinocchio bindings. "
         "Install Pinocchio (e.g. via conda-forge) and retry."
     ) from e
 
