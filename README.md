@@ -184,14 +184,15 @@ x_star = x_star_solve if nullspace_eq is None else nullspace_eq.lift(x_star_solv
 x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve_gauss_newton(runtime)
 ```
 
-### ソルバ切替（gauss_newton / scipy / cyipopt）
+### ソルバ切替（gauss_newton / scipy / cyipopt / liteopt）
 
-`solve()` でソルバを切り替えられます。`scipy` と `cyipopt` は optional dependency です。
+`solve()` でソルバを切り替えられます。`scipy` / `cyipopt` / `liteopt` は optional dependency です。
 
 ```bash
 python -m pip install -e ".[solver-scipy]"      # scipy solver を使う場合
 python -m pip install -e ".[solver-cyipopt]"    # cyipopt solver を使う場合
-python -m pip install -e ".[solvers]"           # 両方入れる場合
+python -m pip install -e ".[solver-liteopt]"    # liteopt solver を使う場合
+python -m pip install -e ".[solvers]"           # 全 solver を入れる場合
 ```
 
 ```python
@@ -199,9 +200,23 @@ from eiopt.optimize.solvers import solve
 
 x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
     runtime,
-    solver="scipy_minimize",  # "gauss_newton" | "scipy_minimize" | "cyipopt"
-    max_iters=1000,
-    scipy_method="L-BFGS-B",
+    solver="liteopt",  # "gauss_newton" | "scipy_minimize" | "cyipopt" | "liteopt"
+    options={"max_iters": 1000, "step_size": 1e-3, "tol_grad": 1e-4},
+)
+```
+
+各 solver の設定は `options` に統一されています。
+外部 solver にそのまま渡したいオプションは `options["backend_options"]` を使います。
+
+```python
+x_star, *_ = solve(
+    runtime,
+    solver="scipy_minimize",
+    options={
+        "method": "L-BFGS-B",
+        "max_iters": 200,
+        "backend_options": {"maxcor": 20},
+    },
 )
 ```
 

@@ -72,6 +72,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "solve_gauss_newton": ("eiopt.optimize.solvers", "solve_gauss_newton"),
     "solve_scipy_minimize": ("eiopt.optimize.solvers", "solve_scipy_minimize"),
     "solve_cyipopt_minimize": ("eiopt.optimize.solvers", "solve_cyipopt_minimize"),
+    "solve_liteopt_gd": ("eiopt.optimize.solvers", "solve_liteopt_gd"),
 }
 
 __all__ = sorted(_EXPORTS.keys())

@@ -16,9 +16,13 @@ solver-scipy = [
 solver-cyipopt = [
     "cyipopt>=1.6.1",
 ]
+solver-liteopt = [
+    "liteopt",
+]
 solvers = [
     "scipy>=1.17.0",
     "cyipopt>=1.6.1",
+    "liteopt",
 ]
 
 [build-system]
@@ -40,4 +44,7 @@ kots = [
 ]
 pinocchio = [
     "pin>=3.8.0",
+]
+solver-liteopt = [
+    "liteopt>=0.1.6",
 ]

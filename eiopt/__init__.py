@@ -32,6 +32,7 @@ from .optimize import (
     solve,
     solve_cyipopt_minimize,
     solve_gauss_newton,
+    solve_liteopt_gd,
     solve_scipy_minimize,
     split_terms_by_component,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "solve_gauss_newton",
     "solve_scipy_minimize",
     "solve_cyipopt_minimize",
+    "solve_liteopt_gd",
     "compile_nls_problem",
     "load_problem_toml",
     "NLSProblem",

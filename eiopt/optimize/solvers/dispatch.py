@@ -68,6 +68,23 @@ def _extract_x_from_callback_arg(xk: Any, *, size: int) -> Array | None:
         return None
 
 
+def _merge_options(*sources: Mapping[str, Any] | None) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for src in sources:
+        if src is None:
+            continue
+        merged.update(dict(src))
+    return merged
+
+
+def _as_options_mapping(value: Any, *, where: str) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{where}: options['backend_options'] must be a mapping or None.")
+    return dict(value)
+
+
 def solve_scipy_minimize(
     runtime: NLSRuntime,
     *,
@@ -230,71 +247,199 @@ def solve_cyipopt_minimize(
     return x_star.copy(), float(initial_cost), float(cost), iters, float(rnorm), float(last_dxnorm), converged
 
 
+def _parse_liteopt_gd_result(
+    result: Any,
+    *,
+    n_total: int,
+) -> tuple[Array, bool, int | None]:
+    if isinstance(result, Mapping):
+        x_raw = result.get("x_star", result.get("x", None))
+        if x_raw is None:
+            raise ValueError("solve_liteopt_gd: liteopt.gd result must provide x_star (or x).")
+        converged = bool(result.get("converged", result.get("success", False)))
+        iters_raw = result.get("iters", result.get("n_iters", result.get("nit", None)))
+        iters = None if iters_raw is None else int(iters_raw)
+        x_star = as_vec(x_raw, expected_size=n_total, name="result.x")
+        return x_star, converged, iters
+
+    if isinstance(result, (tuple, list)):
+        if len(result) < 3:
+            raise ValueError(
+                "solve_liteopt_gd: liteopt.gd result must be "
+                "(x_star, f_star, converged) or Mapping."
+            )
+        x_star = as_vec(result[0], expected_size=n_total, name="result.x")
+        converged = bool(result[2])
+        iters = None
+        if len(result) >= 4:
+            iters = int(result[3])
+        return x_star, converged, iters
+
+    x_star = as_vec(result, expected_size=n_total, name="result.x")
+    return x_star, False, None
+
+
+def solve_liteopt_gd(
+    runtime: NLSRuntime,
+    *,
+    required: Iterable[StateKey] | None = None,
+    max_iters: int | None = 200,
+    step_size: float = 1e-3,
+    tol_grad: float = 1e-4,
+    options: Mapping[str, Any] | None = None,
+    on_iter: IterCallback | None = None,
+) -> SolveResult:
+    """Solve `||r(x)||^2` from a `NLSRuntime` via liteopt.gd."""
+
+    try:
+        import liteopt
+    except ImportError as e:  # pragma: no cover
+        raise ImportError(
+            "solve_liteopt_gd requires liteopt. Install liteopt and re-run."
+        ) from e
+
+    x0 = np.asarray(runtime.pack.get(), dtype=float).reshape(-1).copy()
+    req = runtime.required_list(required)
+    objective = _RuntimeObjective(runtime, required=req)
+    n_total = int(x0.size)
+    initial_cost, _grad0, _rnorm0 = objective.eval(x0)
+
+    options_local: dict[str, Any] = {} if options is None else dict(options)
+    if "step_size" not in options_local:
+        options_local["step_size"] = float(step_size)
+    if max_iters is not None and "max_iters" not in options_local:
+        options_local["max_iters"] = int(max_iters)
+    if "tol_grad" not in options_local:
+        options_local["tol_grad"] = float(tol_grad)
+
+    iter_count = 0
+    last_dxnorm = 0.0
+    prev_x = x0.copy()
+
+    def fun(x: Array) -> float:
+        fx, _gx, _rnorm = objective.eval(x)
+        return float(fx)
+
+    def grad(x: Array) -> Array:
+        nonlocal iter_count, last_dxnorm, prev_x
+        x_vec = as_vec(x, expected_size=n_total, name="x")
+        _fx, gx, rnorm = objective.eval(x_vec)
+        last_dxnorm = float(np.linalg.norm(x_vec - prev_x))
+        prev_x = x_vec.copy()
+        if on_iter is not None:
+            on_iter(iter_count, rnorm, last_dxnorm)
+        iter_count += 1
+        return gx
+
+    result = liteopt.gd(fun, grad, x0.copy(), **options_local)
+    x_star, converged, iters_from_result = _parse_liteopt_gd_result(
+        result,
+        n_total=n_total,
+    )
+    cost, _grad, rnorm = objective.eval(x_star)
+
+    iters = int(iter_count)
+    if iters_from_result is not None:
+        iters = int(iters_from_result)
+    elif iters <= 0:
+        iters = int(max_iters) if max_iters is not None else 0
+
+    if iter_count <= 0:
+        last_dxnorm = float(np.linalg.norm(x_star - x0))
+
+    return (
+        x_star.copy(),
+        float(initial_cost),
+        float(cost),
+        iters,
+        float(rnorm),
+        float(last_dxnorm),
+        bool(converged),
+    )
+
+
 def solve(
     runtime: NLSRuntime,
     *,
     solver: str = "gauss_newton",
     required: Iterable[StateKey] | None = None,
-    max_iters: int = 200,
-    tol_r: float = 1e-10,
-    tol_dx: float = 1e-12,
-    gn_damping: float = 1e-8,
-    gn_line_search: bool = True,
-    gn_ls_beta: float = 0.5,
-    gn_ls_min_step: float = 1e-8,
-    gn_ls_max_iters: int = 12,
-    tol: float | None = None,
     on_iter: IterCallback | None = None,
-    scipy_method: str = "L-BFGS-B",
-    scipy_options: Mapping[str, Any] | None = None,
-    scipy_bounds: Any = None,
-    ipopt_options: Mapping[str, Any] | None = None,
-    ipopt_bounds: Any = None,
+    options: Mapping[str, Any] | None = None,
 ) -> SolveResult:
-    """Dispatch runtime solve to one of: gauss_newton / scipy / cyipopt."""
+    """Dispatch runtime solve to one of: gauss_newton / scipy / cyipopt / liteopt.
+
+    Solver parameters are provided via `options`.
+
+    gauss_newton:
+      max_iters, tol_r, tol_dx, damping, line_search, ls_beta, ls_min_step, ls_max_iters
+
+    scipy:
+      method, max_iters, tol, bounds, backend_options
+
+    cyipopt:
+      max_iters, tol, bounds, backend_options
+
+    liteopt:
+      max_iters, step_size, tol_grad, backend_options
+    """
 
     key = str(solver).strip().lower()
+    opts = _merge_options(options)
+
     if key in {"gauss_newton", "gauss-newton", "gn"}:
         return solve_gauss_newton(
             runtime,
-            max_iters=int(max_iters),
             required=required,
-            tol_r=float(tol_r),
-            tol_dx=float(tol_dx),
-            damping=float(gn_damping),
-            line_search=bool(gn_line_search),
-            ls_beta=float(gn_ls_beta),
-            ls_min_step=float(gn_ls_min_step),
-            ls_max_iters=int(gn_ls_max_iters),
+            max_iters=int(opts.get("max_iters", 200)),
+            tol_r=float(opts.get("tol_r", 1e-10)),
+            tol_dx=float(opts.get("tol_dx", 1e-12)),
+            damping=float(opts.get("damping", 1e-8)),
+            line_search=bool(opts.get("line_search", True)),
+            ls_beta=float(opts.get("ls_beta", 0.5)),
+            ls_min_step=float(opts.get("ls_min_step", 1e-8)),
+            ls_max_iters=int(opts.get("ls_max_iters", 12)),
             on_iter=on_iter,
         )
 
     if key in {"scipy", "scipy_minimize", "minimize", "scipy.optimize.minimize"}:
+        tol = opts.get("tol", None)
         return solve_scipy_minimize(
             runtime,
             required=required,
-            method=scipy_method,
-            max_iters=int(max_iters),
-            tol=tol,
-            bounds=scipy_bounds,
-            options=scipy_options,
+            method=str(opts.get("method", "L-BFGS-B")),
+            max_iters=int(opts.get("max_iters", 200)),
+            tol=(None if tol is None else float(tol)),
+            bounds=opts.get("bounds", None),
+            options=_as_options_mapping(opts.get("backend_options", None), where="solve(scipy)"),
             on_iter=on_iter,
         )
 
     if key in {"cyipopt", "ipopt", "minimize_ipopt", "cyipopt.minimize_ipopt"}:
+        tol = opts.get("tol", None)
         return solve_cyipopt_minimize(
             runtime,
             required=required,
-            max_iters=int(max_iters),
-            tol=tol,
-            bounds=ipopt_bounds,
-            options=ipopt_options,
+            max_iters=int(opts.get("max_iters", 200)),
+            tol=(None if tol is None else float(tol)),
+            bounds=opts.get("bounds", None),
+            options=_as_options_mapping(opts.get("backend_options", None), where="solve(cyipopt)"),
+            on_iter=on_iter,
+        )
+
+    if key in {"liteopt", "liteopt_gd", "gd", "liteopt.gd"}:
+        return solve_liteopt_gd(
+            runtime,
+            required=required,
+            max_iters=int(opts.get("max_iters", 200)),
+            step_size=float(opts.get("step_size", 1e-3)),
+            tol_grad=float(opts.get("tol_grad", 1e-4)),
+            options=_as_options_mapping(opts.get("backend_options", None), where="solve(liteopt)"),
             on_iter=on_iter,
         )
 
     raise ValueError(
         "Unknown solver. Use one of: "
-        "'gauss_newton', 'scipy_minimize', 'cyipopt'. "
+        "'gauss_newton', 'scipy_minimize', 'cyipopt', 'liteopt'. "
         f"Got solver={solver!r}."
     )
 
@@ -304,4 +449,5 @@ __all__ = [
     "solve_gauss_newton",
     "solve_scipy_minimize",
     "solve_cyipopt_minimize",
+    "solve_liteopt_gd",
 ]
