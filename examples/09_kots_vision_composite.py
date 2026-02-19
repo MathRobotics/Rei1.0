@@ -139,9 +139,7 @@ def main() -> None:
     x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
-        max_iters=40,
-        gn_damping=0.0,
-        gn_line_search=False,
+        options={"max_iters": 40, "damping": 0.0, "line_search": False},
     )
 
     print("=== 09_kots_vision_composite ===")

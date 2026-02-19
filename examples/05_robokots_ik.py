@@ -45,8 +45,7 @@ def main() -> None:
     x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
-        max_iters=200,
-        tol_dx=1e-8,
+        options={"max_iters": 200, "tol_dx": 1e-8},
     )
 
     print("=== 05_robokots_ik ===")

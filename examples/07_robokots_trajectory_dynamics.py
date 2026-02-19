@@ -51,8 +51,7 @@ def main() -> None:
     x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
-        max_iters=500,
-        tol_dx=1e-8,
+        options={"max_iters": 500, "tol_dx": 1e-8},
     )
 
     steps = int(compiled.trajectory_map.steps)

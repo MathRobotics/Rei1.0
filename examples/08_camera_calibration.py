@@ -170,9 +170,11 @@ def main() -> None:
     x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
-        max_iters=max_iters,
-        gn_damping=1e-8 if model_kind == "pinhole" else 0.0,
-        gn_line_search=False,
+        options={
+            "max_iters": max_iters,
+            "damping": 1e-8 if model_kind == "pinhole" else 0.0,
+            "line_search": False,
+        },
     )
 
     print("=== 08_camera_calibration ===")

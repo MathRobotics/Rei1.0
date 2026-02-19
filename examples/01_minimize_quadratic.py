@@ -46,9 +46,7 @@ def main() -> None:
     x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
-        max_iters=50,
-        gn_damping=0.0,
-        gn_line_search=False,
+        options={"max_iters": 50, "damping": 0.0, "line_search": False},
     )
 
     print("=== 01_minimize_quadratic ===")

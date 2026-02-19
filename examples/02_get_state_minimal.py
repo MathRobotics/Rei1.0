@@ -89,7 +89,7 @@ def main() -> None:
     x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
         runtime,
         solver="gauss_newton",
-        max_iters=50,
+        options={"max_iters": 50},
     )
 
     print("=== 02_get_state_minimal ===")
