@@ -8,6 +8,8 @@
 PYTHONPATH=. python examples/01_minimize_quadratic.py
 PYTHONPATH=. python examples/02_get_state_minimal.py
 PYTHONPATH=. python examples/03_toml_problem.py
+PYTHONPATH=. python examples/10_stationarity_ioc.py
+PYTHONPATH=. python examples/11_forward_then_inverse_ioc.py
 PYTHONPATH=. python examples/08_camera_calibration.py
 ```
 
@@ -52,6 +54,13 @@ PYTHONPATH=. python examples/09_kots_vision_composite.py
 - `09_kots_vision_composite.py`
   - `CompositeStateBuilder` で `KotsStateBuilder` と `CameraCalibrationStateProvider` を合成する統合例
   - ロボット位置誤差 (`dtype="kinematics"`) とカメラ再投影誤差 (`dtype="vision"`) を同時最適化
+- `10_stationarity_ioc.py`
+  - Stationarity 方程式ベースの IOC 風重み推定例
+  - `RuntimeStationaritySource` と純関数群（filter/build/select）で stationarity を手組みし、`solve_simplex_min_norm` で係数を解く
+- `11_forward_then_inverse_ioc.py`
+  - RoboKots 軌道問題を順最適化で解き、その解から stationarity 方程式で重みを逆推定する例
+  - 軽量実行向けに `torque_d2` 項は除外し、`torque_d1` までを使用
+  - `check_kkt_conditions()` で順最適化解の KKT 指標を検証し、iKKT 指標として `||A_active w||` も出力
 - `dsl/basic.toml`
   - 最小 TOML 問題定義
 - `dsl/ik_pos.toml`

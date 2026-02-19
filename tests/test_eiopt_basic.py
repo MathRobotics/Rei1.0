@@ -23,11 +23,16 @@ from eiopt.optimize.report import (
     format_solve_report,
     get_named_expr_value,
 )
-from eiopt.optimize.ioc import (
-    format_ioc_report,
-    prepare_ioc_weights,
+from eiopt.equations import (
+    SimplexMinNormProblem,
+    RuntimeStationaritySource,
+    build_reference_simplex_init,
+    build_stationarity_gradient_matrix,
+    filter_stationarity_contributions,
+    select_active_stationarity_indices,
+    solve_projected_linearized_min_norm,
+    solve_simplex_min_norm,
 )
-from eiopt.optimize.simplex_weight_solver import estimate_weights_simplex
 from eiopt.optimize.term_gradient_matrix import (
     build_term_gradient_matrix,
     build_term_gradient_matrix_from_stacked,
@@ -42,10 +47,57 @@ from eiopt.core.expr.types import (
     VariablePack,
 )
 from eiopt.optimize.costs import L2Cost
-from eiopt.optimize.problem import NLSProblem
+from eiopt.problem import NLSProblem
 from eiopt.optimize.reductions import build_nullspace_equality_reduction
 from eiopt.optimize.runtime import NLSRuntime
 from eiopt.optimize.solvers import solve, solve_gauss_newton
+
+
+def _compose_stationarity_weights(
+    runtime: object,
+    *,
+    include_constraints: bool = True,
+    active_mode: str = "residual",
+) -> dict[str, object]:
+    source = RuntimeStationaritySource(runtime)
+    x_opt = np.asarray(runtime.pack.get(), dtype=float).reshape(-1).copy()
+    source.set_point(x_opt)
+    required = source.required_list(None)
+    contributions_all = source.term_contributions(required=required)
+    contributions = filter_stationarity_contributions(
+        contributions_all,
+        include_constraints=include_constraints,
+    )
+    A_col, term_indices = build_stationarity_gradient_matrix(
+        contributions,
+        n_total=int(source.n_total),
+    )
+    active_idx, active_grad_idx, active_res_idx = select_active_stationarity_indices(
+        contributions,
+        mode=active_mode,
+    )
+    inferred = np.zeros((len(contributions),), dtype=float)
+    solve_info = None
+    if len(active_idx) > 0:
+        x0 = build_reference_simplex_init(contributions, active_idx)
+        w_active, solve_info = solve_simplex_min_norm(
+            np.asarray(A_col[:, active_idx], dtype=float),
+            x0=x0,
+            return_info=True,
+        )
+        inferred[np.asarray(active_idx, dtype=int)] = np.asarray(w_active, dtype=float).reshape(-1)
+
+    return {
+        "source": source,
+        "contributions": contributions,
+        "A_col": A_col,
+        "term_indices": tuple(int(i) for i in term_indices),
+        "active_idx": tuple(int(i) for i in active_idx),
+        "active_grad_idx": tuple(int(i) for i in active_grad_idx),
+        "active_res_idx": tuple(int(i) for i in active_res_idx),
+        "inferred": inferred,
+        "solve_info": solve_info,
+    }
 
 class TestEiOptBasic:
     def test_gauss_newton_solves_linear_scalar(self) -> None:
@@ -791,7 +843,7 @@ class TestEiOptBasic:
                 ks=[0, 1],
             )
 
-    def test_ioc_matrix_and_simplex_weight_estimation(self) -> None:
+    def test_stationarity_matrix_and_simplex_weight_estimation(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
             "terms": [
@@ -832,13 +884,28 @@ class TestEiOptBasic:
         assert np.allclose(A_from_stacked, A)
         assert idx_from_stacked == term_indices
 
-        w, info = estimate_weights_simplex(A, return_info=True)
+        w, info = solve_simplex_min_norm(A, return_info=True)
         assert np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6)
         assert float(np.sum(w)) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(8)))
         assert bool(info["converged"])
         assert float(info["objective"]) < 1e-12
 
-    def test_prepare_ioc_weights_basic(self) -> None:
+    def test_projected_linearized_solver_on_simplex_problem(self) -> None:
+        A = np.array([[-1.0, 1.0]], dtype=float)
+        problem = SimplexMinNormProblem(A=A, x=np.array([0.9, 0.1], dtype=float))
+
+        w, info = solve_projected_linearized_min_norm(
+            problem,
+            problem,
+            return_info=True,
+        )
+        assert np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6)
+        assert float(np.sum(w)) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(8)))
+        assert np.all(w >= -1e-12)
+        assert bool(info["converged"])
+        assert float(info["objective"]) < 1e-12
+
+    def test_stationarity_composition_basic(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
             "terms": [
@@ -864,22 +931,16 @@ class TestEiOptBasic:
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
-        out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
-        assert out.active_mode == "residual"
-        assert tuple(out.term_indices) == (0, 1)
-        assert np.allclose(out.gradient_matrix, np.array([[-1.0, 1.0]], dtype=float))
-        assert tuple(out.active_objective_indices) == (0, 1)
-        assert tuple(out.active_gradient_objective_indices) == (0, 1)
-        assert tuple(out.active_residual_objective_indices) == (0, 1)
-        assert np.allclose(out.estimated_weights, np.array([0.5, 0.5], dtype=float), atol=1e-6)
-        assert out.doc_weights_normalized is None
-        assert out.solve_info is not None
+        out = _compose_stationarity_weights(runtime, active_mode="residual")
+        assert tuple(out["term_indices"]) == (0, 1)
+        assert np.allclose(out["A_col"], np.array([[-1.0, 1.0]], dtype=float))
+        assert tuple(out["active_idx"]) == (0, 1)
+        assert tuple(out["active_grad_idx"]) == (0, 1)
+        assert tuple(out["active_res_idx"]) == (0, 1)
+        assert np.allclose(out["inferred"], np.array([0.5, 0.5], dtype=float), atol=1e-6)
+        assert out["solve_info"] is not None
 
-        report = format_ioc_report(out)
-        assert "A shape=" in report
-        assert "estimated weights:" in report
-
-    def test_prepare_ioc_weights_respects_constraints_and_doc_weights(self) -> None:
+    def test_stationarity_composition_respects_constraints_and_reference_init(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
             "terms": [
@@ -910,19 +971,18 @@ class TestEiOptBasic:
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
-        out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
-        assert out.active_mode == "residual"
-        assert tuple(out.active_objective_indices) == (1, 2)
-        assert tuple(out.active_gradient_objective_indices) == (1, 2)
-        assert tuple(out.active_residual_objective_indices) == (1, 2)
-        assert np.allclose(out.estimated_weights, np.array([0.0, 0.0, 1.0], dtype=float))
-        assert out.doc_weights_normalized is not None
-        assert np.allclose(out.doc_weights_normalized, np.array([0.0, 0.2, 0.8], dtype=float))
+        out = _compose_stationarity_weights(runtime, active_mode="residual")
+        assert tuple(out["term_indices"]) == (0, 1, 2)
+        assert tuple(out["active_idx"]) == (1, 2)
+        assert tuple(out["active_grad_idx"]) == (1, 2)
+        assert tuple(out["active_res_idx"]) == (1, 2)
+        assert np.allclose(out["inferred"], np.array([0.0, 0.0, 1.0], dtype=float))
 
-        report = format_ioc_report(out, include_term_details=True)
-        assert "term[1] x_to_1" in report
+        ref_init = build_reference_simplex_init(out["contributions"], out["active_idx"])
+        assert ref_init is not None
+        assert np.allclose(ref_init, np.array([0.2, 0.8], dtype=float))
 
-    def test_prepare_ioc_weights_reports_residual_vs_gradient_activity(self) -> None:
+    def test_stationarity_activity_residual_vs_gradient_differs(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
             "terms": [
@@ -943,23 +1003,98 @@ class TestEiOptBasic:
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
-        out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
-        assert out.active_mode == "residual"
-        assert tuple(out.active_objective_indices) == (0, 1)
-        assert tuple(out.active_gradient_objective_indices) == (1,)
-        assert tuple(out.active_residual_objective_indices) == (0, 1)
-        assert np.allclose(out.doc_weights_normalized, np.array([0.75, 0.25], dtype=float))
-        assert out.doc_weights_normalized_residual_active is not None
-        assert np.allclose(
-                out.doc_weights_normalized_residual_active,
-                np.array([0.75, 0.25], dtype=float),
-            )
+        out = _compose_stationarity_weights(runtime, active_mode="residual")
+        assert tuple(out["active_idx"]) == (0, 1)
+        assert tuple(out["active_grad_idx"]) == (1,)
+        assert tuple(out["active_res_idx"]) == (0, 1)
+        ref_init = build_reference_simplex_init(out["contributions"], out["active_idx"])
+        assert ref_init is not None
+        assert np.allclose(ref_init, np.array([0.75, 0.25], dtype=float))
+        assert np.allclose(out["inferred"], np.array([1.0, 0.0], dtype=float))
 
-        report = format_ioc_report(out, include_term_details=True)
-        assert "note: residual-active terms can differ" in report
-        assert "||r_w||=" in report
+    def test_runtime_stationarity_source_is_stable(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "t1",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [1.0]},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "t2",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [-1.0]},
+                    },
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
-    def test_ioc_matrix_reduced_runtime_matches_from_terms(self) -> None:
+        src_a = RuntimeStationaritySource(runtime)
+        src_b = RuntimeStationaritySource(runtime)
+        x_opt = runtime.pack.get().copy()
+        src_a.set_point(x_opt)
+        src_b.set_point(x_opt)
+        ca = src_a.term_contributions(required=src_a.required_list(None))
+        cb = src_b.term_contributions(required=src_b.required_list(None))
+        assert len(ca) == len(cb) == 2
+        Aa, ia = build_stationarity_gradient_matrix(ca, n_total=int(src_a.n_total))
+        Ab, ib = build_stationarity_gradient_matrix(cb, n_total=int(src_b.n_total))
+        assert tuple(ia) == tuple(ib) == (0, 1)
+        assert np.allclose(Aa, Ab)
+
+    def test_stationarity_composition_can_exclude_constraints(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {"type": "get_var", "name": "x_keep", "var": "x"},
+                    "cost": {"type": "scalar_weight", "w": 2.0},
+                },
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_to_1",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [1.0]},
+                    },
+                    "cost": {"type": "scalar_weight", "w": 1.0},
+                },
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "sub",
+                        "name": "eq_x_half",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [0.5]},
+                    },
+                    "cost": {"type": "scalar_weight", "w": 4.0},
+                },
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+
+        out = _compose_stationarity_weights(
+            runtime,
+            include_constraints=False,
+            active_mode="residual",
+        )
+        assert tuple(out["term_indices"]) == (0, 1)
+        assert tuple(out["active_idx"]) == (1,)
+        assert np.allclose(out["inferred"], np.array([0.0, 1.0], dtype=float))
+        ref_init = build_reference_simplex_init(out["contributions"], out["active_idx"])
+        assert ref_init is not None
+        assert np.allclose(ref_init, np.array([1.0], dtype=float))
+
+    def test_stationarity_matrix_reduced_runtime_matches_from_terms(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 2, "init": [0.0, 0.0]}],
             "terms": [

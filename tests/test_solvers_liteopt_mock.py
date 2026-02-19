@@ -8,7 +8,7 @@ import pytest
 
 from eiopt.core.expr.types import DirectVectorExpr, RuntimeContext, Variable, VariablePack
 from eiopt.optimize.costs import L2Cost
-from eiopt.optimize.problem import NLSProblem
+from eiopt.problem import NLSProblem
 from eiopt.optimize.runtime import NLSRuntime
 from eiopt.optimize.solvers import solve
 
