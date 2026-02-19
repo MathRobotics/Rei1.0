@@ -6,7 +6,7 @@ import unittest
 import numpy as np
 
 import eiopt
-from eiopt.backends.state.template import BackendDispatchStateBuilder
+from eiopt.backends.state.dispatch.template import BackendDispatchStateBuilder
 from eiopt.core.expr.types import DirectVectorExpr, RuntimeContext, Variable, VariablePack
 from eiopt.optimize.builder import compile_nls_problem
 from eiopt.optimize.costs import L2Cost
@@ -101,6 +101,18 @@ class TestNamespaceLayering(unittest.TestCase):
             importlib.import_module("eiopt.backends._template")
         with self.assertRaises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends._spatial")
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("eiopt.backends.state.template")
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("eiopt.backends.state.composite")
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("eiopt.backends.state.spatial")
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("eiopt.backends.state.kots")
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("eiopt.backends.state.pinocchio")
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("eiopt.backends.state.vision_pinhole")
 
     def test_removed_optimize_legacy_aliases(self) -> None:
         optimize_builder = importlib.import_module("eiopt.optimize.builder")

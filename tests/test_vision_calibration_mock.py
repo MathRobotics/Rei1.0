@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.vision import VisionFieldHandler
+from eiopt.backends.state.vision.provider import VisionFieldHandler
 from eiopt.optimize.solvers import solve
 from eiopt.optimize_backends.vision import compile_camera_calibration_problem
 

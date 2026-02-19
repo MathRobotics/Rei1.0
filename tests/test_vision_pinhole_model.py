@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from eiopt.backends.state.vision_pinhole import (
+from eiopt.backends.state.vision.pinhole import (
     PINHOLE_RADIAL_PARAM_ORDER,
     build_pinhole_radial_vision_field_handler,
     pinhole_radial_reprojection,

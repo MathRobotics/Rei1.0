@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.vision import CameraCalibrationStateProvider, VisionFieldHandler
+from eiopt.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
 from eiopt.core.state_schema import DTYPE_VISION, vision_jac_key, vision_key
 
 

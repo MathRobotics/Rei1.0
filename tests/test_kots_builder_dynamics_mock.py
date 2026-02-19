@@ -38,7 +38,7 @@ def _ensure_robokots_state_stub() -> None:
 
 
 _ensure_robokots_state_stub()
-_kots_state_mod = importlib.import_module("eiopt.backends.state.kots")
+_kots_state_mod = importlib.import_module("eiopt.backends.state.robotics.kots")
 _kots_opt_mod = importlib.import_module("eiopt.optimize_backends.kots")
 KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
 compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem

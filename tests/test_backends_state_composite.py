@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.composite import CompositeStateBuilder
-from eiopt.backends.state.template import BackendDispatchStateBuilder
+from eiopt.backends.state.dispatch.composite import CompositeStateBuilder
+from eiopt.backends.state.dispatch.template import BackendDispatchStateBuilder
 from eiopt.core.state_cache import OwnerKey, StateKey
 
 

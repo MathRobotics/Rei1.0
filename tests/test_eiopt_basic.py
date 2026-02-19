@@ -33,7 +33,7 @@ from eiopt.optimize.term_gradient_matrix import (
     build_term_gradient_matrix_from_stacked,
     build_term_gradient_matrix_from_terms,
 )
-from eiopt.backends.state.template import BackendDispatchStateBuilder
+from eiopt.backends.state.dispatch.template import BackendDispatchStateBuilder
 from eiopt.core.expr.nodes import GetStateExpr, GetVarExpr
 from eiopt.core.expr.types import (
     DirectVectorExpr,
