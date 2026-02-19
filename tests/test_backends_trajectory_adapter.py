@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import unittest
+import pytest
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -8,12 +9,10 @@ import numpy as np
 
 from eiopt.optimize_backends.trajectory_adapter import compile_trajectory_problem_with_adapter
 
-
 class _NoopStateBuilder:
     def build_state(self, q: np.ndarray, key: Any) -> dict[str, Any]:
         del q, key
         return {}
-
 
 @dataclass
 class _FakeAdapter:
@@ -44,8 +43,7 @@ class _FakeAdapter:
         if int(runtime.pack.n_total) != int(prepared.trajectory_map.p_dim):
             raise AssertionError("validate_runtime: runtime pack size mismatch.")
 
-
-class TestBackendsTrajectoryAdapter(unittest.TestCase):
+class TestBackendsTrajectoryAdapter:
     def _linear_dsl(self, *, include_q_dim: bool = True) -> dict:
         trajectory = {
             "type": "linear",
@@ -85,16 +83,16 @@ class TestBackendsTrajectoryAdapter(unittest.TestCase):
             adapter=adapter,
         )
 
-        self.assertTrue(adapter.validated)
-        self.assertEqual(adapter.seen_p_var, "p")
-        self.assertAlmostEqual(float(compiled.prepared.dt), 0.2)
-        self.assertEqual(int(compiled.prepared.model_order), 4)
-        self.assertEqual(int(compiled.prepared.trajectory_map.p_dim), 2)
-        self.assertEqual(int(compiled.runtime.pack.n_total), 2)
+        assert adapter.validated
+        assert adapter.seen_p_var == "p"
+        assert float(compiled.prepared.dt) == pytest.approx(0.2, rel=0.0, abs=1e-7)
+        assert int(compiled.prepared.model_order) == 4
+        assert int(compiled.prepared.trajectory_map.p_dim) == 2
+        assert int(compiled.runtime.pack.n_total) == 2
 
         r, J = compiled.runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([-1.0, -2.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.eye(2, dtype=float)))
+        assert np.allclose(r, np.array([-1.0, -2.0], dtype=float))
+        assert np.allclose(J, np.eye(2, dtype=float))
 
     def test_compile_trajectory_problem_with_adapter_uses_model_dof_as_q_dim_default(self) -> None:
         adapter = _FakeAdapter(dof=1, order=2)
@@ -107,8 +105,5 @@ class TestBackendsTrajectoryAdapter(unittest.TestCase):
             adapter=adapter,
         )
 
-        self.assertEqual(int(compiled.prepared.trajectory_map.q_dim), 1)
+        assert int(compiled.prepared.trajectory_map.q_dim) == 1
 
-
-if __name__ == "__main__":
-    unittest.main()

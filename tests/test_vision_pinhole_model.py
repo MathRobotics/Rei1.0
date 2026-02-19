@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import unittest
-
 import numpy as np
 
 from eiopt.backends.state.vision.pinhole import (
@@ -12,7 +10,6 @@ from eiopt.backends.state.vision.pinhole import (
 )
 from eiopt.optimize.solvers import solve
 from eiopt.optimize_backends.vision import compile_camera_calibration_problem
-
 
 def _points_xy() -> np.ndarray:
     return np.array(
@@ -31,17 +28,16 @@ def _points_xy() -> np.ndarray:
         dtype=float,
     )
 
-
-class TestVisionPinholeModel(unittest.TestCase):
+class TestVisionPinholeModel:
     def test_pinhole_radial_reprojection_shapes(self) -> None:
         pts = _points_xy()
         theta = np.array([700.0, 710.0, 320.0, 240.0, 0.01, -0.003], dtype=float)
         y = pinhole_radial_reprojection(theta, pts)
         J = pinhole_radial_reprojection_jacobian(theta, pts)
 
-        self.assertEqual(theta.size, PINHOLE_RADIAL_PARAM_ORDER.size)
-        self.assertEqual(y.shape, (2 * pts.shape[0],))
-        self.assertEqual(J.shape, (2 * pts.shape[0], PINHOLE_RADIAL_PARAM_ORDER.size))
+        assert theta.size == PINHOLE_RADIAL_PARAM_ORDER.size
+        assert y.shape == (2 * pts.shape[0],)
+        assert J.shape == (2 * pts.shape[0], PINHOLE_RADIAL_PARAM_ORDER.size)
 
     def test_pinhole_radial_reprojection_jacobian_matches_finite_difference(self) -> None:
         pts = _points_xy()
@@ -94,10 +90,7 @@ class TestVisionPinholeModel(unittest.TestCase):
             max_iters=40,
             gn_damping=1e-8,
         )
-        self.assertTrue(converged)
-        self.assertLess(cost, 1e-16)
+        assert converged
+        assert cost < 1e-16
         np.testing.assert_allclose(x_star, theta_true, rtol=0.0, atol=1e-8)
 
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import unittest
+import pytest
+
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from eiopt.optimize_backends.problem_adapter import compile_problem_with_adapter
-
 
 def _basic_dsl() -> dict[str, Any]:
     return {
@@ -20,19 +20,16 @@ def _basic_dsl() -> dict[str, Any]:
         ],
     }
 
-
 @dataclass
 class _NoopStateBuilder:
     def build_state(self, x_all: np.ndarray, *, pack: Any = None, time: Any = None, required: Any = None) -> dict:
         del x_all, pack, time, required
         return {}
 
-
 @dataclass(frozen=True)
 class _PreparedDsl:
     dsl: dict[str, Any]
     name: str
-
 
 @dataclass
 class _FakeAdapter:
@@ -58,15 +55,13 @@ class _FakeAdapter:
         if int(runtime.pack.n_total) != 1:
             raise AssertionError("validate_runtime: unexpected variable dimension.")
 
-
 @dataclass
 class _BadAdapter(_FakeAdapter):
     def build_state_builder(self, *, model: Any, data: Any, prepared: Any) -> Any:
         del model, data, prepared
         return object()
 
-
-class TestBackendsProblemAdapter(unittest.TestCase):
+class TestBackendsProblemAdapter:
     def test_compile_problem_with_adapter_accepts_wrapped_prepared_dsl(self) -> None:
         adapter = _FakeAdapter(use_wrapped_prepared=True)
         compiled = compile_problem_with_adapter(
@@ -76,11 +71,11 @@ class TestBackendsProblemAdapter(unittest.TestCase):
             adapter=adapter,
         )
 
-        self.assertTrue(adapter.validated)
-        self.assertEqual(getattr(compiled.prepared, "name", None), "prepared")
+        assert adapter.validated
+        assert getattr(compiled.prepared, "name", None) == "prepared"
         r, J = compiled.runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([2.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.array([[1.0]], dtype=float)))
+        assert np.allclose(r, np.array([2.0], dtype=float))
+        assert np.allclose(J, np.array([[1.0]], dtype=float))
 
     def test_compile_problem_with_adapter_accepts_mapping_prepared_dsl(self) -> None:
         adapter = _FakeAdapter(use_wrapped_prepared=False)
@@ -91,12 +86,12 @@ class TestBackendsProblemAdapter(unittest.TestCase):
             adapter=adapter,
         )
 
-        self.assertTrue(adapter.validated)
-        self.assertIsInstance(compiled.prepared, dict)
+        assert adapter.validated
+        assert isinstance(compiled.prepared, dict)
 
     def test_compile_problem_with_adapter_requires_build_state(self) -> None:
         adapter = _BadAdapter(use_wrapped_prepared=True)
-        with self.assertRaises(TypeError):
+        with pytest.raises(TypeError):
             _ = compile_problem_with_adapter(
                 _basic_dsl(),
                 model=object(),
@@ -104,6 +99,3 @@ class TestBackendsProblemAdapter(unittest.TestCase):
                 adapter=adapter,
             )
 
-
-if __name__ == "__main__":
-    unittest.main()

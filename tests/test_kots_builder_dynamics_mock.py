@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 import copy
 import importlib
 import sys
 import types
-import unittest
 
 import numpy as np
 
@@ -12,7 +13,6 @@ from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, DTYPE_KINEMATIC
 from eiopt.core.trajectory import TrajectoryMap
 from eiopt.optimize.reductions import build_nullspace_equality_reduction
 from eiopt.optimize.solvers import solve
-
 
 def _ensure_robokots_state_stub() -> None:
     robokots_mod = types.ModuleType("robokots")
@@ -36,13 +36,11 @@ def _ensure_robokots_state_stub() -> None:
     sys.modules["robokots.core"] = core_mod
     sys.modules["robokots.core.state"] = state_mod
 
-
 _ensure_robokots_state_stub()
 _kots_state_mod = importlib.import_module("eiopt.backends.state.robotics.kots")
 _kots_opt_mod = importlib.import_module("eiopt.optimize_backends.kots")
 KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
 compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem
-
 
 class _FakeKotsModel:
     def __init__(self) -> None:
@@ -126,7 +124,6 @@ class _FakeKotsModel:
             )
         raise ValueError(f"Unsupported jacobian field: {field!r}")
 
-
 class _FakeKotsModelOrder4:
     def __init__(self) -> None:
         self._motion = np.zeros((8,), dtype=float)
@@ -180,7 +177,6 @@ class _FakeKotsModelOrder4:
                 dtype=float,
             )
         raise ValueError(f"Unsupported jacobian field: {field!r}")
-
 
 class _FakeKotsModelLinkLocalJacobian:
     def __init__(self) -> None:
@@ -242,14 +238,12 @@ class _FakeKotsModelLinkLocalJacobian:
             dtype=float,
         )
 
-
 def _traj_map_from_rows(rows: list[list[float]]) -> TrajectoryMap:
     A = np.asarray(rows, dtype=float)
     b = np.zeros((A.shape[0],), dtype=float)
     return TrajectoryMap(A=A, b=b, steps=2, q_dim=2)
 
-
-class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
+class TestKotsTrajectoryDynamicsMock:
     def test_kots_link_pos_jacobian_is_rotated_to_world_frame(self) -> None:
         model = _FakeKotsModelLinkLocalJacobian()
         builder = _kots_state_mod.KotsStateBuilder(
@@ -295,9 +289,9 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         np.testing.assert_allclose(J_world, expected, rtol=0.0, atol=1e-12)
 
     def test_kots_state_field_name_keeps_canonical_torque_derivative_orders(self) -> None:
-        self.assertEqual(_kots_state_mod.KotsStateBuilder._state_field_name("torque_d1"), "torque_d1")
-        self.assertEqual(_kots_state_mod.KotsStateBuilder._state_field_name("torque_d2"), "torque_d2")
-        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
+        assert _kots_state_mod.KotsStateBuilder._state_field_name("torque_d1") == "torque_d1"
+        assert _kots_state_mod.KotsStateBuilder._state_field_name("torque_d2") == "torque_d2"
+        with pytest.raises(ValueError, match="unsupported field alias"):
             _ = _kots_state_mod.KotsStateBuilder._state_field_name("tau_diff2")
 
     def test_kots_state_ref_backend_fallback_uses_torque_diff_for_derivative(self) -> None:
@@ -327,7 +321,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 field="torque_d1",
             )
             state_ref = builder._resolve_state_ref(key)
-            self.assertEqual(getattr(state_ref, "field", None), "torque_diff1")
+            assert getattr(state_ref, "field", None) == "torque_diff1"
         finally:
             _kots_state_mod.StateType = original_state_type
 
@@ -365,18 +359,18 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             dynamics_fields=("torque",),
         )
 
-        self.assertEqual(compiled.p_var, "p")
-        self.assertAlmostEqual(compiled.dt, 0.2)
-        self.assertEqual(compiled.model_order, 3)
-        self.assertEqual(compiled.trajectory_map.steps, 2)
-        self.assertEqual(compiled.trajectory_map.q_dim, 2)
-        self.assertEqual(compiled.trajectory_map.p_dim, 2)
-        self.assertEqual(sorted(compiled.trajectory_derivative_maps.keys()), [0, 1, 2])
-        self.assertEqual(compiled.runtime.pack.n_total, 2)
+        assert compiled.p_var == "p"
+        assert compiled.dt == pytest.approx(0.2, rel=0.0, abs=1e-7)
+        assert compiled.model_order == 3
+        assert compiled.trajectory_map.steps == 2
+        assert compiled.trajectory_map.q_dim == 2
+        assert compiled.trajectory_map.p_dim == 2
+        assert sorted(compiled.trajectory_derivative_maps.keys()) == [0, 1, 2]
+        assert compiled.runtime.pack.n_total == 2
 
         r, J = compiled.runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([0.0, 0.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.eye(2, dtype=float)))
+        assert np.allclose(r, np.array([0.0, 0.0], dtype=float))
+        assert np.allclose(J, np.eye(2, dtype=float))
 
     def test_compile_kots_trajectory_problem_supports_external_nullspace_eq_runtime(self) -> None:
         model = _FakeKotsModel()
@@ -435,12 +429,12 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             data={},
         )
         reduction = build_nullspace_equality_reduction(compiled.runtime)
-        self.assertIsNotNone(reduction)
         assert reduction is not None
-        self.assertEqual(reduction.runtime.pack.n_total, 2)
-        self.assertEqual(compiled.runtime.pack.n_total, 4)
+        assert reduction is not None
+        assert reduction.runtime.pack.n_total == 2
+        assert compiled.runtime.pack.n_total == 4
         runtime_for_solve = reduction.runtime
-        self.assertIs(runtime_for_solve, reduction.runtime)
+        assert runtime_for_solve is reduction.runtime
 
         z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             runtime_for_solve,
@@ -449,15 +443,15 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             tol_r=1e-12,
             tol_dx=1e-12,
         )
-        self.assertTrue(converged)
+        assert converged
         p_star = reduction.lift(z_star)
-        self.assertTrue(np.allclose(p_star, np.array([1.0, 2.0, 0.0, 0.0], dtype=float), atol=1e-8))
+        assert np.allclose(p_star, np.array([1.0, 2.0, 0.0, 0.0], dtype=float), atol=1e-8)
 
         p_cur = compiled.runtime.pack.get().copy()
-        self.assertTrue(np.allclose(p_cur, p_star, atol=1e-12))
+        assert np.allclose(p_cur, p_star, atol=1e-12)
         eq_terms = compiled.runtime.linearize_constraint_terms(kind="eq", weighted=False)
         req = np.concatenate([term.residual for term in eq_terms], axis=0)
-        self.assertLess(float(np.linalg.norm(req)), 1e-10)
+        assert float(np.linalg.norm(req)) < 1e-10
 
     def test_compile_kots_trajectory_problem_nullspace_term_selection(self) -> None:
         model = _FakeKotsModel()
@@ -544,15 +538,15 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             eq_term_indices=[0],
             objective_term_indices=[2],
         )
-        self.assertIsNotNone(reduction)
         assert reduction is not None
-        self.assertEqual(reduction.eq_term_indices, (0,))
-        self.assertEqual(reduction.objective_term_indices, (2,))
-        self.assertEqual(reduction.runtime.pack.n_total, 2)
+        assert reduction is not None
+        assert reduction.eq_term_indices == (0,)
+        assert reduction.objective_term_indices == (2,)
+        assert reduction.runtime.pack.n_total == 2
 
         selected = reduction.runtime.linearize_terms(weighted=False, term_indices=[2])
-        self.assertEqual([t.term_index for t in selected], [2])
-        with self.assertRaisesRegex(ValueError, "global problem indexing"):
+        assert [t.term_index for t in selected] == [2]
+        with pytest.raises(ValueError, match="global problem indexing"):
             reduction.runtime.linearize_terms(weighted=False, term_indices=[1])
 
     def test_compile_kots_trajectory_problem_nullspace_rejects_non_eq_term_selection(self) -> None:
@@ -606,7 +600,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             ],
         }
 
-        with self.assertRaisesRegex(ValueError, "constraint.kind='eq'"):
+        with pytest.raises(ValueError, match="constraint.kind='eq'"):
             _ = build_nullspace_equality_reduction(
                 compile_kots_trajectory_problem(
                     dsl,
@@ -667,7 +661,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             ],
         }
 
-        with self.assertRaisesRegex(TypeError, "enabled"):
+        with pytest.raises(TypeError, match="enabled"):
             _ = build_nullspace_equality_reduction(
                 compile_kots_trajectory_problem(
                     dsl,
@@ -705,10 +699,10 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             model=model,
             data={},
         )
-        self.assertEqual(compiled.trajectory_map.q_dim, 2)
-        self.assertEqual(compiled.trajectory_map.p_dim, 8)
-        self.assertEqual(compiled.runtime.pack.n_total, 8)
-        self.assertTrue(np.allclose(compiled.runtime.pack.get(), np.zeros((8,), dtype=float)))
+        assert compiled.trajectory_map.q_dim == 2
+        assert compiled.trajectory_map.p_dim == 8
+        assert compiled.runtime.pack.n_total == 8
+        assert np.allclose(compiled.runtime.pack.get(), np.zeros((8,), dtype=float))
 
     def test_compile_kots_trajectory_problem_does_not_mutate_input_dsl(self) -> None:
         model = _FakeKotsModel()
@@ -738,9 +732,9 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             model=model,
             data={},
         )
-        self.assertEqual(dsl, dsl_before)
-        self.assertNotIn("q_dim", dsl["trajectory"])
-        self.assertNotIn("dim", dsl["variables"][0])
+        assert dsl == dsl_before
+        assert "q_dim" not in dsl["trajectory"]
+        assert "dim" not in dsl["variables"][0]
 
     def test_compile_kots_trajectory_problem_rejects_scalar_init_without_fill(self) -> None:
         model = _FakeKotsModel()
@@ -764,7 +758,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             ],
         }
 
-        with self.assertRaisesRegex(ValueError, "init = \\{ fill = <value> \\}"):
+        with pytest.raises(ValueError, match="init = \\{ fill = <value> \\}"):
             _ = compile_kots_trajectory_problem(
                 dsl,
                 model=model,
@@ -813,7 +807,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             model=model,
             data={},
         )
-        self.assertEqual(compiled.dynamics_fields, ("torque",))
+        assert compiled.dynamics_fields == ("torque",)
         _ = compiled.runtime.linearize()
 
     def test_compile_kots_trajectory_problem_validates_p_dim(self) -> None:
@@ -843,7 +837,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
             ],
         }
 
-        with self.assertRaisesRegex(ValueError, "dim mismatch"):
+        with pytest.raises(ValueError, match="dim mismatch"):
             _ = compile_kots_trajectory_problem(
                 dsl,
                 model=model,
@@ -886,7 +880,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "Missing: torque_d1"):
+        with pytest.raises(ValueError, match="Missing: torque_d1"):
             _ = compile_kots_trajectory_problem(
                 dsl,
                 model=model,
@@ -930,7 +924,7 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "unsupported owner_type"):
+        with pytest.raises(ValueError, match="unsupported owner_type"):
             _ = compile_kots_trajectory_problem(
                 dsl,
                 model=model,
@@ -1057,141 +1051,121 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         p = np.array([1.0, 2.0], dtype=float)
         out = builder.build_state(p, required=required)
 
-        self.assertTrue(
-            np.allclose(
-                out[make_key(k=0, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="torque")],
-                np.array([17.0, 44.0], dtype=float),
-            )
+        assert np.allclose(
+            out[make_key(k=0, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="torque")],
+            np.array([17.0, 44.0], dtype=float),
         )
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_key(
-                        k=0,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_DYNAMICS,
-                        field="torque_d1",
-                    )
-                ],
-                np.array([18.0, 46.0], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_key(
+                    k=0,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_DYNAMICS,
+                    field="torque_d1",
+                )
+            ],
+            np.array([18.0, 46.0], dtype=float),
         )
-        self.assertTrue(
-            np.allclose(
-                out[make_key(k=1, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="torque")],
-                np.array([52.0, 116.0], dtype=float),
-            )
+        assert np.allclose(
+            out[make_key(k=1, owner_type="total_joint", owner_name="robot", dtype=DTYPE_DYNAMICS, field="torque")],
+            np.array([52.0, 116.0], dtype=float),
         )
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_key(
-                        k=1,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_DYNAMICS,
-                        field="torque_d1",
-                    )
-                ],
-                np.array([48.0, 106.0], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_key(
+                    k=1,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_DYNAMICS,
+                    field="torque_d1",
+                )
+            ],
+            np.array([48.0, 106.0], dtype=float),
         )
 
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_jac_key(
-                        k=0,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_DYNAMICS,
-                        field="torque",
-                        var="p",
-                    )
-                ],
-                np.array([[17.0, 0.0], [0.0, 22.0]], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_jac_key(
+                    k=0,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_DYNAMICS,
+                    field="torque",
+                    var="p",
+                )
+            ],
+            np.array([[17.0, 0.0], [0.0, 22.0]], dtype=float),
         )
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_jac_key(
-                        k=0,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_DYNAMICS,
-                        field="torque_d1",
-                        var="p",
-                    )
-                ],
-                np.array([[18.0, 0.0], [0.0, 23.0]], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_jac_key(
+                    k=0,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_DYNAMICS,
+                    field="torque_d1",
+                    var="p",
+                )
+            ],
+            np.array([[18.0, 0.0], [0.0, 23.0]], dtype=float),
         )
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_jac_key(
-                        k=1,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_DYNAMICS,
-                        field="torque",
-                        var="p",
-                    )
-                ],
-                np.array([[52.0, 0.0], [0.0, 58.0]], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_jac_key(
+                    k=1,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_DYNAMICS,
+                    field="torque",
+                    var="p",
+                )
+            ],
+            np.array([[52.0, 0.0], [0.0, 58.0]], dtype=float),
         )
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_jac_key(
-                        k=1,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_DYNAMICS,
-                        field="torque_d1",
-                        var="p",
-                    )
-                ],
-                np.array([[48.0, 0.0], [0.0, 53.0]], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_jac_key(
+                    k=1,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_DYNAMICS,
+                    field="torque_d1",
+                    var="p",
+                )
+            ],
+            np.array([[48.0, 0.0], [0.0, 53.0]], dtype=float),
         )
 
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_jac_key(
-                        k=0,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_COORD,
-                        field="q",
-                        var="p",
-                    )
-                ],
-                np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_jac_key(
+                    k=0,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_COORD,
+                    field="q",
+                    var="p",
+                )
+            ],
+            np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float),
         )
-        self.assertTrue(
-            np.allclose(
-                out[
-                    make_jac_key(
-                        k=1,
-                        owner_type="total_joint",
-                        owner_name="robot",
-                        dtype=DTYPE_COORD,
-                        field="q",
-                        var="p",
-                    )
-                ],
-                np.array([[6.0, 0.0], [0.0, 7.0]], dtype=float),
-            )
+        assert np.allclose(
+            out[
+                make_jac_key(
+                    k=1,
+                    owner_type="total_joint",
+                    owner_name="robot",
+                    dtype=DTYPE_COORD,
+                    field="q",
+                    var="p",
+                )
+            ],
+            np.array([[6.0, 0.0], [0.0, 7.0]], dtype=float),
         )
 
-        self.assertEqual(model.kinematics_calls, 0)
-        self.assertEqual(model.dynamics_calls, 2)
+        assert model.kinematics_calls == 0
+        assert model.dynamics_calls == 2
 
     def test_second_torque_derivative_value_and_jac_chain(self) -> None:
         model = _FakeKotsModel()
@@ -1246,8 +1220,8 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         )
 
         out = builder.build_state(np.array([1.0, 2.0], dtype=float), required=[key_d2, key_d2_jac])
-        self.assertTrue(np.allclose(out[key_d2], np.array([4.0, 10.0], dtype=float)))
-        self.assertTrue(np.allclose(out[key_d2_jac], np.array([[4.0, 0.0], [0.0, 5.0]], dtype=float)))
+        assert np.allclose(out[key_d2], np.array([4.0, 10.0], dtype=float))
+        assert np.allclose(out[key_d2_jac], np.array([[4.0, 0.0], [0.0, 5.0]], dtype=float))
 
     def test_order4_low_order_state_jac_chain(self) -> None:
         model = _FakeKotsModelOrder4()
@@ -1310,5 +1284,5 @@ class TestKotsTrajectoryDynamicsMock(unittest.TestCase):
         )
 
         out = builder.build_state(np.array([1.0, 2.0], dtype=float), required=[key_tau, key_tau_jac])
-        self.assertTrue(np.allclose(out[key_tau], np.array([17.0, 44.0], dtype=float)))
-        self.assertTrue(np.allclose(out[key_tau_jac], np.array([[17.0, 0.0], [0.0, 22.0]], dtype=float)))
+        assert np.allclose(out[key_tau], np.array([17.0, 44.0], dtype=float))
+        assert np.allclose(out[key_tau_jac], np.array([[17.0, 0.0], [0.0, 22.0]], dtype=float))

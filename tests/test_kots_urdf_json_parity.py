@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
-import unittest
 
 import numpy as np
 
@@ -11,7 +12,6 @@ try:
     from robokots.kots import Kots
 except ImportError:  # pragma: no cover
     Kots = None
-
 
 def _minimal_kots_trajectory_dsl() -> dict:
     return {
@@ -116,19 +116,18 @@ def _minimal_kots_trajectory_dsl() -> dict:
         ],
     }
 
-
-class TestKotsUrdfJsonParity(unittest.TestCase):
+class TestKotsUrdfJsonParity:
     def test_kots_urdf_and_json_models_match_runtime_linearization(self) -> None:
         if Kots is None:
-            self.skipTest("RoboKots is not installed.")
+            pytest.skip("RoboKots is not installed.")
         if not hasattr(Kots, "from_urdf_file"):
-            self.skipTest("RoboKots does not expose Kots.from_urdf_file yet.")
+            pytest.skip("RoboKots does not expose Kots.from_urdf_file yet.")
 
         root = Path(__file__).resolve().parents[1]
         json_path = root / "examples" / "models" / "planar2.json"
         urdf_path = root / "examples" / "models" / "planar2.urdf"
-        self.assertTrue(json_path.is_file(), f"model not found: {json_path}")
-        self.assertTrue(urdf_path.is_file(), f"model not found: {urdf_path}")
+        assert json_path.is_file(), f"model not found: {json_path}"
+        assert urdf_path.is_file(), f"model not found: {urdf_path}"
 
         order = 5
         dsl = _minimal_kots_trajectory_dsl()
@@ -146,8 +145,8 @@ class TestKotsUrdfJsonParity(unittest.TestCase):
             model=model_urdf,
             data=model_urdf.state_dict_,
         )
-        self.assertEqual(compiled_json.model_order, compiled_urdf.model_order)
-        self.assertEqual(compiled_json.runtime.pack.n_total, compiled_urdf.runtime.pack.n_total)
+        assert compiled_json.model_order == compiled_urdf.model_order
+        assert compiled_json.runtime.pack.n_total == compiled_urdf.runtime.pack.n_total
 
         n_total = int(compiled_json.runtime.pack.n_total)
         rng = np.random.default_rng(0)
@@ -177,6 +176,3 @@ class TestKotsUrdfJsonParity(unittest.TestCase):
                 err_msg=f"jacobian mismatch at sample {i}",
             )
 
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import unittest
+import pytest
+
 from typing import Any
 
 import numpy as np
@@ -8,7 +9,6 @@ import numpy as np
 from eiopt.backends.state.vision.provider import VisionFieldHandler
 from eiopt.optimize.solvers import solve
 from eiopt.optimize_backends.vision import compile_camera_calibration_problem
-
 
 def _build_handlers(points: np.ndarray) -> dict[str, VisionFieldHandler]:
     pts = np.asarray(points, dtype=float).reshape(-1)
@@ -37,7 +37,6 @@ def _build_handlers(points: np.ndarray) -> dict[str, VisionFieldHandler]:
         )
     }
 
-
 def _dsl(*, observations: np.ndarray, init: list[float]) -> dict[str, Any]:
     return {
         "vision": {
@@ -53,8 +52,7 @@ def _dsl(*, observations: np.ndarray, init: list[float]) -> dict[str, Any]:
         "terms": [],
     }
 
-
-class TestVisionCalibrationMock(unittest.TestCase):
+class TestVisionCalibrationMock:
     def test_compile_camera_calibration_problem_builds_runtime(self) -> None:
         points = np.array([-1.0, 0.0, 1.0], dtype=float)
         theta_true = np.array([2.0, -0.5], dtype=float)
@@ -68,17 +66,17 @@ class TestVisionCalibrationMock(unittest.TestCase):
             field_handlers=_build_handlers(points),
         )
 
-        self.assertEqual(compiled.p_var, "theta")
-        self.assertEqual(compiled.owner_type, "camera")
-        self.assertEqual(compiled.owner_name, "cam0")
-        self.assertEqual(compiled.field, "reproj")
-        self.assertEqual(compiled.k, 0)
-        self.assertEqual(compiled.term_name, "reproj_error")
-        self.assertEqual(compiled.n_observations, 3)
-        self.assertEqual(compiled.fields, ("reproj",))
+        assert compiled.p_var == "theta"
+        assert compiled.owner_type == "camera"
+        assert compiled.owner_name == "cam0"
+        assert compiled.field == "reproj"
+        assert compiled.k == 0
+        assert compiled.term_name == "reproj_error"
+        assert compiled.n_observations == 3
+        assert compiled.fields == ("reproj",)
         r, J = compiled.runtime.linearize()
-        self.assertEqual(r.shape, (3,))
-        self.assertEqual(J.shape, (3, 2))
+        assert r.shape == (3,)
+        assert J.shape == (3, 2)
 
     def test_compile_camera_calibration_problem_requires_owner_name_and_observations(self) -> None:
         dsl_missing_owner = {
@@ -86,7 +84,7 @@ class TestVisionCalibrationMock(unittest.TestCase):
             "variables": [{"name": "theta", "dim": 2, "init": [0.0, 0.0]}],
             "terms": [],
         }
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _ = compile_camera_calibration_problem(
                 dsl_missing_owner,
                 model={"points": np.array([0.0, 1.0], dtype=float)},
@@ -99,7 +97,7 @@ class TestVisionCalibrationMock(unittest.TestCase):
             "variables": [{"name": "theta", "dim": 2, "init": [0.0, 0.0]}],
             "terms": [],
         }
-        with self.assertRaises(ValueError):
+        with pytest.raises(ValueError):
             _ = compile_camera_calibration_problem(
                 dsl_missing_observations,
                 model={"points": np.array([0.0, 1.0], dtype=float)},
@@ -129,11 +127,8 @@ class TestVisionCalibrationMock(unittest.TestCase):
             gn_line_search=False,
         )
 
-        self.assertTrue(converged)
-        self.assertGreater(initial_cost, 0.0)
-        self.assertLess(cost, 1e-20)
+        assert converged
+        assert initial_cost > 0.0
+        assert cost < 1e-20
         np.testing.assert_allclose(x_star, theta_true, rtol=0.0, atol=1e-10)
 
-
-if __name__ == "__main__":
-    unittest.main()

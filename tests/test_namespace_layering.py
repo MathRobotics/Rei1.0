@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
 import importlib
-import unittest
 
 import numpy as np
 
@@ -20,8 +21,7 @@ from eiopt.optimize.solvers import solve, solve_gauss_newton
 from eiopt.optimize.term_gradient_matrix import build_term_gradient_matrix
 from eiopt.optimize_backends.trajectory_adapter import compile_trajectory_problem_with_adapter
 
-
-class TestNamespaceLayering(unittest.TestCase):
+class TestNamespaceLayering:
     def test_optimize_builder_compile_nls_problem(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [2.0]}],
@@ -38,8 +38,8 @@ class TestNamespaceLayering(unittest.TestCase):
             build_state=lambda *_args, **_kwargs: {},
         )
         r, J = runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([2.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.array([[1.0]], dtype=float)))
+        assert np.allclose(r, np.array([2.0], dtype=float))
+        assert np.allclose(J, np.array([[1.0]], dtype=float))
 
     def test_canonical_types_construct_runtime(self) -> None:
         x_var = Variable(name="x", x=np.array([0.0], dtype=float))
@@ -57,70 +57,67 @@ class TestNamespaceLayering(unittest.TestCase):
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
         x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(runtime, max_iters=8)
-        self.assertTrue(converged)
-        self.assertGreaterEqual(cost0, cost)
-        self.assertLess(cost, 1e-20)
-        self.assertAlmostEqual(float(x_star[0]), 1.0, places=10)
+        assert converged
+        assert cost0 >= cost
+        assert cost < 1e-20
+        assert float(x_star[0]) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(10)))
 
     def test_canonical_solver_entrypoint(self) -> None:
-        self.assertTrue(callable(solve))
+        assert callable(solve)
 
     def test_canonical_entrypoints_exist(self) -> None:
-        self.assertTrue(callable(prepare_trajectory_problem_dsl))
-        self.assertTrue(callable(build_nullspace_equality_reduction))
-        self.assertTrue(callable(format_solve_report))
-        self.assertTrue(callable(build_term_gradient_matrix))
-        self.assertTrue(callable(estimate_weights_simplex))
-        self.assertTrue(callable(compile_trajectory_problem_with_adapter))
-        self.assertTrue(issubclass(BackendDispatchStateBuilder, object))
+        assert callable(prepare_trajectory_problem_dsl)
+        assert callable(build_nullspace_equality_reduction)
+        assert callable(format_solve_report)
+        assert callable(build_term_gradient_matrix)
+        assert callable(estimate_weights_simplex)
+        assert callable(compile_trajectory_problem_with_adapter)
+        assert issubclass(BackendDispatchStateBuilder, object)
 
     def test_removed_top_level_legacy_aliases(self) -> None:
-        self.assertFalse(hasattr(eiopt, "compile_problem"))
-        self.assertFalse(hasattr(eiopt, "ProblemRuntime"))
-        self.assertFalse(hasattr(eiopt, "dsl"))
-        self.assertFalse(hasattr(eiopt, "model"))
-        self.assertFalse(hasattr(eiopt, "solvers"))
-        self.assertFalse(hasattr(eiopt, "expr"))
+        assert not (hasattr(eiopt, "compile_problem"))
+        assert not (hasattr(eiopt, "ProblemRuntime"))
+        assert not (hasattr(eiopt, "dsl"))
+        assert not (hasattr(eiopt, "model"))
+        assert not (hasattr(eiopt, "solvers"))
+        assert not (hasattr(eiopt, "expr"))
 
     def test_removed_legacy_namespace_modules(self) -> None:
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.dsl")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.model")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.solvers")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.expr")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.trajectory_adapter")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.kots")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.pinocchio")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends._template")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends._spatial")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.state.template")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.state.composite")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.state.spatial")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.state.kots")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.state.pinocchio")
-        with self.assertRaises(ModuleNotFoundError):
+        with pytest.raises(ModuleNotFoundError):
             importlib.import_module("eiopt.backends.state.vision_pinhole")
 
     def test_removed_optimize_legacy_aliases(self) -> None:
         optimize_builder = importlib.import_module("eiopt.optimize.builder")
         optimize_problem = importlib.import_module("eiopt.optimize.problem")
-        self.assertFalse(hasattr(optimize_builder, "build_problem"))
-        self.assertFalse(hasattr(optimize_builder, "collect_required"))
-        self.assertFalse(hasattr(optimize_problem, "Problem"))
+        assert not (hasattr(optimize_builder, "build_problem"))
+        assert not (hasattr(optimize_builder, "collect_required"))
+        assert not (hasattr(optimize_problem, "Problem"))
 
-
-if __name__ == "__main__":
-    unittest.main()

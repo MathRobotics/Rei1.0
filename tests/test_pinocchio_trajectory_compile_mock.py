@@ -3,12 +3,10 @@ from __future__ import annotations
 import importlib
 import sys
 import types
-import unittest
 
 import numpy as np
 
 from eiopt.core.state_schema import DTYPE_COORD
-
 
 def _ensure_pinocchio_stub() -> None:
     pin = types.ModuleType("pinocchio")
@@ -51,11 +49,9 @@ def _ensure_pinocchio_stub() -> None:
 
     sys.modules["pinocchio"] = pin
 
-
 _ensure_pinocchio_stub()
 _pin_opt_mod = importlib.import_module("eiopt.optimize_backends.pinocchio")
 compile_pinocchio_trajectory_problem = _pin_opt_mod.compile_pinocchio_trajectory_problem
-
 
 class _FakePinModel:
     nq = 1
@@ -64,7 +60,6 @@ class _FakePinModel:
     def getFrameId(self, owner_name: str) -> int:
         del owner_name
         return 0
-
 
 class _FakePinData:
     def __init__(self) -> None:
@@ -75,8 +70,7 @@ class _FakePinData:
         )
         self.oMf = [frame]
 
-
-class TestPinocchioTrajectoryCompileMock(unittest.TestCase):
+class TestPinocchioTrajectoryCompileMock:
     def test_compile_pinocchio_trajectory_problem_for_joint_q_constraints(self) -> None:
         dsl = {
             "time": {"N": 1, "dt": 0.2},
@@ -141,14 +135,14 @@ class TestPinocchioTrajectoryCompileMock(unittest.TestCase):
             fields=("pos",),
         )
 
-        self.assertEqual(compiled.p_var, "p")
-        self.assertEqual(compiled.trajectory_map.p_dim, 2)
-        self.assertEqual(compiled.trajectory_map.steps, 2)
-        self.assertEqual(compiled.runtime.pack.n_total, 2)
+        assert compiled.p_var == "p"
+        assert compiled.trajectory_map.p_dim == 2
+        assert compiled.trajectory_map.steps == 2
+        assert compiled.runtime.pack.n_total == 2
 
         r, J = compiled.runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([-1.0, -2.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.eye(2, dtype=float)))
+        assert np.allclose(r, np.array([-1.0, -2.0], dtype=float))
+        assert np.allclose(J, np.eye(2, dtype=float))
 
     def test_compile_pinocchio_trajectory_problem_torque_uses_trajectory_dynamics(self) -> None:
         dsl = {
@@ -192,20 +186,17 @@ class TestPinocchioTrajectoryCompileMock(unittest.TestCase):
             data=_FakePinData(),
             fields=("pos",),
         )
-        self.assertEqual(compiled.model_order, 3)
-        self.assertEqual(sorted(compiled.trajectory_derivative_maps.keys()), [0, 1, 2])
+        assert compiled.model_order == 3
+        assert sorted(compiled.trajectory_derivative_maps.keys()) == [0, 1, 2]
 
         runtime = compiled.runtime
         x_target = np.array([0.0, 1.0, 0.0], dtype=float)
         runtime.pack.apply_dx(x_target - runtime.pack.get())
 
         terms = runtime.linearize_terms(weighted=False)
-        self.assertEqual(len(terms), 1)
+        assert len(terms) == 1
         r = terms[0].residual
         J = terms[0].jacobian
-        self.assertFalse(np.allclose(r, np.zeros_like(r)))
-        self.assertFalse(np.allclose(J, np.zeros_like(J)))
+        assert not (np.allclose(r, np.zeros_like(r)))
+        assert not (np.allclose(J, np.zeros_like(J)))
 
-
-if __name__ == "__main__":
-    unittest.main()

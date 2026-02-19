@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import sys
 import types
-import unittest
 from typing import Any
 
 import numpy as np
@@ -13,7 +12,6 @@ from eiopt.backends.state.vision.provider import CameraCalibrationStateProvider,
 from eiopt.core.state_schema import DTYPE_KINEMATICS, make_key
 from eiopt.optimize.builder import compile_nls_problem
 from eiopt.optimize.solvers import solve
-
 
 def _ensure_robokots_state_stub() -> None:
     robokots_mod = types.ModuleType("robokots")
@@ -37,14 +35,12 @@ def _ensure_robokots_state_stub() -> None:
     sys.modules["robokots.core"] = core_mod
     sys.modules["robokots.core.state"] = state_mod
 
-
 _ensure_robokots_state_stub()
 if "eiopt.backends.state.robotics.kots" in sys.modules:
     _kots_mod = importlib.reload(sys.modules["eiopt.backends.state.robotics.kots"])
 else:
     _kots_mod = importlib.import_module("eiopt.backends.state.robotics.kots")
 KotsStateBuilder = _kots_mod.KotsStateBuilder
-
 
 class _FakeKotsModel:
     def __init__(self) -> None:
@@ -92,8 +88,7 @@ class _FakeKotsModel:
             )
         raise ValueError(f"Unsupported field: {field!r}")
 
-
-class TestKotsVisionCompositeIntegration(unittest.TestCase):
+class TestKotsVisionCompositeIntegration:
     def test_composite_state_builder_solves_joint_robot_camera_problem(self) -> None:
         model = _FakeKotsModel()
         kots_builder = KotsStateBuilder(
@@ -218,11 +213,8 @@ class TestKotsVisionCompositeIntegration(unittest.TestCase):
             gn_line_search=False,
         )
 
-        self.assertTrue(converged)
-        self.assertLess(cost, 1e-20)
+        assert converged
+        assert cost < 1e-20
         np.testing.assert_allclose(x_star, q_true, rtol=0.0, atol=1e-10)
-        self.assertGreater(model.kinematics_calls, 0)
+        assert model.kinematics_calls > 0
 
-
-if __name__ == "__main__":
-    unittest.main()

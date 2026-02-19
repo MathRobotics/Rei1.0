@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import unittest
-
 import numpy as np
 
 from eiopt.optimize.builder import compile_nls_problem
 from eiopt.optimize.kkt import check_kkt_conditions, check_kkt_residuals
 
-
-class TestSolveCheck(unittest.TestCase):
+class TestSolveCheck:
     def test_check_kkt_conditions_unconstrained_stationarity(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
@@ -28,10 +25,10 @@ class TestSolveCheck(unittest.TestCase):
         runtime.pack.apply_dx(np.array([3.0], dtype=float) - x_cur)
 
         out = check_kkt_conditions(runtime)
-        self.assertTrue(out.ok)
-        self.assertLess(out.stationarity_inf, 1e-10)
-        self.assertEqual(out.n_eq_rows, 0)
-        self.assertEqual(out.n_ineq_rows, 0)
+        assert out.ok
+        assert out.stationarity_inf < 1e-10
+        assert out.n_eq_rows == 0
+        assert out.n_ineq_rows == 0
 
     def test_check_kkt_conditions_eq_constraint(self) -> None:
         dsl = {
@@ -55,11 +52,11 @@ class TestSolveCheck(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         out = check_kkt_conditions(runtime, stationarity_tol=1e-10, eq_tol=1e-10)
-        self.assertTrue(out.ok)
-        self.assertLess(out.stationarity_inf, 1e-10)
-        self.assertLess(out.eq_violation_inf, 1e-10)
-        self.assertEqual(out.n_eq_rows, 2)
-        self.assertTrue(np.allclose(out.lambda_eq, np.array([-1.0, -1.0], dtype=float), atol=1e-10))
+        assert out.ok
+        assert out.stationarity_inf < 1e-10
+        assert out.eq_violation_inf < 1e-10
+        assert out.n_eq_rows == 2
+        assert np.allclose(out.lambda_eq, np.array([-1.0, -1.0], dtype=float), atol=1e-10)
 
     def test_check_kkt_conditions_ineq_violation_detected(self) -> None:
         dsl = {
@@ -87,9 +84,9 @@ class TestSolveCheck(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         out = check_kkt_conditions(runtime, ineq_tol=1e-12)
-        self.assertFalse(out.ok)
-        self.assertGreater(out.ineq_violation_inf, 0.5)
-        self.assertIn("ineq_violation_inf", out.message)
+        assert not (out.ok)
+        assert out.ineq_violation_inf > 0.5
+        assert "ineq_violation_inf" in out.message
 
     def test_check_kkt_residuals_generic(self) -> None:
         out = check_kkt_residuals(
@@ -99,11 +96,8 @@ class TestSolveCheck(unittest.TestCase):
             ineq_residual=np.zeros((0,), dtype=float),
             ineq_jacobian=np.zeros((0, 2), dtype=float),
         )
-        self.assertTrue(out.ok)
-        self.assertLess(out.stationarity_inf, 1e-12)
-        self.assertEqual(out.n_eq_rows, 1)
-        self.assertEqual(out.n_ineq_rows, 0)
+        assert out.ok
+        assert out.stationarity_inf < 1e-12
+        assert out.n_eq_rows == 1
+        assert out.n_ineq_rows == 0
 
-
-if __name__ == "__main__":
-    unittest.main()

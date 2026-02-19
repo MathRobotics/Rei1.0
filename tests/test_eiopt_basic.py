@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import unittest
+import pytest
 
 import numpy as np
 
@@ -47,8 +47,7 @@ from eiopt.optimize.reductions import build_nullspace_equality_reduction
 from eiopt.optimize.runtime import NLSRuntime
 from eiopt.optimize.solvers import solve, solve_gauss_newton
 
-
-class TestEiOptBasic(unittest.TestCase):
+class TestEiOptBasic:
     def test_gauss_newton_solves_linear_scalar(self) -> None:
         x_var = Variable(name="x", x=np.array([0.0], dtype=float))
         pack = VariablePack([x_var])
@@ -71,15 +70,15 @@ class TestEiOptBasic(unittest.TestCase):
             tol_r=1e-14,
             tol_dx=1e-14,
         )
-        self.assertTrue(converged)
-        self.assertGreaterEqual(cost0, cost)
-        self.assertLess(cost, 1e-20)
-        self.assertAlmostEqual(float(x_star[0]), 3.0, places=10)
-        self.assertAlmostEqual(float(x_var.x[0]), 3.0, places=10)
+        assert converged
+        assert cost0 >= cost
+        assert cost < 1e-20
+        assert float(x_star[0]) == pytest.approx(3.0, rel=0.0, abs=10 ** (-(10)))
+        assert float(x_var.x[0]) == pytest.approx(3.0, rel=0.0, abs=10 ** (-(10)))
         report = format_solve_report(runtime, x0=x0, x_star=x_star)
-        self.assertIn("x_minus_3", report)
-        self.assertIn("Variables:", report)
-        self.assertIn("x0=", report)
+        assert "x_minus_3" in report
+        assert "Variables:" in report
+        assert "x0=" in report
 
     def test_solve_runtime_dispatches_gauss_newton(self) -> None:
         x_var = Variable(name="x", x=np.array([0.0], dtype=float))
@@ -103,10 +102,10 @@ class TestEiOptBasic(unittest.TestCase):
             tol_r=1e-14,
             tol_dx=1e-14,
         )
-        self.assertTrue(converged)
-        self.assertGreaterEqual(cost0, cost)
-        self.assertLess(cost, 1e-20)
-        self.assertAlmostEqual(float(x_star[0]), 2.5, places=10)
+        assert converged
+        assert cost0 >= cost
+        assert cost < 1e-20
+        assert float(x_star[0]) == pytest.approx(2.5, rel=0.0, abs=10 ** (-(10)))
 
     def test_solve_runtime_raises_for_unknown_solver(self) -> None:
         x_var = Variable(name="x", x=np.array([0.0], dtype=float))
@@ -122,7 +121,7 @@ class TestEiOptBasic(unittest.TestCase):
         problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        with self.assertRaisesRegex(ValueError, "Unknown solver"):
+        with pytest.raises(ValueError, match="Unknown solver"):
             _ = solve(runtime, solver="unknown_solver")
 
     def test_runtime_set_cost_weight_updates_specific_term_and_invalidates_cache(self) -> None:
@@ -142,13 +141,13 @@ class TestEiOptBasic(unittest.TestCase):
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r0, _J0 = runtime.linearize()
-        self.assertTrue(np.allclose(r0, np.array([2.0, 4.0], dtype=float)))
+        assert np.allclose(r0, np.array([2.0, 4.0], dtype=float))
 
         idx = runtime.set_cost_weight("tune_term", 9.0)
-        self.assertEqual(idx, 1)
+        assert idx == 1
 
         r1, _J1 = runtime.linearize()
-        self.assertTrue(np.allclose(r1, np.array([2.0, 6.0], dtype=float)))
+        assert np.allclose(r1, np.array([2.0, 6.0], dtype=float))
 
     def test_runtime_set_cost_weight_rejects_ambiguous_term_name(self) -> None:
         dsl = {
@@ -166,7 +165,7 @@ class TestEiOptBasic(unittest.TestCase):
         }
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "multiple terms matched"):
+        with pytest.raises(ValueError, match="multiple terms matched"):
             runtime.set_cost_weight("dup", 3.0)
 
     def test_runtime_set_cost_weight_rejects_unweighted_cost(self) -> None:
@@ -181,7 +180,7 @@ class TestEiOptBasic(unittest.TestCase):
         }
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(TypeError, "does not support runtime weight updates"):
+        with pytest.raises(TypeError, match="does not support runtime weight updates"):
             runtime.set_cost_weight("plain", 3.0)
 
     def test_runtime_collects_term_attrs_and_finds_indices(self) -> None:
@@ -206,11 +205,11 @@ class TestEiOptBasic(unittest.TestCase):
         }
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        self.assertEqual(runtime.find_term_indices(attr="is_constraint", value=True), [0])
-        self.assertEqual(runtime.find_term_indices(attr="group", value="constraint"), [1])
-        self.assertEqual(runtime.term_attrs("constraint_term").get("is_constraint"), True)
-        self.assertEqual(runtime.term_attrs("grouped_constraint_term").get("phase"), "path")
-        self.assertEqual(runtime.term_attrs("plain_term"), {})
+        assert runtime.find_term_indices(attr="is_constraint", value=True) == [0]
+        assert runtime.find_term_indices(attr="group", value="constraint") == [1]
+        assert runtime.term_attrs("constraint_term").get("is_constraint") == True
+        assert runtime.term_attrs("grouped_constraint_term").get("phase") == "path"
+        assert runtime.term_attrs("plain_term") == {}
 
     def test_runtime_set_cost_weight_by_attr_updates_all_matches(self) -> None:
         dsl = {
@@ -236,13 +235,13 @@ class TestEiOptBasic(unittest.TestCase):
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r0, _J0 = runtime.linearize()
-        self.assertTrue(np.allclose(r0, np.array([2.0, 4.0, 2.0], dtype=float)))
+        assert np.allclose(r0, np.array([2.0, 4.0, 2.0], dtype=float))
 
         idxs = runtime.set_cost_weight_by_attr(attr="group", value="constraint", w=9.0)
-        self.assertEqual(idxs, [0, 1])
+        assert idxs == [0, 1]
 
         r1, _J1 = runtime.linearize()
-        self.assertTrue(np.allclose(r1, np.array([6.0, 6.0, 2.0], dtype=float)))
+        assert np.allclose(r1, np.array([6.0, 6.0, 2.0], dtype=float))
 
     def test_runtime_set_cost_weight_by_attr_rejects_no_match(self) -> None:
         dsl = {
@@ -257,7 +256,7 @@ class TestEiOptBasic(unittest.TestCase):
         }
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "no term matched"):
+        with pytest.raises(ValueError, match="no term matched"):
             runtime.set_cost_weight_by_attr(attr="group", value="constraint", w=3.0)
 
     def test_runtime_constraint_kind_helpers(self) -> None:
@@ -282,11 +281,11 @@ class TestEiOptBasic(unittest.TestCase):
         }
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        self.assertEqual(runtime.find_constraint_term_indices(), [0, 1])
-        self.assertEqual(runtime.find_constraint_term_indices(kind="eq"), [0])
-        self.assertEqual(runtime.find_constraint_term_indices(kind="ineq"), [1])
-        self.assertEqual(runtime.term_attrs("eq_term").get("constraint_kind"), "eq")
-        self.assertEqual(runtime.term_attrs("ineq_term").get("constraint_kind"), "ineq")
+        assert runtime.find_constraint_term_indices() == [0, 1]
+        assert runtime.find_constraint_term_indices(kind="eq") == [0]
+        assert runtime.find_constraint_term_indices(kind="ineq") == [1]
+        assert runtime.term_attrs("eq_term").get("constraint_kind") == "eq"
+        assert runtime.term_attrs("ineq_term").get("constraint_kind") == "ineq"
 
     def test_runtime_set_cost_weight_by_constraint(self) -> None:
         dsl = {
@@ -307,10 +306,10 @@ class TestEiOptBasic(unittest.TestCase):
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         idxs = runtime.set_cost_weight_by_constraint(kind="ineq", w=9.0)
-        self.assertEqual(idxs, [1])
+        assert idxs == [1]
 
         r1, _J1 = runtime.linearize()
-        self.assertTrue(np.allclose(r1, np.array([2.0, 6.0], dtype=float)))
+        assert np.allclose(r1, np.array([2.0, 6.0], dtype=float))
 
     def test_runtime_linearize_terms_weighted_and_unweighted(self) -> None:
         dsl = {
@@ -333,32 +332,32 @@ class TestEiOptBasic(unittest.TestCase):
         terms_raw = runtime.linearize_terms(weighted=False)
         terms_w = runtime.linearize_terms(weighted=True)
 
-        self.assertEqual([t.term_index for t in terms_raw], [0, 1])
-        self.assertEqual([t.name for t in terms_raw], ["term_a", "term_b"])
-        self.assertEqual(terms_raw[1].attrs.get("group"), "constraint")
+        assert [t.term_index for t in terms_raw] == [0, 1]
+        assert [t.name for t in terms_raw] == ["term_a", "term_b"]
+        assert terms_raw[1].attrs.get("group") == "constraint"
 
-        self.assertTrue(np.allclose(terms_raw[0].residual, np.array([2.0], dtype=float)))
-        self.assertTrue(np.allclose(terms_raw[1].residual, np.array([2.0], dtype=float)))
-        self.assertTrue(np.allclose(terms_raw[0].jacobian, np.array([[1.0]], dtype=float)))
-        self.assertTrue(np.allclose(terms_raw[1].jacobian, np.array([[1.0]], dtype=float)))
+        assert np.allclose(terms_raw[0].residual, np.array([2.0], dtype=float))
+        assert np.allclose(terms_raw[1].residual, np.array([2.0], dtype=float))
+        assert np.allclose(terms_raw[0].jacobian, np.array([[1.0]], dtype=float))
+        assert np.allclose(terms_raw[1].jacobian, np.array([[1.0]], dtype=float))
 
-        self.assertTrue(np.allclose(terms_w[0].residual, np.array([2.0], dtype=float)))
-        self.assertTrue(np.allclose(terms_w[1].residual, np.array([6.0], dtype=float)))
-        self.assertTrue(np.allclose(terms_w[0].jacobian, np.array([[1.0]], dtype=float)))
-        self.assertTrue(np.allclose(terms_w[1].jacobian, np.array([[3.0]], dtype=float)))
+        assert np.allclose(terms_w[0].residual, np.array([2.0], dtype=float))
+        assert np.allclose(terms_w[1].residual, np.array([6.0], dtype=float))
+        assert np.allclose(terms_w[0].jacobian, np.array([[1.0]], dtype=float))
+        assert np.allclose(terms_w[1].jacobian, np.array([[3.0]], dtype=float))
 
         r_stack, J_stack = runtime.linearize_stacked_terms(weighted=True)
-        self.assertTrue(np.allclose(r_stack, np.array([2.0, 6.0], dtype=float)))
-        self.assertTrue(np.allclose(J_stack, np.array([[1.0], [3.0]], dtype=float)))
+        assert np.allclose(r_stack, np.array([2.0, 6.0], dtype=float))
+        assert np.allclose(J_stack, np.array([[1.0], [3.0]], dtype=float))
 
         r_sel, J_sel = runtime.linearize_stacked_terms(weighted=False, term_indices=[1])
-        self.assertTrue(np.allclose(r_sel, np.array([2.0], dtype=float)))
-        self.assertTrue(np.allclose(J_sel, np.array([[1.0]], dtype=float)))
+        assert np.allclose(r_sel, np.array([2.0], dtype=float))
+        assert np.allclose(J_sel, np.array([[1.0]], dtype=float))
 
         r_layout, J_layout, layout = runtime.linearize_stacked_terms_with_layout(weighted=False)
-        self.assertTrue(np.allclose(r_layout, np.array([2.0, 2.0], dtype=float)))
-        self.assertTrue(np.allclose(J_layout, np.array([[1.0], [1.0]], dtype=float)))
-        self.assertEqual([(s.term_index, s.row_start, s.row_stop) for s in layout], [(0, 0, 1), (1, 1, 2)])
+        assert np.allclose(r_layout, np.array([2.0, 2.0], dtype=float))
+        assert np.allclose(J_layout, np.array([[1.0], [1.0]], dtype=float))
+        assert [(s.term_index, s.row_start, s.row_stop) for s in layout] == [(0, 0, 1), (1, 1, 2)]
 
     def test_runtime_linearize_constraint_terms(self) -> None:
         dsl = {
@@ -384,10 +383,10 @@ class TestEiOptBasic(unittest.TestCase):
 
         eq_terms = runtime.linearize_constraint_terms(kind="eq", weighted=False)
         ineq_terms = runtime.linearize_constraint_terms(kind="ineq", weighted=False)
-        self.assertEqual([t.name for t in eq_terms], ["eq_term"])
-        self.assertEqual([t.name for t in ineq_terms], ["ineq_term"])
-        self.assertTrue(np.allclose(eq_terms[0].residual, np.array([2.0], dtype=float)))
-        self.assertTrue(np.allclose(ineq_terms[0].residual, np.array([2.0], dtype=float)))
+        assert [t.name for t in eq_terms] == ["eq_term"]
+        assert [t.name for t in ineq_terms] == ["ineq_term"]
+        assert np.allclose(eq_terms[0].residual, np.array([2.0], dtype=float))
+        assert np.allclose(ineq_terms[0].residual, np.array([2.0], dtype=float))
 
     def test_build_nullspace_equality_reduction_and_solve(self) -> None:
         dsl = {
@@ -433,17 +432,17 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=build_state)
         reduction = build_nullspace_equality_reduction(runtime)
 
-        self.assertEqual(reduction.eq_term_indices, (0,))
-        self.assertEqual(reduction.objective_term_indices, (1,))
-        self.assertEqual(reduction.runtime.pack.n_total, 1)
+        assert reduction.eq_term_indices == (0,)
+        assert reduction.objective_term_indices == (1,)
+        assert reduction.runtime.pack.n_total == 1
         selected = reduction.runtime.linearize_terms(weighted=False, term_indices=[1])
-        self.assertEqual([t.term_index for t in selected], [1])
-        with self.assertRaisesRegex(ValueError, "global problem indexing"):
+        assert [t.term_index for t in selected] == [1]
+        with pytest.raises(ValueError, match="global problem indexing"):
             reduction.runtime.linearize_terms(weighted=False, term_indices=[0])
 
         z0 = reduction.runtime.pack.get().copy()
         x0 = reduction.lift(z0)
-        self.assertAlmostEqual(float(np.sum(x0)), 1.0, places=10)
+        assert float(np.sum(x0)) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(10)))
 
         z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
             reduction.runtime,
@@ -452,15 +451,15 @@ class TestEiOptBasic(unittest.TestCase):
             tol_r=1e-12,
             tol_dx=1e-12,
         )
-        self.assertTrue(converged)
+        assert converged
 
         x_star = reduction.lift(z_star)
-        self.assertTrue(np.allclose(x_star, np.array([0.5, 0.5], dtype=float), atol=1e-8))
-        self.assertTrue(np.allclose(runtime.pack.get(), x_star, atol=1e-12))
+        assert np.allclose(x_star, np.array([0.5, 0.5], dtype=float), atol=1e-8)
+        assert np.allclose(runtime.pack.get(), x_star, atol=1e-12)
 
         eq_terms = runtime.linearize_constraint_terms(kind="eq", weighted=False)
         r_eq = np.concatenate([t.residual for t in eq_terms], axis=0)
-        self.assertLess(float(np.linalg.norm(r_eq)), 1e-10)
+        assert float(np.linalg.norm(r_eq)) < 1e-10
 
     def test_nullspace_runtime_linearize_matches_linearize_terms_stacking(self) -> None:
         dsl = {
@@ -512,8 +511,8 @@ class TestEiOptBasic(unittest.TestCase):
         r_terms = np.concatenate([np.asarray(t.residual, dtype=float).reshape(-1) for t in terms], axis=0)
         J_terms = np.vstack([np.asarray(t.jacobian, dtype=float) for t in terms])
 
-        self.assertTrue(np.allclose(r_fast, r_terms, atol=1e-12))
-        self.assertTrue(np.allclose(J_fast, J_terms, atol=1e-12))
+        assert np.allclose(r_fast, r_terms, atol=1e-12)
+        assert np.allclose(J_fast, J_terms, atol=1e-12)
 
     def test_build_nullspace_equality_reduction_rejects_nonlinear_eq_by_default(self) -> None:
         x_var = Variable(name="x", x=np.array([1.0], dtype=float))
@@ -543,7 +542,7 @@ class TestEiOptBasic(unittest.TestCase):
         )
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        with self.assertRaisesRegex(ValueError, "linearity check failed"):
+        with pytest.raises(ValueError, match="linearity check failed"):
             _ = build_nullspace_equality_reduction(
                 runtime,
                 linearity_samples=2,
@@ -554,7 +553,7 @@ class TestEiOptBasic(unittest.TestCase):
             runtime,
             check_linearity=False,
         )
-        self.assertEqual(reduction.eq_term_indices, (0,))
+        assert reduction.eq_term_indices == (0,)
 
     def test_build_nullspace_equality_reduction_rejects_non_eq_term_indices(self) -> None:
         dsl = {
@@ -572,7 +571,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "constraint.kind='eq'"):
+        with pytest.raises(ValueError, match="constraint.kind='eq'"):
             _ = build_nullspace_equality_reduction(runtime, eq_term_indices=[1])
 
     def test_build_nullspace_equality_reduction_manual_switch(self) -> None:
@@ -620,14 +619,14 @@ class TestEiOptBasic(unittest.TestCase):
         use_nullspace = False
         reduction_none = build_nullspace_equality_reduction(runtime) if use_nullspace else None
         runtime_for_solve = runtime if reduction_none is None else reduction_none.runtime
-        self.assertIs(runtime_for_solve, runtime)
+        assert runtime_for_solve is runtime
 
         reduction = build_nullspace_equality_reduction(runtime)
-        self.assertIsNotNone(reduction)
         assert reduction is not None
-        self.assertEqual(reduction.runtime.pack.n_total, 1)
+        assert reduction is not None
+        assert reduction.runtime.pack.n_total == 1
 
-        with self.assertRaisesRegex(TypeError, "enabled"):
+        with pytest.raises(TypeError, match="enabled"):
             _ = build_nullspace_equality_reduction(
                 runtime,
                 enabled=False,  # type: ignore[call-arg]
@@ -665,9 +664,9 @@ class TestEiOptBasic(unittest.TestCase):
             ks=[0, 1, 2],
             expected_dim=2,
         )
-        self.assertEqual(traj.shape, (3, 2))
-        self.assertTrue(np.allclose(traj[0], np.array([0.0, 10.0], dtype=float)))
-        self.assertTrue(np.allclose(traj[2], np.array([2.0, 12.0], dtype=float)))
+        assert traj.shape == (3, 2)
+        assert np.allclose(traj[0], np.array([0.0, 10.0], dtype=float))
+        assert np.allclose(traj[2], np.array([2.0, 12.0], dtype=float))
 
     def test_runtime_collect_state_traj_uses_canonical_field(self) -> None:
         dsl = {
@@ -699,8 +698,8 @@ class TestEiOptBasic(unittest.TestCase):
             ks=[0, 1, 2],
             expected_dim=1,
         )
-        self.assertEqual(traj.shape, (3, 1))
-        self.assertTrue(np.allclose(traj[:, 0], np.array([0.0, 1.0, 2.0], dtype=float)))
+        assert traj.shape == (3, 1)
+        assert np.allclose(traj[:, 0], np.array([0.0, 1.0, 2.0], dtype=float))
 
     def test_runtime_collect_state_traj_rejects_tau_alias(self) -> None:
         dsl = {
@@ -713,7 +712,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
+        with pytest.raises(ValueError, match="unsupported field alias"):
             _ = runtime.collect_state_traj(
                 owner_type="total_joint",
                 owner_name="robot",
@@ -733,7 +732,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "unsupported dtype alias"):
+        with pytest.raises(ValueError, match="unsupported dtype alias"):
             _ = runtime.collect_state_traj(
                 owner_type="total_joint",
                 owner_name="robot",
@@ -753,7 +752,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(KeyError, "missing required keys"):
+        with pytest.raises(KeyError, match="missing required keys"):
             _ = runtime.collect_state_traj(
                 owner_type="demo",
                 owner_name="thing",
@@ -789,9 +788,9 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         A, term_indices = build_term_gradient_matrix(runtime, weighted=False)
-        self.assertEqual(A.shape, (1, 2))
-        self.assertEqual(term_indices, [0, 1])
-        self.assertTrue(np.allclose(A, np.array([[-1.0, 1.0]], dtype=float)))
+        assert A.shape == (1, 2)
+        assert term_indices == [0, 1]
+        assert np.allclose(A, np.array([[-1.0, 1.0]], dtype=float))
 
         r_stack, J_stack, layout = runtime.linearize_stacked_terms_with_layout(weighted=False)
         A_from_stacked, idx_from_stacked = build_term_gradient_matrix_from_stacked(
@@ -800,14 +799,14 @@ class TestEiOptBasic(unittest.TestCase):
             layout,
             n_total=int(runtime.pack.n_total),
         )
-        self.assertTrue(np.allclose(A_from_stacked, A))
-        self.assertEqual(idx_from_stacked, term_indices)
+        assert np.allclose(A_from_stacked, A)
+        assert idx_from_stacked == term_indices
 
         w, info = estimate_weights_simplex(A, return_info=True)
-        self.assertTrue(np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6))
-        self.assertAlmostEqual(float(np.sum(w)), 1.0, places=8)
-        self.assertTrue(bool(info["converged"]))
-        self.assertLess(float(info["objective"]), 1e-12)
+        assert np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6)
+        assert float(np.sum(w)) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(8)))
+        assert bool(info["converged"])
+        assert float(info["objective"]) < 1e-12
 
     def test_prepare_ioc_weights_basic(self) -> None:
         dsl = {
@@ -836,19 +835,19 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
-        self.assertEqual(out.active_mode, "residual")
-        self.assertEqual(tuple(out.term_indices), (0, 1))
-        self.assertTrue(np.allclose(out.gradient_matrix, np.array([[-1.0, 1.0]], dtype=float)))
-        self.assertEqual(tuple(out.active_objective_indices), (0, 1))
-        self.assertEqual(tuple(out.active_gradient_objective_indices), (0, 1))
-        self.assertEqual(tuple(out.active_residual_objective_indices), (0, 1))
-        self.assertTrue(np.allclose(out.estimated_weights, np.array([0.5, 0.5], dtype=float), atol=1e-6))
-        self.assertIsNone(out.doc_weights_normalized)
-        self.assertIsNotNone(out.solve_info)
+        assert out.active_mode == "residual"
+        assert tuple(out.term_indices) == (0, 1)
+        assert np.allclose(out.gradient_matrix, np.array([[-1.0, 1.0]], dtype=float))
+        assert tuple(out.active_objective_indices) == (0, 1)
+        assert tuple(out.active_gradient_objective_indices) == (0, 1)
+        assert tuple(out.active_residual_objective_indices) == (0, 1)
+        assert np.allclose(out.estimated_weights, np.array([0.5, 0.5], dtype=float), atol=1e-6)
+        assert out.doc_weights_normalized is None
+        assert out.solve_info is not None
 
         report = format_ioc_report(out)
-        self.assertIn("A shape=", report)
-        self.assertIn("estimated weights:", report)
+        assert "A shape=" in report
+        assert "estimated weights:" in report
 
     def test_prepare_ioc_weights_respects_constraints_and_doc_weights(self) -> None:
         dsl = {
@@ -882,18 +881,16 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
-        self.assertEqual(out.active_mode, "residual")
-        self.assertEqual(tuple(out.active_objective_indices), (1, 2))
-        self.assertEqual(tuple(out.active_gradient_objective_indices), (1, 2))
-        self.assertEqual(tuple(out.active_residual_objective_indices), (1, 2))
-        self.assertTrue(np.allclose(out.estimated_weights, np.array([0.0, 0.0, 1.0], dtype=float)))
-        self.assertIsNotNone(out.doc_weights_normalized)
-        self.assertTrue(
-            np.allclose(out.doc_weights_normalized, np.array([0.0, 0.2, 0.8], dtype=float))
-        )
+        assert out.active_mode == "residual"
+        assert tuple(out.active_objective_indices) == (1, 2)
+        assert tuple(out.active_gradient_objective_indices) == (1, 2)
+        assert tuple(out.active_residual_objective_indices) == (1, 2)
+        assert np.allclose(out.estimated_weights, np.array([0.0, 0.0, 1.0], dtype=float))
+        assert out.doc_weights_normalized is not None
+        assert np.allclose(out.doc_weights_normalized, np.array([0.0, 0.2, 0.8], dtype=float))
 
         report = format_ioc_report(out, include_term_details=True)
-        self.assertIn("term[1] x_to_1", report)
+        assert "term[1] x_to_1" in report
 
     def test_prepare_ioc_weights_reports_residual_vs_gradient_activity(self) -> None:
         dsl = {
@@ -917,22 +914,20 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
         out = prepare_ioc_weights(runtime, x_opt=runtime.pack.get().copy())
-        self.assertEqual(out.active_mode, "residual")
-        self.assertEqual(tuple(out.active_objective_indices), (0, 1))
-        self.assertEqual(tuple(out.active_gradient_objective_indices), (1,))
-        self.assertEqual(tuple(out.active_residual_objective_indices), (0, 1))
-        self.assertTrue(np.allclose(out.doc_weights_normalized, np.array([0.75, 0.25], dtype=float)))
-        self.assertIsNotNone(out.doc_weights_normalized_residual_active)
-        self.assertTrue(
-            np.allclose(
+        assert out.active_mode == "residual"
+        assert tuple(out.active_objective_indices) == (0, 1)
+        assert tuple(out.active_gradient_objective_indices) == (1,)
+        assert tuple(out.active_residual_objective_indices) == (0, 1)
+        assert np.allclose(out.doc_weights_normalized, np.array([0.75, 0.25], dtype=float))
+        assert out.doc_weights_normalized_residual_active is not None
+        assert np.allclose(
                 out.doc_weights_normalized_residual_active,
                 np.array([0.75, 0.25], dtype=float),
             )
-        )
 
         report = format_ioc_report(out, include_term_details=True)
-        self.assertIn("note: residual-active terms can differ", report)
-        self.assertIn("||r_w||=", report)
+        assert "note: residual-active terms can differ" in report
+        assert "||r_w||=" in report
 
     def test_ioc_matrix_reduced_runtime_matches_from_terms(self) -> None:
         dsl = {
@@ -984,8 +979,8 @@ class TestEiOptBasic(unittest.TestCase):
             terms,
             n_total=int(reduced.pack.n_total),
         )
-        self.assertEqual(idx_fast, idx_ref)
-        self.assertTrue(np.allclose(A_fast, A_ref))
+        assert idx_fast == idx_ref
+        assert np.allclose(A_fast, A_ref)
 
     def test_format_solve_report_includes_diagnostics(self) -> None:
         dsl = {
@@ -999,11 +994,11 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         report = format_solve_report(runtime)
-        self.assertIn("Diagnostics:", report)
-        self.assertIn("||J^T r||", report)
-        self.assertIn("rank(J)", report)
-        self.assertIn("svd(J)", report)
-        self.assertIn("active terms", report)
+        assert "Diagnostics:" in report
+        assert "||J^T r||" in report
+        assert "rank(J)" in report
+        assert "svd(J)" in report
+        assert "active terms" in report
 
     def test_format_solve_report_includes_kkt(self) -> None:
         dsl = {
@@ -1034,14 +1029,14 @@ class TestEiOptBasic(unittest.TestCase):
                 "dynamics_fields": ("torque",),
             },
         )
-        self.assertIn("KKT:", report)
-        self.assertIn("stationarity_inf=", report)
-        self.assertIn("Solve:", report)
-        self.assertIn("converged=True", report)
-        self.assertIn("Trajectory:", report)
-        self.assertIn("steps=11", report)
+        assert "KKT:" in report
+        assert "stationarity_inf=" in report
+        assert "Solve:" in report
+        assert "converged=True" in report
+        assert "Trajectory:" in report
+        assert "steps=11" in report
 
-        with self.assertRaisesRegex(ValueError, "pass `required`"):
+        with pytest.raises(ValueError, match="pass `required`"):
             _ = format_solve_report(runtime, include_kkt=True, kkt_kwargs={"required": []})
 
     def test_constraint_kind_validation(self) -> None:
@@ -1055,7 +1050,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "must be 'eq' or 'ineq'"):
+        with pytest.raises(ValueError, match="must be 'eq' or 'ineq'"):
             _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_expr_reads_cache(self) -> None:
@@ -1088,9 +1083,9 @@ class TestEiOptBasic(unittest.TestCase):
         ctx = RuntimeContext(pack=pack, state=cache, time=time)
 
         y, blocks = expr.eval(ctx)
-        self.assertTrue(np.allclose(y, np.array([1.0, 2.0])))
-        self.assertEqual(len(blocks), 1)
-        self.assertTrue(np.allclose(blocks[0], np.eye(2)))
+        assert np.allclose(y, np.array([1.0, 2.0]))
+        assert len(blocks) == 1
+        assert np.allclose(blocks[0], np.eye(2))
 
     def test_get_state_builder_autofills_jac_field(self) -> None:
         dsl = {
@@ -1118,10 +1113,10 @@ class TestEiOptBasic(unittest.TestCase):
 
         runtime = compile_nls_problem(dsl, build_state=build_state)
         fields = {k.field for k in runtime.required}
-        self.assertIn("pos", fields)
-        self.assertIn(jac_field("pos", var="q"), fields)
+        assert "pos" in fields
+        assert jac_field("pos", var="q") in fields
         frames = {k.frame for k in runtime.required}
-        self.assertEqual(frames, {"world"})
+        assert frames == {"world"}
 
     def test_get_state_expr_multiple_jac_blocks(self) -> None:
         p_var = Variable(name="p", x=np.array([0.1, 0.2], dtype=float))
@@ -1156,10 +1151,10 @@ class TestEiOptBasic(unittest.TestCase):
         )
         y, blocks = expr.eval(RuntimeContext(pack=pack, state=cache, time=time))
 
-        self.assertTrue(np.allclose(y, np.array([2.0, -1.0], dtype=float)))
-        self.assertEqual(len(blocks), 2)
-        self.assertTrue(np.allclose(blocks[0], np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float)))
-        self.assertTrue(np.allclose(blocks[1], np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 1.0]], dtype=float)))
+        assert np.allclose(y, np.array([2.0, -1.0], dtype=float))
+        assert len(blocks) == 2
+        assert np.allclose(blocks[0], np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float))
+        assert np.allclose(blocks[1], np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 1.0]], dtype=float))
 
     def test_get_state_builder_supports_jacs_list(self) -> None:
         dsl = {
@@ -1190,9 +1185,9 @@ class TestEiOptBasic(unittest.TestCase):
 
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         fields = {k.field for k in runtime.required}
-        self.assertIn("pos", fields)
-        self.assertIn(jac_field("pos", var="p"), fields)
-        self.assertIn(jac_field("pos", var="q"), fields)
+        assert "pos" in fields
+        assert jac_field("pos", var="p") in fields
+        assert jac_field("pos", var="q") in fields
 
     def test_get_state_builder_requires_explicit_jac_var_when_multiple_vars(self) -> None:
         dsl = {
@@ -1216,7 +1211,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "Multiple variables exist"):
+        with pytest.raises(ValueError, match="Multiple variables exist"):
             _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_rejects_tau_alias(self) -> None:
@@ -1239,7 +1234,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
+        with pytest.raises(ValueError, match="unsupported field alias"):
             _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_uses_torque_d1_field(self) -> None:
@@ -1264,8 +1259,8 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         fields = {k.field for k in runtime.required}
-        self.assertIn("torque_d1", fields)
-        self.assertIn("torque_d1_J_q", fields)
+        assert "torque_d1" in fields
+        assert "torque_d1_J_q" in fields
 
     def test_get_state_builder_rejects_joint_dtype_alias(self) -> None:
         dsl = {
@@ -1287,7 +1282,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "unsupported dtype alias"):
+        with pytest.raises(ValueError, match="unsupported dtype alias"):
             _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_get_state_builder_rejects_dtau_alias(self) -> None:
@@ -1310,17 +1305,17 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "unsupported field alias"):
+        with pytest.raises(ValueError, match="unsupported field alias"):
             _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_state_schema_dynamics_field_aliases(self) -> None:
-        self.assertIn("torque", DYNAMICS_FIELDS)
-        self.assertIn("torque_d1", DYNAMICS_FIELDS)
-        self.assertEqual(canonical_field_name("torque"), "torque")
-        self.assertEqual(canonical_field_name("momentum"), "momentum")
-        self.assertEqual(canonical_field_name("force"), "force")
-        self.assertEqual(canonical_field_name("torque_d1"), "torque_d1")
-        self.assertEqual(canonical_field_name("torque_d2"), "torque_d2")
+        assert "torque" in DYNAMICS_FIELDS
+        assert "torque_d1" in DYNAMICS_FIELDS
+        assert canonical_field_name("torque") == "torque"
+        assert canonical_field_name("momentum") == "momentum"
+        assert canonical_field_name("force") == "force"
+        assert canonical_field_name("torque_d1") == "torque_d1"
+        assert canonical_field_name("torque_d2") == "torque_d2"
         for legacy in (
             "tau",
             "h",
@@ -1333,11 +1328,11 @@ class TestEiOptBasic(unittest.TestCase):
             "dtau2",
             "tau_diff2",
         ):
-            with self.assertRaisesRegex(ValueError, "unsupported field alias"):
+            with pytest.raises(ValueError, match="unsupported field alias"):
                 _ = canonical_field_name(legacy)
-        self.assertEqual(canonical_field_name("torque_d1_J_p"), "torque_d1_J_p")
+                assert canonical_field_name("torque_d1_J_p") == "torque_d1_J_p"
         for legacy_jac in ("dtau_J_p", "tau_diff_J_p", "torque_diff2_J_p"):
-            with self.assertRaisesRegex(ValueError, "unsupported field alias"):
+            with pytest.raises(ValueError, match="unsupported field alias"):
                 _ = canonical_field_name(legacy_jac)
 
     def test_stack_get_state_uses_torque_d1_field(self) -> None:
@@ -1367,8 +1362,8 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         torque_d1_keys = [k for k in runtime.required if k.field == "torque_d1"]
         torque_d1_jac_keys = [k for k in runtime.required if k.field == "torque_d1_J_p"]
-        self.assertEqual({k.k for k in torque_d1_keys}, {0, 1})
-        self.assertEqual({k.k for k in torque_d1_jac_keys}, {0, 1})
+        assert {k.k for k in torque_d1_keys} == {0, 1}
+        assert {k.k for k in torque_d1_jac_keys} == {0, 1}
 
     def test_stack_get_state_supports_last_range(self) -> None:
         dsl = {
@@ -1397,8 +1392,8 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         torque_d1_keys = [k for k in runtime.required if k.field == "torque_d1"]
         torque_d1_jac_keys = [k for k in runtime.required if k.field == "torque_d1_J_p"]
-        self.assertEqual({k.k for k in torque_d1_keys}, {0, 1, 2})
-        self.assertEqual({k.k for k in torque_d1_jac_keys}, {0, 1, 2})
+        assert {k.k for k in torque_d1_keys} == {0, 1, 2}
+        assert {k.k for k in torque_d1_jac_keys} == {0, 1, 2}
 
     def test_get_state_builder_supports_last_index(self) -> None:
         dsl = {
@@ -1424,8 +1419,8 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         torque_keys = [k for k in runtime.required if k.field == "torque"]
         torque_jac_keys = [k for k in runtime.required if k.field == "torque_J_q"]
-        self.assertEqual({k.k for k in torque_keys}, {2})
-        self.assertEqual({k.k for k in torque_jac_keys}, {2})
+        assert {k.k for k in torque_keys} == {2}
+        assert {k.k for k in torque_jac_keys} == {2}
 
     def test_get_var_expr_reads_pack(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0], dtype=float))
@@ -1436,9 +1431,9 @@ class TestEiOptBasic(unittest.TestCase):
         ctx = RuntimeContext(pack=pack, state=None, time=time)
 
         q, blocks = expr.eval(ctx)
-        self.assertTrue(np.allclose(q, np.array([1.0, 2.0], dtype=float)))
-        self.assertEqual(len(blocks), 1)
-        self.assertTrue(np.allclose(blocks[0], np.eye(2, dtype=float)))
+        assert np.allclose(q, np.array([1.0, 2.0], dtype=float))
+        assert len(blocks) == 1
+        assert np.allclose(blocks[0], np.eye(2, dtype=float))
 
     def test_get_var_expr_slices_time_chunked(self) -> None:
         q_var = Variable(name="q", x=np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], dtype=float))
@@ -1451,11 +1446,11 @@ class TestEiOptBasic(unittest.TestCase):
         q1, blocks = expr.eval(ctx)
         J1 = np.asarray(blocks[0], dtype=float)
 
-        self.assertTrue(np.allclose(q1, np.array([3.0, 4.0], dtype=float)))
+        assert np.allclose(q1, np.array([3.0, 4.0], dtype=float))
 
         expected_J = np.zeros((2, 6), dtype=float)
         expected_J[:, 2:4] = np.eye(2, dtype=float)
-        self.assertTrue(np.allclose(J1, expected_J))
+        assert np.allclose(J1, expected_J)
 
     def test_get_var_expr_supports_last_index(self) -> None:
         dsl = {
@@ -1470,10 +1465,10 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([5.0, 6.0], dtype=float)))
+        assert np.allclose(r, np.array([5.0, 6.0], dtype=float))
         expected_J = np.zeros((2, 6), dtype=float)
         expected_J[:, 4:6] = np.eye(2, dtype=float)
-        self.assertTrue(np.allclose(J, expected_J))
+        assert np.allclose(J, expected_J)
 
     def test_get_named_expr_value_single(self) -> None:
         dsl = {
@@ -1492,7 +1487,7 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         x_now = get_named_expr_value(runtime, name="x_now")
-        self.assertTrue(np.allclose(x_now, np.array([1.5, -2.0], dtype=float)))
+        assert np.allclose(x_now, np.array([1.5, -2.0], dtype=float))
 
     def test_get_named_expr_value_raises_on_ambiguous_match(self) -> None:
         dsl = {
@@ -1511,7 +1506,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
-        with self.assertRaisesRegex(ValueError, "multiple named Expr values matched"):
+        with pytest.raises(ValueError, match="multiple named Expr values matched"):
             _ = get_named_expr_value(runtime, name="x_k")
 
     def test_get_traj_var_expr_bspline_inferrs_q_dim_from_var(self) -> None:
@@ -1543,8 +1538,8 @@ class TestEiOptBasic(unittest.TestCase):
             default_q_dim=2,
         )
         p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
-        self.assertTrue(np.allclose(r, traj.A @ p + traj.b))
-        self.assertTrue(np.allclose(J, traj.A))
+        assert np.allclose(r, traj.A @ p + traj.b)
+        assert np.allclose(J, traj.A)
 
     def test_get_traj_var_regularization_term_against_previous_trajectory(self) -> None:
         prev_q = np.array(
@@ -1585,8 +1580,8 @@ class TestEiOptBasic(unittest.TestCase):
         )
         p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
         q = traj.A @ p + traj.b
-        self.assertTrue(np.allclose(r, 2.0 * (q - prev_q)))
-        self.assertTrue(np.allclose(J, 2.0 * traj.A))
+        assert np.allclose(r, 2.0 * (q - prev_q))
+        assert np.allclose(J, 2.0 * traj.A)
 
     def test_get_traj_var_expr_bspline_first_derivative_wrt_time(self) -> None:
         dsl = {
@@ -1627,11 +1622,11 @@ class TestEiOptBasic(unittest.TestCase):
             default_dt=0.2,
         )
         p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
-        self.assertTrue(np.allclose(r, traj_d1.A @ p + traj_d1.b))
-        self.assertTrue(np.allclose(J, traj_d1.A))
+        assert np.allclose(r, traj_d1.A @ p + traj_d1.b)
+        assert np.allclose(J, traj_d1.A)
 
         qdot = r.reshape(3, 2)
-        self.assertTrue(np.allclose(qdot, np.array([[5.0, 5.0], [5.0, 5.0], [5.0, 5.0]], dtype=float)))
+        assert np.allclose(qdot, np.array([[5.0, 5.0], [5.0, 5.0], [5.0, 5.0]], dtype=float))
 
     def test_get_traj_var_expr_bspline_derivatives_0_to_n(self) -> None:
         dsl = {
@@ -1675,10 +1670,10 @@ class TestEiOptBasic(unittest.TestCase):
         r_ref = np.concatenate([m.A @ p + m.b for m in maps], axis=0)
         J_ref = np.vstack([m.A for m in maps])
 
-        self.assertEqual(r.size, 12)
-        self.assertEqual(J.shape, (12, 4))
-        self.assertTrue(np.allclose(r, r_ref))
-        self.assertTrue(np.allclose(J, J_ref))
+        assert r.size == 12
+        assert J.shape == (12, 4)
+        assert np.allclose(r, r_ref)
+        assert np.allclose(J, J_ref)
 
     def test_get_traj_var_expr_bspline_derivatives_0_to_n_with_k_slice(self) -> None:
         dsl = {
@@ -1723,10 +1718,10 @@ class TestEiOptBasic(unittest.TestCase):
         r_ref = np.concatenate([m.q_at(p, 2) for m in maps], axis=0)
         J_ref = np.vstack([m.dqdp_at(2) for m in maps])
 
-        self.assertEqual(r.size, 6)
-        self.assertEqual(J.shape, (6, 8))
-        self.assertTrue(np.allclose(r, r_ref))
-        self.assertTrue(np.allclose(J, J_ref))
+        assert r.size == 6
+        assert J.shape == (6, 8)
+        assert np.allclose(r, r_ref)
+        assert np.allclose(J, J_ref)
 
     def test_bspline_basis_derivative_matrices_matches_single_order(self) -> None:
         degree = 4
@@ -1745,7 +1740,7 @@ class TestEiOptBasic(unittest.TestCase):
             num_ctrl_points=num_ctrl_points,
             max_derivative_order=max_order,
         )
-        self.assertEqual(mats.shape, (max_order + 1, u_vec.size, num_ctrl_points))
+        assert mats.shape == (max_order + 1, u_vec.size, num_ctrl_points)
 
         for order in range(max_order + 1):
             mat_single = bspline_basis_derivative_matrix(
@@ -1755,9 +1750,9 @@ class TestEiOptBasic(unittest.TestCase):
                 num_ctrl_points=num_ctrl_points,
                 derivative_order=order,
             )
-            self.assertTrue(np.allclose(mats[order, :, :], mat_single, atol=1e-10, rtol=1e-10))
+            assert np.allclose(mats[order, :, :], mat_single, atol=1e-10, rtol=1e-10)
 
-        self.assertTrue(np.allclose(mats[degree + 1 :, :, :], 0.0))
+            assert np.allclose(mats[degree + 1 :, :, :], 0.0)
 
     def test_trajectory_map_from_bspline_derivatives_matches_single_order(self) -> None:
         steps = 7
@@ -1775,7 +1770,7 @@ class TestEiOptBasic(unittest.TestCase):
             max_derivative_order=max_order,
             parameter_scale=parameter_scale,
         )
-        self.assertEqual(len(maps), max_order + 1)
+        assert len(maps) == max_order + 1
 
         p = np.arange(num_ctrl_points * q_dim, dtype=float) * 0.1
         for order in range(max_order + 1):
@@ -1787,10 +1782,10 @@ class TestEiOptBasic(unittest.TestCase):
                 derivative_order=order,
                 parameter_scale=parameter_scale,
             )
-            self.assertTrue(np.allclose(maps[order].A, map_single.A))
-            self.assertTrue(np.allclose(maps[order].b, map_single.b))
+            assert np.allclose(maps[order].A, map_single.A)
+            assert np.allclose(maps[order].b, map_single.b)
             for k in range(steps):
-                self.assertTrue(np.allclose(maps[order].q_at(p, k), map_single.q_at(p, k)))
+                assert np.allclose(maps[order].q_at(p, k), map_single.q_at(p, k))
 
     def test_build_trajectory_maps_with_derivatives_time_matches_single(self) -> None:
         traj_dsl = {
@@ -1807,7 +1802,7 @@ class TestEiOptBasic(unittest.TestCase):
             derivative_wrt="time",
             default_dt=0.2,
         )
-        self.assertEqual(len(maps), 5)
+        assert len(maps) == 5
 
         map_d2 = build_trajectory_map_with_derivative(
             traj_dsl,
@@ -1815,8 +1810,8 @@ class TestEiOptBasic(unittest.TestCase):
             derivative_wrt="time",
             default_dt=0.2,
         )
-        self.assertTrue(np.allclose(maps[2].A, map_d2.A))
-        self.assertTrue(np.allclose(maps[2].b, map_d2.b))
+        assert np.allclose(maps[2].A, map_d2.A)
+        assert np.allclose(maps[2].b, map_d2.b)
 
     def test_get_traj_var_expr_slices_by_k(self) -> None:
         dsl = {
@@ -1849,8 +1844,8 @@ class TestEiOptBasic(unittest.TestCase):
         )
         p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
 
-        self.assertTrue(np.allclose(r, traj.q_at(p, 1)))
-        self.assertTrue(np.allclose(J, traj.dqdp_at(1)))
+        assert np.allclose(r, traj.q_at(p, 1))
+        assert np.allclose(J, traj.dqdp_at(1))
 
     def test_get_traj_var_expr_slices_by_last(self) -> None:
         dsl = {
@@ -1883,8 +1878,8 @@ class TestEiOptBasic(unittest.TestCase):
         )
         p = np.array([1.0, 2.0, 3.0, 4.0], dtype=float)
 
-        self.assertTrue(np.allclose(r, traj.q_at(p, 2)))
-        self.assertTrue(np.allclose(J, traj.dqdp_at(2)))
+        assert np.allclose(r, traj.q_at(p, 2))
+        assert np.allclose(J, traj.dqdp_at(2))
 
     def test_time_diff_expr_on_traj_var(self) -> None:
         dsl = {
@@ -1931,8 +1926,8 @@ class TestEiOptBasic(unittest.TestCase):
         D[2:4, 4:6] = np.eye(2, dtype=float)
         J_ref = D @ traj.A
 
-        self.assertTrue(np.allclose(r, r_ref))
-        self.assertTrue(np.allclose(J, J_ref))
+        assert np.allclose(r, r_ref)
+        assert np.allclose(J, J_ref)
 
     def test_time_diff_expr_wrt_time_scales_by_dt(self) -> None:
         dsl = {
@@ -1966,8 +1961,8 @@ class TestEiOptBasic(unittest.TestCase):
         D[2:4, 2:4] = -2.0 * np.eye(2, dtype=float)
         D[2:4, 4:6] = 2.0 * np.eye(2, dtype=float)
 
-        self.assertTrue(np.allclose(r, r_ref))
-        self.assertTrue(np.allclose(J, D))
+        assert np.allclose(r, r_ref)
+        assert np.allclose(J, D)
 
     def test_const_repeat_expr_uses_time_steps(self) -> None:
         dsl = {
@@ -1989,9 +1984,9 @@ class TestEiOptBasic(unittest.TestCase):
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
 
-        self.assertTrue(np.allclose(r, np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0], dtype=float)))
-        self.assertEqual(J.shape, (6, 2))
-        self.assertTrue(np.allclose(J, 0.0))
+        assert np.allclose(r, np.array([1.0, -1.0, 1.0, -1.0, 1.0, -1.0], dtype=float))
+        assert J.shape == (6, 2)
+        assert np.allclose(J, 0.0)
 
     def test_variable_init_fill_expands_to_dim(self) -> None:
         dsl = {
@@ -2005,8 +2000,8 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([2.0, 2.0, 2.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.eye(3, dtype=float)))
+        assert np.allclose(r, np.array([2.0, 2.0, 2.0], dtype=float))
+        assert np.allclose(J, np.eye(3, dtype=float))
 
     def test_variable_init_scalar_requires_fill(self) -> None:
         dsl = {
@@ -2018,7 +2013,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "init = \\{ fill = <value> \\}"):
+        with pytest.raises(ValueError, match="init = \\{ fill = <value> \\}"):
             _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_sub_expr_with_const_fill(self) -> None:
@@ -2037,8 +2032,8 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([-1.0, -1.0, -1.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.eye(3, dtype=float)))
+        assert np.allclose(r, np.array([-1.0, -1.0, -1.0], dtype=float))
+        assert np.allclose(J, np.eye(3, dtype=float))
 
     def test_sub_expr_with_const_repeat_fill_and_inferred_segment_dim(self) -> None:
         dsl = {
@@ -2069,8 +2064,8 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
-        self.assertTrue(np.allclose(r, np.array([-1.0, -1.0, -1.0, -1.0], dtype=float)))
-        self.assertTrue(np.allclose(J, np.array([[1.0, 0.0], [0.0, 1.0], [2.0, 0.0], [0.0, 2.0]], dtype=float)))
+        assert np.allclose(r, np.array([-1.0, -1.0, -1.0, -1.0], dtype=float))
+        assert np.allclose(J, np.array([[1.0, 0.0], [0.0, 1.0], [2.0, 0.0], [0.0, 2.0]], dtype=float))
 
     def test_sub_expr_with_const_fill_infers_q_dim_from_bspline_trajectory(self) -> None:
         dsl = {
@@ -2101,9 +2096,9 @@ class TestEiOptBasic(unittest.TestCase):
         }
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         r, J = runtime.linearize()
-        self.assertEqual(r.shape, (2,))
-        self.assertTrue(np.allclose(r, np.array([-1.0, -1.0], dtype=float)))
-        self.assertEqual(J.shape[0], 2)
+        assert r.shape == (2,)
+        assert np.allclose(r, np.array([-1.0, -1.0], dtype=float))
+        assert J.shape[0] == 2
 
     def test_sub_expr_with_scalar_const_requires_fill(self) -> None:
         dsl = {
@@ -2119,7 +2114,7 @@ class TestEiOptBasic(unittest.TestCase):
                 }
             ],
         }
-        with self.assertRaisesRegex(ValueError, "value = \\{ fill = <value> \\}"):
+        with pytest.raises(ValueError, match="value = \\{ fill = <value> \\}"):
             _ = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 
     def test_build_trajectory_maps_with_derivatives_linear_uses_finite_difference(self) -> None:
@@ -2141,9 +2136,9 @@ class TestEiOptBasic(unittest.TestCase):
             derivative_wrt="time",
             default_dt=0.2,
         )
-        self.assertEqual(len(maps), 2)
-        self.assertEqual(maps[0].steps, 3)
-        self.assertEqual(maps[1].steps, 3)
+        assert len(maps) == 2
+        assert maps[0].steps == 3
+        assert maps[1].steps == 3
 
         p = np.array([0.0, 1.0, 3.0], dtype=float)
         q = (maps[0].A @ p + maps[0].b).reshape(3)
@@ -2157,7 +2152,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
             dtype=float,
         )
-        self.assertTrue(np.allclose(dq, dq_ref))
+        assert np.allclose(dq, dq_ref)
 
     def test_build_trajectory_maps_with_derivatives_bspline_nonuniform_time_fallback(self) -> None:
         traj_dsl = {
@@ -2174,7 +2169,7 @@ class TestEiOptBasic(unittest.TestCase):
             derivative_wrt="time",
             default_dt=0.5,
         )
-        self.assertEqual(len(maps), 2)
+        assert len(maps) == 2
 
         p = np.array([1.0, 5.0], dtype=float)
         q = (maps[0].A @ p + maps[0].b).reshape(3)
@@ -2187,7 +2182,7 @@ class TestEiOptBasic(unittest.TestCase):
             ],
             dtype=float,
         )
-        self.assertTrue(np.allclose(dq, dq_ref))
+        assert np.allclose(dq, dq_ref)
 
     def test_trajectory_map_q_and_jac(self) -> None:
         A = np.array(
@@ -2209,12 +2204,12 @@ class TestEiOptBasic(unittest.TestCase):
         q1 = traj.q_at(p, 1)
         q2 = traj.q_at(p, 2)
 
-        self.assertTrue(np.allclose(q0, np.array([1.1, 1.8], dtype=float)))
-        self.assertTrue(np.allclose(q1, np.array([2.0, 3.0], dtype=float)))
-        self.assertTrue(np.allclose(q2, np.array([2.7, 4.4], dtype=float)))
+        assert np.allclose(q0, np.array([1.1, 1.8], dtype=float))
+        assert np.allclose(q1, np.array([2.0, 3.0], dtype=float))
+        assert np.allclose(q2, np.array([2.7, 4.4], dtype=float))
 
         J1 = traj.dqdp_at(1)
-        self.assertTrue(np.allclose(J1, np.array([[0.5, 0.0, 0.5, 0.0], [0.0, 0.5, 0.0, 0.5]], dtype=float)))
+        assert np.allclose(J1, np.array([[0.5, 0.0, 0.5, 0.0], [0.0, 0.5, 0.0, 0.5]], dtype=float))
 
     def test_trajectory_map_from_blocks(self) -> None:
         A_blocks = [
@@ -2228,11 +2223,11 @@ class TestEiOptBasic(unittest.TestCase):
         traj = TrajectoryMap.from_blocks(A_blocks, b_blocks=b_blocks)
         p = np.array([4.0, 8.0], dtype=float)
 
-        self.assertEqual(traj.steps, 2)
-        self.assertEqual(traj.q_dim, 2)
-        self.assertEqual(traj.p_dim, 2)
-        self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([4.0, 8.0], dtype=float)))
-        self.assertTrue(np.allclose(traj.q_at(p, 1), np.array([2.0, 1.0], dtype=float)))
+        assert traj.steps == 2
+        assert traj.q_dim == 2
+        assert traj.p_dim == 2
+        assert np.allclose(traj.q_at(p, 0), np.array([4.0, 8.0], dtype=float))
+        assert np.allclose(traj.q_at(p, 1), np.array([2.0, 1.0], dtype=float))
 
     def test_bspline_trajectory_map_degree1_equals_linear_interp(self) -> None:
         steps = 5
@@ -2250,7 +2245,7 @@ class TestEiOptBasic(unittest.TestCase):
         for k in range(steps):
             alpha = float(k) / float(steps - 1)
             q_ref = (1.0 - alpha) * q_start + alpha * q_goal
-            self.assertTrue(np.allclose(traj.q_at(p, k), q_ref))
+            assert np.allclose(traj.q_at(p, k), q_ref)
 
     def test_bspline_trajectory_map_jacobian_matches_finite_difference(self) -> None:
         traj = TrajectoryMap.from_bspline(
@@ -2283,7 +2278,7 @@ class TestEiOptBasic(unittest.TestCase):
 
         for k in range(traj.steps):
             J = traj.dqdp_at(k)
-            self.assertEqual(J.shape, (traj.q_dim, traj.p_dim))
+            assert J.shape == (traj.q_dim, traj.p_dim)
             q0 = traj.q_at(p, k)
             J_fd = np.zeros_like(J)
             for j in range(traj.p_dim):
@@ -2291,7 +2286,7 @@ class TestEiOptBasic(unittest.TestCase):
                 dp[j] = eps
                 q1 = traj.q_at(p + dp, k)
                 J_fd[:, j] = (q1 - q0) / eps
-            self.assertTrue(np.allclose(J, J_fd, atol=1e-6, rtol=1e-6))
+            assert np.allclose(J, J_fd, atol=1e-6, rtol=1e-6)
 
     def test_build_trajectory_map_bspline(self) -> None:
         dsl = {
@@ -2302,13 +2297,13 @@ class TestEiOptBasic(unittest.TestCase):
         }
         traj = build_trajectory_map(dsl, default_steps=4, default_q_dim=2)
 
-        self.assertEqual(traj.steps, 4)
-        self.assertEqual(traj.q_dim, 2)
-        self.assertEqual(traj.p_dim, 4)
+        assert traj.steps == 4
+        assert traj.q_dim == 2
+        assert traj.p_dim == 4
 
         p = np.array([0.0, 1.0, 2.0, 3.0], dtype=float)
-        self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([0.0, 1.0], dtype=float)))
-        self.assertTrue(np.allclose(traj.q_at(p, traj.steps - 1), np.array([2.0, 3.0], dtype=float)))
+        assert np.allclose(traj.q_at(p, 0), np.array([0.0, 1.0], dtype=float))
+        assert np.allclose(traj.q_at(p, traj.steps - 1), np.array([2.0, 3.0], dtype=float))
 
     def test_build_trajectory_map_linear(self) -> None:
         dsl = {
@@ -2332,11 +2327,11 @@ class TestEiOptBasic(unittest.TestCase):
         traj = build_trajectory_map(dsl)
         p = np.array([2.0, 4.0], dtype=float)
 
-        self.assertEqual(traj.steps, 2)
-        self.assertEqual(traj.q_dim, 2)
-        self.assertEqual(traj.p_dim, 2)
-        self.assertTrue(np.allclose(traj.q_at(p, 0), np.array([2.0, 4.0], dtype=float)))
-        self.assertTrue(np.allclose(traj.q_at(p, 1), np.array([2.0, 1.0], dtype=float)))
+        assert traj.steps == 2
+        assert traj.q_dim == 2
+        assert traj.p_dim == 2
+        assert np.allclose(traj.q_at(p, 0), np.array([2.0, 4.0], dtype=float))
+        assert np.allclose(traj.q_at(p, 1), np.array([2.0, 1.0], dtype=float))
 
     def test_state_cache_unions_required(self) -> None:
         q_var = Variable(name="q", x=np.array([0.0], dtype=float))
@@ -2364,14 +2359,14 @@ class TestEiOptBasic(unittest.TestCase):
         cache.update_if_needed(pack, time=time, required=[key_a, key_b])
         cache.update_if_needed(pack, time=time, required=[key_b])
 
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0], {key_a})
-        self.assertEqual(calls[1], {key_b})
+        assert len(calls) == 2
+        assert calls[0] == {key_a}
+        assert calls[1] == {key_b}
 
         calls.clear()
         cache.update_if_needed(pack, time=time, required=None)
         cache.update_if_needed(pack, time=time, required=[key_a])
-        self.assertEqual(calls, [None])
+        assert calls == [None]
 
     def test_dispatch_state_builder_registers_value_and_jac_in_one_call(self) -> None:
         class DummyRotBuilder(BackendDispatchStateBuilder):
@@ -2416,13 +2411,13 @@ class TestEiOptBasic(unittest.TestCase):
             required=[key_rot, key_rot_j, key_ignored],
         )
 
-        self.assertIn(key_rot, out)
-        self.assertIn(key_rot_j, out)
-        self.assertNotIn(key_ignored, out)
-        self.assertTrue(np.allclose(out[key_rot], np.array([2.0, 1.0], dtype=float)))
-        self.assertTrue(np.allclose(out[key_rot_j], np.eye(2, 2, dtype=float)))
-        self.assertTrue(np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float)))
-        self.assertEqual(builder.resolve_calls, 1)
+        assert key_rot in out
+        assert key_rot_j in out
+        assert key_ignored not in out
+        assert np.allclose(out[key_rot], np.array([2.0, 1.0], dtype=float))
+        assert np.allclose(out[key_rot_j], np.eye(2, 2, dtype=float))
+        assert np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float))
+        assert builder.resolve_calls == 1
 
     def test_dispatch_state_builder_routes_handlers_by_key(self) -> None:
         class DummyDispatchBuilder(BackendDispatchStateBuilder):
@@ -2466,14 +2461,14 @@ class TestEiOptBasic(unittest.TestCase):
             required=[key_pos, key_rot, key_ignored, key_ignored_k],
         )
 
-        self.assertIn(key_pos, out)
-        self.assertIn(key_rot, out)
-        self.assertNotIn(key_ignored, out)
-        self.assertNotIn(key_ignored_k, out)
-        self.assertTrue(np.allclose(out[key_pos], np.array([2.0, 1.0], dtype=float)))
-        self.assertTrue(np.allclose(out[key_rot], np.array([2.0, 2.0], dtype=float)))
-        self.assertTrue(np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float)))
-        self.assertEqual(builder.resolve_calls, 2)
+        assert key_pos in out
+        assert key_rot in out
+        assert key_ignored not in out
+        assert key_ignored_k not in out
+        assert np.allclose(out[key_pos], np.array([2.0, 1.0], dtype=float))
+        assert np.allclose(out[key_rot], np.array([2.0, 2.0], dtype=float))
+        assert np.allclose(builder.last_q, np.array([0.2, -0.1], dtype=float))
+        assert builder.resolve_calls == 2
 
     def test_dispatch_state_builder_registered_route_fields(self) -> None:
         class DummyDispatchBuilder(BackendDispatchStateBuilder):
@@ -2502,23 +2497,10 @@ class TestEiOptBasic(unittest.TestCase):
                 return np.zeros((1,), dtype=float)
 
         builder = DummyDispatchBuilder()
-        self.assertEqual(
-            builder.registered_route_fields(dtype=DTYPE_DYNAMICS, owner_type="total_joint"),
-            {"torque", "torque_J_q"},
-        )
-        self.assertEqual(
-            builder.registered_route_fields(dtype=DTYPE_KINEMATICS, owner_type="link"),
-            {"pos"},
-        )
-        self.assertEqual(
-            builder.registered_route_fields(dtype=DTYPE_KINEMATICS, owner_type="total_joint"),
-            set(),
-        )
-        with self.assertRaisesRegex(ValueError, "dtype must be non-empty"):
+        assert builder.registered_route_fields(dtype=DTYPE_DYNAMICS, owner_type="total_joint") == {"torque", "torque_J_q"}
+        assert builder.registered_route_fields(dtype=DTYPE_KINEMATICS, owner_type="link") == {"pos"}
+        assert builder.registered_route_fields(dtype=DTYPE_KINEMATICS, owner_type="total_joint") == set()
+        with pytest.raises(ValueError, match="dtype must be non-empty"):
             _ = builder.registered_route_fields(dtype="")
-        with self.assertRaisesRegex(ValueError, "owner_type must be non-empty"):
+        with pytest.raises(ValueError, match="owner_type must be non-empty"):
             _ = builder.registered_route_fields(owner_type="")
-
-
-if __name__ == "__main__":
-    unittest.main()
