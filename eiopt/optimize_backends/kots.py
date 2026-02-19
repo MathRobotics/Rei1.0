@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ..backends.state.kots import KotsTrajectoryStateBuilder
+from ..backends.state.robotics.kots import KotsTrajectoryStateBuilder
 from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl

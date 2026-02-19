@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from ..backends.state.pinocchio import PinocchioTrajectoryStateBuilder
-from ..backends.state.spatial import Jacobian6Order
+from ..backends.state.robotics.pinocchio import PinocchioTrajectoryStateBuilder
+from ..backends.state.robotics.spatial import Jacobian6Order
 from ..core.state_schema import DTYPE_DYNAMICS
 from ..core.trajectory import TrajectoryMap
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl

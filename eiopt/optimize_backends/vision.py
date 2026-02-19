@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from ..backends.state.vision import CameraCalibrationStateProvider, ModelUpdateFn, VisionFieldHandler
+from ..backends.state.vision.provider import CameraCalibrationStateProvider, ModelUpdateFn, VisionFieldHandler
 from ..core.state_schema import DTYPE_VISION
 from ..optimize.dsl import PreparedVisionCalibrationDsl, prepare_vision_calibration_problem_dsl
 from ..optimize.runtime import NLSRuntime
