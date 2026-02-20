@@ -31,6 +31,14 @@ from .flow import (
     as_constraint_problem,
     as_project_problem,
 )
+from .core import (
+    Profiler,
+    SolveOutcome,
+    SolveStats,
+    TimingReport,
+    TimingSpan,
+    ensure_profiler,
+)
 from .optimize import (
     ConstraintProblem,
     EvaluateProblem,
@@ -52,6 +60,7 @@ from .optimize import (
     collect_named_expr_values,
     collect_plot_series_from_term_attrs,
     compile_nls_problem,
+    format_timing_report,
     format_solve_report,
     get_named_expr_value,
     load_problem_toml,
@@ -94,6 +103,7 @@ __all__ = [
     "check_kkt_conditions",
     "check_kkt_residuals",
     "format_solve_report",
+    "format_timing_report",
     "collect_named_expr_values",
     "get_named_expr_value",
     "collect_plot_series_from_term_attrs",
@@ -122,4 +132,10 @@ __all__ = [
     "as_constraint_problem",
     "as_project_problem",
     "split_terms_by_component",
+    "SolveStats",
+    "SolveOutcome",
+    "TimingSpan",
+    "TimingReport",
+    "Profiler",
+    "ensure_profiler",
 ]

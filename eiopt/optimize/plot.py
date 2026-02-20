@@ -344,7 +344,7 @@ def collect_plot_series_from_term_attrs(
     """Collect state trajectories declared by `term.attrs.plot` metadata.
 
     Supported spec type:
-      - `type = "state_traj"` (aliases: `"state"`, `"state_trajectory"`)
+      - `type = "state_traj"`
     """
 
     out: list[TermAttrPlotSeries] = []
@@ -367,11 +367,11 @@ def collect_plot_series_from_term_attrs(
         for j, spec in enumerate(specs):
             where = f"term[{idx}].attrs.plot[{j}]"
             typ = str(spec.get("type", spec.get("kind", "state_traj"))).strip().lower()
-            if typ not in ("state", "state_traj", "state_trajectory"):
+            if typ != "state_traj":
                 if strict:
                     raise ValueError(
                         f"{where}: unsupported plot type {typ!r}. "
-                        "Supported type is 'state_traj'."
+                        "Supported type is exactly 'state_traj'."
                     )
                 continue
 

@@ -53,12 +53,12 @@ def _normalize_term_indices(
 
 def _inequality_sign_to_standardized(sense: str) -> tuple[str, float]:
     v = str(sense).strip().lower()
-    if v in {"<=", "<", "le", "less_equal", "less-than-or-equal"}:
+    if v == "<=":
         return "<=", 1.0
-    if v in {">=", ">", "ge", "greater_equal", "greater-than-or-equal"}:
+    if v == ">=":
         return ">=", -1.0
     raise ValueError(
-        "check_kkt_conditions: ineq_sense must be one of '<=' or '>=' (aliases allowed). "
+        "check_kkt_conditions: ineq_sense must be one of '<=' or '>=' (exact match). "
         f"Got {sense!r}."
     )
 

@@ -6,7 +6,9 @@ from typing import Any
 
 import numpy as np
 
+from ..core.outcome import SolveOutcome
 from ..core.state_cache import StateKey
+from ..core.timing import TimingReport
 from .kkt import KKTCheckResult, check_kkt_conditions
 from .runtime import NLSRuntime
 
@@ -176,6 +178,8 @@ def _append_kkt_report(lines: list[str], out: KKTCheckResult) -> None:
 
 def _append_solve_summary(lines: list[str], summary: Mapping[str, Any]) -> None:
     parts: list[str] = []
+    if "status" in summary:
+        parts.append(f"status={str(summary['status'])}")
     if "converged" in summary:
         parts.append(f"converged={bool(summary['converged'])}")
     if "iters" in summary:
@@ -188,6 +192,8 @@ def _append_solve_summary(lines: list[str], summary: Mapping[str, Any]) -> None:
         parts.append(f"rnorm={float(summary['rnorm']):.3e}")
     if "dxnorm" in summary:
         parts.append(f"dxnorm={float(summary['dxnorm']):.3e}")
+    if "message" in summary and str(summary["message"]) != "":
+        parts.append(f"message={str(summary['message'])}")
     if len(parts) == 0:
         return
     lines.append("Solve:")
@@ -212,11 +218,106 @@ def _append_trajectory_summary(lines: list[str], summary: Mapping[str, Any]) -> 
     lines.append("")
 
 
+def format_timing_report(
+    timing: TimingReport,
+    *,
+    title: str = "Timing",
+    sort_by: str = "seconds",
+    descending: bool = True,
+    max_rows: int | None = None,
+) -> str:
+    """Format TimingReport as a compact ASCII table."""
+
+    sort_key_raw = str(sort_by).strip().lower()
+    if sort_key_raw in {"seconds", "time", "duration", ""}:
+        sort_key = "seconds"
+    elif sort_key_raw in {"name", "span"}:
+        sort_key = "name"
+    elif sort_key_raw in {"count", "calls"}:
+        sort_key = "count"
+    else:
+        raise ValueError(
+            "format_timing_report: sort_by must be one of "
+            "'seconds', 'name', 'count'. "
+            f"Got {sort_by!r}."
+        )
+
+    rows = [
+        (
+            str(span.name),
+            float(span.seconds),
+            int(span.count),
+        )
+        for span in timing.spans
+    ]
+
+    if sort_key == "seconds":
+        rows.sort(key=lambda x: x[1], reverse=bool(descending))
+    elif sort_key == "name":
+        rows.sort(key=lambda x: x[0], reverse=bool(descending))
+    else:
+        rows.sort(key=lambda x: x[2], reverse=bool(descending))
+
+    if max_rows is not None:
+        max_rows_i = int(max_rows)
+        if max_rows_i <= 0:
+            raise ValueError(f"format_timing_report: max_rows must be > 0, got {max_rows_i}.")
+        shown = rows[:max_rows_i]
+        hidden = int(max(0, len(rows) - len(shown)))
+    else:
+        shown = rows
+        hidden = 0
+
+    name_w = max(4, *(len(r[0]) for r in shown)) if len(shown) > 0 else 4
+    sec_w = 11
+    pct_w = 6
+    cnt_w = 5
+    header = (
+        f"{'span':<{name_w}} "
+        f"{'seconds':>{sec_w}} "
+        f"{'share':>{pct_w}} "
+        f"{'count':>{cnt_w}}"
+    )
+    total = float(timing.total_seconds)
+
+    lines: list[str] = [str(title), header, "-" * len(header)]
+    for name, seconds, count in shown:
+        pct = 100.0 * seconds / total if total > 0.0 else 0.0
+        lines.append(
+            f"{name:<{name_w}} "
+            f"{seconds:>{sec_w}.3e} "
+            f"{pct:>{pct_w}.1f}% "
+            f"{count:>{cnt_w}d}"
+        )
+    if hidden > 0:
+        lines.append(f"... (+{hidden} more spans)")
+    lines.append(
+        f"{'total':<{name_w}} "
+        f"{total:>{sec_w}.3e} "
+        f"{100.0:>{pct_w}.1f}% "
+        f"{'-':>{cnt_w}}"
+    )
+    return "\n".join(lines)
+
+
+def _append_timing_summary(lines: list[str], timing: TimingReport) -> None:
+    lines.extend(
+        format_timing_report(
+            timing,
+            title="Timing",
+            sort_by="seconds",
+            descending=True,
+        ).splitlines()
+    )
+    lines.append("")
+
+
 def format_solve_report(
     runtime: NLSRuntime,
     *,
     x0: Array | None = None,
     x_star: Array | None = None,
+    outcome: SolveOutcome | None = None,
     required: Iterable[StateKey] | None = None,
     max_elems: int = 6,
     precision: int = 4,
@@ -251,8 +352,15 @@ def format_solve_report(
 
     lines: list[str] = []
 
+    if outcome is not None and x_star is None:
+        x_star = np.asarray(outcome.solution, dtype=float).reshape(-1).copy()
+    if outcome is not None and solve_summary is None:
+        solve_summary = outcome.to_summary()
+
     if solve_summary is not None:
         _append_solve_summary(lines, solve_summary)
+    if outcome is not None:
+        _append_timing_summary(lines, outcome.timing)
 
     if trajectory_summary is not None:
         _append_trajectory_summary(lines, trajectory_summary)
