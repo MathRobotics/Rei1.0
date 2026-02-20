@@ -136,23 +136,27 @@ def main() -> None:
     runtime = compile_nls_problem(dsl, build_state=composite.build_state)
 
     x0 = runtime.pack.get().copy()
-    x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
+    out = solve(
         runtime,
         solver="gauss_newton",
         options={"max_iters": 40, "damping": 0.0, "line_search": False},
     )
+    x_star = out.solution
+    stats = out.stats
 
     print("=== 09_kots_vision_composite ===")
     print(f"model={_MODEL_PATH} (order={_ORDER})")
-    print(f"converged={converged} iters={iters}")
+    print(f"status={stats.status} converged={stats.converged} iters={stats.iterations}")
     print(
-        f"cost0={initial_cost:.3e} cost={cost:.3e} "
-        f"rnorm={rnorm:.3e} dxnorm={dxnorm:.3e}"
+        f"cost0={float(stats.initial_objective or 0.0):.3e} "
+        f"cost={float(stats.objective or 0.0):.3e} "
+        f"rnorm={float(stats.residual_norm or 0.0):.3e} "
+        f"dxnorm={float(stats.step_norm or 0.0):.3e}"
     )
     print(f"q_true={q_true}")
     print(f"q_init={x0}")
     print(f"q_est={x_star}")
-    print(format_solve_report(runtime, x0=x0, x_star=x_star))
+    print(format_solve_report(runtime, x0=x0, outcome=out))
 
 
 if __name__ == "__main__":

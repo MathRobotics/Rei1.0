@@ -86,16 +86,14 @@ def main() -> None:
     )
 
     w_hat = np.zeros((len(contributions),), dtype=float)
-    solve_info: dict[str, object] | None = None
+    simplex_out = None
     if len(active_idx) > 0:
         x0 = build_reference_simplex_init(contributions, active_idx)
-        w_active, solve_info_raw = solve_simplex_min_norm(
+        simplex_out = solve_simplex_min_norm(
             np.asarray(A_col[:, active_idx], dtype=float),
             x0=x0,
-            return_info=True,
         )
-        w_hat[np.asarray(active_idx, dtype=int)] = np.asarray(w_active, dtype=float).reshape(-1)
-        solve_info = dict(solve_info_raw)
+        w_hat[np.asarray(active_idx, dtype=int)] = np.asarray(simplex_out.solution, dtype=float).reshape(-1)
 
     print("=== 10_stationarity_ioc ===")
     print(f"x_demo={x_demo}")
@@ -108,12 +106,14 @@ def main() -> None:
     x0_ref = build_reference_simplex_init(contributions, active_idx)
     if x0_ref is not None:
         print(f"reference normalized (active only)={x0_ref}")
-    if solve_info is not None:
+    if simplex_out is not None:
+        stats = simplex_out.stats
         print(
             "simplex solver: "
-            f"converged={bool(solve_info.get('converged', False))} "
-            f"iters={int(solve_info.get('iterations', -1))} "
-            f"objective={float(solve_info.get('objective', float('nan'))):.3e}"
+            f"status={stats.status} "
+            f"converged={stats.converged} "
+            f"iters={stats.iterations} "
+            f"objective={float(stats.objective or float('nan')):.3e}"
         )
 
     print()

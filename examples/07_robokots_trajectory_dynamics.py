@@ -48,11 +48,12 @@ def main() -> None:
     runtime = compiled.runtime
 
     x0 = runtime.pack.get().copy()
-    x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
+    out = solve(
         runtime,
         solver="gauss_newton",
         options={"max_iters": 500, "tol_dx": 1e-8},
     )
+    x_star = out.solution
 
     steps = int(compiled.trajectory_map.steps)
 
@@ -63,17 +64,9 @@ def main() -> None:
         format_solve_report(
             runtime,
             x0=x0,
-            x_star=x_star,
+            outcome=out,
             include_kkt=True,
             kkt_kwargs={"stationarity_tol": 1e-6},
-            solve_summary={
-                "converged": converged,
-                "iters": iters,
-                "cost0": initial_cost,
-                "cost": cost,
-                "rnorm": rnorm,
-                "dxnorm": dxnorm,
-            },
             trajectory_summary={
                 "steps": steps,
                 "dt": compiled.dt,

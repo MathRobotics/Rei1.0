@@ -35,23 +35,27 @@ def main() -> None:
     runtime = compile_nls_problem(dsl, build_state=builder.build_state)
 
     x0 = runtime.pack.get().copy()
-    x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
+    out = solve(
         runtime,
         solver="gauss_newton",
         options={"max_iters": 200, "tol_dx": 1e-8},
     )
+    x_star = out.solution
+    stats = out.stats
 
     print("=== 04_pinocchio_ik ===")
     print(f"dsl={_DSL_PATH}")
     print(f"model={_URDF_PATH}")
     print(
-        f"converged={converged} iters={iters} "
-        f"cost0={initial_cost:.3e} cost={cost:.3e} "
-        f"rnorm={rnorm:.3e} dxnorm={dxnorm:.3e}"
+        f"status={stats.status} converged={stats.converged} iters={stats.iterations} "
+        f"cost0={float(stats.initial_objective or 0.0):.3e} "
+        f"cost={float(stats.objective or 0.0):.3e} "
+        f"rnorm={float(stats.residual_norm or 0.0):.3e} "
+        f"dxnorm={float(stats.step_norm or 0.0):.3e}"
     )
     print(f"x0={x0}")
     print(f"x*={x_star}")
-    print(format_solve_report(runtime, x0=x0, x_star=x_star))
+    print(format_solve_report(runtime, x0=x0, outcome=out))
 
 
 if __name__ == "__main__":

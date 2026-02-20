@@ -167,7 +167,7 @@ def main() -> None:
     runtime = compiled.runtime
 
     x0 = runtime.pack.get().copy()
-    x_star, initial_cost, cost, iters, rnorm, dxnorm, converged = solve(
+    out = solve(
         runtime,
         solver="gauss_newton",
         options={
@@ -176,20 +176,24 @@ def main() -> None:
             "line_search": False,
         },
     )
+    x_star = out.solution
+    stats = out.stats
 
     print("=== 08_camera_calibration ===")
     print(f"model={model_kind}")
     if model_kind == "pinhole":
         print(f"param_order={list(PINHOLE_RADIAL_PARAM_ORDER.names)}")
-    print(f"converged={converged} iters={iters}")
+    print(f"status={stats.status} converged={stats.converged} iters={stats.iterations}")
     print(
-        f"cost0={initial_cost:.3e} cost={cost:.3e} "
-        f"rnorm={rnorm:.3e} dxnorm={dxnorm:.3e}"
+        f"cost0={float(stats.initial_objective or 0.0):.3e} "
+        f"cost={float(stats.objective or 0.0):.3e} "
+        f"rnorm={float(stats.residual_norm or 0.0):.3e} "
+        f"dxnorm={float(stats.step_norm or 0.0):.3e}"
     )
     print(f"theta_true={theta_true}")
     print(f"theta_init={x0}")
     print(f"theta_est={x_star}")
-    print(format_solve_report(runtime, x0=x0, x_star=x_star))
+    print(format_solve_report(runtime, x0=x0, outcome=out))
 
 
 if __name__ == "__main__":
