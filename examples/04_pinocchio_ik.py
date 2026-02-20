@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from eiopt.optimize.builder import compile_nls_problem, load_problem_toml
-from eiopt.optimize.report import format_solve_report
-from eiopt.optimize.solvers import solve
+from rei.optimize.builder import compile_nls_problem, load_problem_toml
+from rei.optimize.report import format_solve_report
+from rei.optimize.solvers import solve
 
 try:
     import pinocchio as pin
-    from eiopt.backends.state.robotics.pinocchio import PinocchioStateBuilder
+    from rei.backends.state.robotics.pinocchio import PinocchioStateBuilder
 except ImportError as e:  # pragma: no cover
     raise SystemExit(
         "This example requires the robotics Pinocchio bindings.\n"

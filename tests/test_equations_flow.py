@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from eiopt.equations import as_linear_equation_problem
-from eiopt.flow import as_constraint_problem, as_project_problem
-from eiopt.optimize.builder import compile_nls_problem
+from rei.equations import as_linear_equation_problem
+from rei.flow import as_constraint_problem, as_project_problem
+from rei.optimize.builder import compile_nls_problem
 
 
 class TestEquationFlowAdapters:

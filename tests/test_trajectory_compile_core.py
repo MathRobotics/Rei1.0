@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from eiopt.optimize.dsl.trajectory_compile import prepare_trajectory_problem_dsl
+from rei.optimize.dsl.trajectory_compile import prepare_trajectory_problem_dsl
 
 class TestTrajectoryCompileCore:
     def _linear_dsl(self) -> dict:

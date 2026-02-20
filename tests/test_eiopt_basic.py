@@ -4,28 +4,28 @@ import pytest
 
 import numpy as np
 
-from eiopt.core.bspline import (
+from rei.core.bspline import (
     bspline_basis_derivative_matrices,
     bspline_basis_derivative_matrix,
     default_clamped_uniform_knots,
 )
-from eiopt.core.state_cache import OwnerKey, StateCache, StateKey
-from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_KINEMATICS, DYNAMICS_FIELDS, canonical_field_name, jac_field
-from eiopt.core.time_grid import TimeGrid
-from eiopt.core.trajectory import TrajectoryMap
-from eiopt.optimize.dsl import (
+from rei.core.state_cache import OwnerKey, StateCache, StateKey
+from rei.core.state_schema import DTYPE_DYNAMICS, DTYPE_KINEMATICS, DYNAMICS_FIELDS, canonical_field_name, jac_field
+from rei.core.time_grid import TimeGrid
+from rei.core.trajectory import TrajectoryMap
+from rei.optimize.dsl import (
     build_trajectory_map,
     build_trajectory_map_with_derivative,
     build_trajectory_maps_with_derivatives,
 )
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.report import (
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.report import (
     format_timing_report,
     format_solve_report,
     get_named_expr_value,
 )
-from eiopt.core import TimingReport, TimingSpan
-from eiopt.equations import (
+from rei.core import TimingReport, TimingSpan
+from rei.equations import (
     SimplexMinNormProblem,
     RuntimeStationaritySource,
     build_reference_simplex_init,
@@ -35,24 +35,24 @@ from eiopt.equations import (
     solve_projected_linearized_min_norm,
     solve_simplex_min_norm,
 )
-from eiopt.optimize.term_gradient_matrix import (
+from rei.optimize.term_gradient_matrix import (
     build_term_gradient_matrix,
     build_term_gradient_matrix_from_stacked,
     build_term_gradient_matrix_from_terms,
 )
-from eiopt.backends.state.dispatch.template import BackendDispatchStateBuilder
-from eiopt.core.expr.nodes import GetStateExpr, GetVarExpr
-from eiopt.core.expr.types import (
+from rei.backends.state.dispatch.template import BackendDispatchStateBuilder
+from rei.core.expr.nodes import GetStateExpr, GetVarExpr
+from rei.core.expr.types import (
     DirectVectorExpr,
     RuntimeContext,
     Variable,
     VariablePack,
 )
-from eiopt.optimize.costs import L2Cost
-from eiopt.problem import NLSProblem
-from eiopt.optimize.reductions import build_nullspace_equality_reduction
-from eiopt.optimize.runtime import NLSRuntime
-from eiopt.optimize.solvers import solve, solve_gauss_newton
+from rei.optimize.costs import L2Cost
+from rei.problem import NLSProblem
+from rei.optimize.reductions import build_nullspace_equality_reduction
+from rei.optimize.runtime import NLSRuntime
+from rei.optimize.solvers import solve, solve_gauss_newton
 
 
 def _compose_stationarity_weights(
@@ -100,7 +100,7 @@ def _compose_stationarity_weights(
         "solve_info": solve_out,
     }
 
-class TestEiOptBasic:
+class TestReiBasic:
     def test_gauss_newton_solves_linear_scalar(self) -> None:
         x_var = Variable(name="x", x=np.array([0.0], dtype=float))
         pack = VariablePack([x_var])

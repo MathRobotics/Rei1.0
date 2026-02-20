@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.optimize_backends.problem_adapter import compile_problem_with_adapter
+from rei.optimize_backends.problem_adapter import compile_problem_with_adapter
 
 def _basic_dsl() -> dict[str, Any]:
     return {

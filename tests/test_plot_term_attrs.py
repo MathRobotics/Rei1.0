@@ -4,8 +4,8 @@ import pytest
 
 import numpy as np
 
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.plot import collect_plot_series_from_term_attrs
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.plot import collect_plot_series_from_term_attrs
 
 class TestPlotTermAttrs:
     def test_collect_plot_series_infers_state_key_from_term_expr(self) -> None:

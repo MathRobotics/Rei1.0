@@ -2,7 +2,7 @@
 
 This package also preserves the historical import style:
 
-    from eiopt.backends.state.vision import CameraCalibrationStateProvider
+    from rei.backends.state.vision import CameraCalibrationStateProvider
 """
 
 from __future__ import annotations

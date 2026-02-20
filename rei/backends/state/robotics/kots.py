@@ -25,7 +25,7 @@ try:
     from robokots.core.state import StateType
 except ImportError as e:  # pragma: no cover
     raise ImportError(
-        "`eiopt.backends.state.robotics.kots` requires the robotics RoboKots bindings. "
+        "`rei.backends.state.robotics.kots` requires the robotics RoboKots bindings. "
         "Install RoboKots (e.g. via github) and retry."
     ) from e
 

@@ -6,9 +6,9 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.vision.provider import VisionFieldHandler
-from eiopt.optimize.solvers import solve
-from eiopt.optimize_backends.vision import compile_camera_calibration_problem
+from rei.backends.state.vision.provider import VisionFieldHandler
+from rei.optimize.solvers import solve
+from rei.optimize_backends.vision import compile_camera_calibration_problem
 
 def _build_handlers(points: np.ndarray) -> dict[str, VisionFieldHandler]:
     pts = np.asarray(points, dtype=float).reshape(-1)

@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from eiopt.optimize.builder import load_problem_toml
-from eiopt.optimize.report import format_solve_report
-from eiopt.optimize.solvers import solve
-from eiopt.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
+from rei.optimize.builder import load_problem_toml
+from rei.optimize.report import format_solve_report
+from rei.optimize.solvers import solve
+from rei.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
 
 try:
     import pinocchio as pin
@@ -76,7 +76,7 @@ def main() -> None:
     )
 
     if args.plot:
-        from eiopt.optimize.plot import plot_term_attrs
+        from rei.optimize.plot import plot_term_attrs
 
         fig, _ax, series = plot_term_attrs(
             runtime,

@@ -1,25 +1,25 @@
-# EiOpt
+# Rei
 
-`eiopt` は `RoboKots/robokots/inward` を元にした、capability 指向の数値問題ツールキットです。
+`rei` は `RoboKots/robokots/inward` を元にした、capability 指向の数値問題ツールキットです。
 
 ## Layered Namespaces
 
 現在の canonical namespace は以下です。
 
-- `eiopt.optimize`: 最適化責務の API 入口（`compile_nls_problem`, `solve` など）
-- `eiopt.equations`: 方程式系 problem capability の入口（`RuntimeStationaritySource` など）
-- `eiopt.flow`: フロー/制約/射影 problem capability の入口
-- `eiopt.backends.state`: backend の state builder 入口
-- `eiopt.optimize_backends`: optimize と backend を接続する compile helper
+- `rei.optimize`: 最適化責務の API 入口（`compile_nls_problem`, `solve` など）
+- `rei.equations`: 方程式系 problem capability の入口（`RuntimeStationaritySource` など）
+- `rei.flow`: フロー/制約/射影 problem capability の入口
+- `rei.backends.state`: backend の state builder 入口
+- `rei.optimize_backends`: optimize と backend を接続する compile helper
 
-旧 namespace / alias (`eiopt.dsl`, `eiopt.model`, `eiopt.solvers`, `eiopt.expr` など) は削除済みです。
+旧 namespace / alias (`rei.dsl`, `rei.model`, `rei.solvers`, `rei.expr` など) は削除済みです。
 
 ## Capability Adapters
 
 Problem は capability 単位で扱えます。既存 runtime から能力を取り出す入口は以下です。
 
 ```python
-from eiopt import (
+from rei import (
     as_linear_equation_problem,
     as_constraint_problem,
     as_project_problem,
@@ -34,16 +34,16 @@ project_problem = as_project_problem(runtime)  # 既定は恒等射影
 
 以下の旧フラット import path は削除済みです。canonical path を使用してください。
 
-- `eiopt.backends.state.template` -> `eiopt.backends.state.dispatch.template`
-- `eiopt.backends.state.composite` -> `eiopt.backends.state.dispatch.composite`
-- `eiopt.backends.state.spatial` -> `eiopt.backends.state.robotics.spatial`
-- `eiopt.backends.state.kots` -> `eiopt.backends.state.robotics.kots`
-- `eiopt.backends.state.pinocchio` -> `eiopt.backends.state.robotics.pinocchio`
-- `eiopt.backends.state.vision_pinhole` -> `eiopt.backends.state.vision.pinhole`
+- `rei.backends.state.template` -> `rei.backends.state.dispatch.template`
+- `rei.backends.state.composite` -> `rei.backends.state.dispatch.composite`
+- `rei.backends.state.spatial` -> `rei.backends.state.robotics.spatial`
+- `rei.backends.state.kots` -> `rei.backends.state.robotics.kots`
+- `rei.backends.state.pinocchio` -> `rei.backends.state.robotics.pinocchio`
+- `rei.backends.state.vision_pinhole` -> `rei.backends.state.vision.pinhole`
 
 ## Backend との接続点
 
-backend(kots / pinocchio 等) と `eiopt` を繋ぐ唯一の接続点は `StateCache` が呼ぶ `build_state()` です。
+backend(kots / pinocchio 等) と `rei` を繋ぐ唯一の接続点は `StateCache` が呼ぶ `build_state()` です。
 
 - `build_state(x_all, *, pack=None, time=None, required=None) -> dict[StateKey, Any]`
   - `x_all`: 全決定変数ベクトル（`VariablePack` の順）
@@ -51,12 +51,12 @@ backend(kots / pinocchio 等) と `eiopt` を繋ぐ唯一の接続点は `StateC
   - `time`: `TimeGrid`
 - `required`: 今回必要な `StateKey` の集合（これだけ計算すると速い）。`None` は「全部計算」。
 
-複数 backend を同時利用したい場合は `eiopt.backends.state.dispatch.composite.CompositeStateBuilder` で
+複数 backend を同時利用したい場合は `rei.backends.state.dispatch.composite.CompositeStateBuilder` で
 `build_state()` を合成できます（例: ロボット状態 provider + カメラ状態 provider）。
 
 ```python
-from eiopt.backends.state.dispatch.composite import CompositeStateBuilder
-from eiopt.optimize.builder import compile_nls_problem
+from rei.backends.state.dispatch.composite import CompositeStateBuilder
+from rei.optimize.builder import compile_nls_problem
 
 state_builder = CompositeStateBuilder([robot_provider, camera_provider])
 runtime = compile_nls_problem(dsl, build_state=state_builder.build_state)
@@ -80,7 +80,7 @@ backend 側で実装すべき最小要件は `build_state()` だけです。
 最適化問題は TOML で定義します（JSON は使用しません）。読み込みは `load_problem_toml()` を使います。
 
 ```python
-from eiopt.optimize.builder import compile_nls_problem, load_problem_toml
+from rei.optimize.builder import compile_nls_problem, load_problem_toml
 
 dsl = load_problem_toml("examples/dsl/basic.toml")
 runtime = compile_nls_problem(dsl, build_state=build_state)
@@ -137,12 +137,12 @@ uv sync --group kots
 
 ### Kots 軌道問題の高レベルビルダー
 
-`eiopt.optimize_backends.kots.compile_kots_trajectory_problem()` を使うと、
+`rei.optimize_backends.kots.compile_kots_trajectory_problem()` を使うと、
 軌道マップ生成・導関数マップ生成・`p` 変数次元チェック・`KotsTrajectoryStateBuilder` 構築・`compile_nls_problem()` までを一括で実行できます。
 この関数は入力 DSL オブジェクトを破壊的に書き換えません。
 
 ```python
-from eiopt.optimize_backends.kots import compile_kots_trajectory_problem
+from rei.optimize_backends.kots import compile_kots_trajectory_problem
 
 compiled = compile_kots_trajectory_problem(
     dsl,
@@ -157,7 +157,7 @@ traj_map = compiled.trajectory_map
 Pinocchio 側にも同様の helper があります。
 
 ```python
-from eiopt.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
+from rei.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
 
 compiled = compile_pinocchio_trajectory_problem(
     dsl,
@@ -170,17 +170,17 @@ traj_map = compiled.trajectory_map
 ```
 
 trajectory 前提を置かない backend の compile helper は
-`eiopt.optimize_backends.problem_adapter.compile_problem_with_adapter()` で実装できます。
+`rei.optimize_backends.problem_adapter.compile_problem_with_adapter()` で実装できます。
 `dsl` 準備・state builder 構築・runtime 検証の 3 段を adapter に分離できます。
 
-camera calibration 向けには `eiopt.optimize_backends.vision.compile_camera_calibration_problem()` も利用できます。
+camera calibration 向けには `rei.optimize_backends.vision.compile_camera_calibration_problem()` も利用できます。
 
 等式制約 (`constraint.kind="eq"`) を零空間で消去した reduced 問題を作る場合は、
 `compile_kots_trajectory_problem()` の後段で backend 非依存 API を適用します。
 
 ```python
-from eiopt.optimize.reductions import build_nullspace_equality_reduction
-from eiopt.optimize.solvers import solve
+from rei.optimize.reductions import build_nullspace_equality_reduction
+from rei.optimize.solvers import solve
 
 use_nullspace = True
 nullspace_eq = (
@@ -212,7 +212,7 @@ print(out.stats.status, out.stats.converged, out.stats.objective)
 計測結果を表形式で表示したい場合は `format_timing_report()` が使えます。
 
 ```python
-from eiopt import format_timing_report
+from rei import format_timing_report
 
 print(format_timing_report(out.timing, title="solver timing"))
 ```
@@ -230,7 +230,7 @@ python -m pip install -e ".[solvers]"           # 全 solver を入れる場合
 ```
 
 ```python
-from eiopt.optimize.solvers import solve
+from rei.optimize.solvers import solve
 
 out = solve(
     runtime,
@@ -326,7 +326,7 @@ for s in layout:
 Stationarity 方程式の解法用に `A = [J_0^T r_0, ..., J_n^T r_n]` を作るヘルパーも使えます。
 
 ```python
-from eiopt import build_term_gradient_matrix, solve_simplex_min_norm
+from rei import build_term_gradient_matrix, solve_simplex_min_norm
 
 A, term_indices = build_term_gradient_matrix(runtime, weighted=False)
 simplex_out = solve_simplex_min_norm(A)
@@ -336,7 +336,7 @@ w_hat = simplex_out.solution  # w>=0, sum(w)=1
 Stationarity の組み立ては `RuntimeStationaritySource` と純関数群を組み合わせます。
 
 ```python
-from eiopt import (
+from rei import (
     RuntimeStationaritySource,
     filter_stationarity_contributions,
     build_stationarity_gradient_matrix,
@@ -379,7 +379,7 @@ ee_traj = runtime.collect_state_traj(
 簡潔に確認したい場合は `format_solve_report()` を使えます。`x0` を渡すと初期値と最適化後の決定変数も併せて表示します。
 
 ```python
-from eiopt import format_solve_report, solve_gauss_newton
+from rei import format_solve_report, solve_gauss_newton
 
 x0 = runtime.pack.get().copy()
 out = solve_gauss_newton(runtime)
@@ -392,7 +392,7 @@ print(format_solve_report(runtime, x0=x0, outcome=out))
 名前付き Expr の値をコード側で直接使う場合は `get_named_expr_value()` が使えます。
 
 ```python
-from eiopt import get_named_expr_value
+from rei import get_named_expr_value
 
 ee_traj = get_named_expr_value(runtime, name="ee_pos_traj")
 ```
@@ -400,7 +400,7 @@ ee_traj = get_named_expr_value(runtime, name="ee_pos_traj")
 ### `term.attrs` ベースで時系列を描画
 
 `term.attrs.plot` に可視化メタデータを置くと、DSL から描画対象を宣言できます。
-描画責務は `eiopt.optimize` 側に閉じており、core/backend の責務分離を維持できます。
+描画責務は `rei.optimize` 側に閉じており、core/backend の責務分離を維持できます。
 
 ```toml
 [[terms]]
@@ -439,7 +439,7 @@ k1 = "last"
 ```
 
 ```python
-from eiopt import collect_plot_series_from_term_attrs, plot_term_attrs
+from rei import collect_plot_series_from_term_attrs, plot_term_attrs
 
 series = collect_plot_series_from_term_attrs(runtime)
 fig, ax, _series = plot_term_attrs(runtime, title="Trajectory diagnostics")
@@ -517,7 +517,7 @@ observations = [0.1, 0.2, 0.3]     # 必須
 Python helper:
 
 ```python
-from eiopt.core.state_schema import vision_key, vision_jac_key
+from rei.core.state_schema import vision_key, vision_jac_key
 
 key = vision_key(k=0, owner_name="cam0", field="reproj")
 key_j = vision_jac_key(k=0, owner_name="cam0", field="reproj", var="theta")
@@ -526,7 +526,7 @@ key_j = vision_jac_key(k=0, owner_name="cam0", field="reproj", var="theta")
 最小 provider 雛形:
 
 ```python
-from eiopt.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
+from rei.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
 
 provider = CameraCalibrationStateProvider(
     model=model,
@@ -545,7 +545,7 @@ provider = CameraCalibrationStateProvider(
 
 ヤコビアンは `"{field}_J_{var}"` を推奨します（例: `pos_J_q`）。
 
-Python 側は `eiopt.core.state_schema.jac_field()` が使えます。
+Python 側は `rei.core.state_schema.jac_field()` が使えます。
 
 `get_state` は単一 Jacobian (`expr.jac`) に加え、複数 Jacobian (`expr.jacs`) をサポートします。
 複数変数がある場合は `var` を明示してください。
@@ -664,9 +664,9 @@ num_ctrl_points = 6
 最小コード例（DSL から生成）:
 
 ```python
-from eiopt.backends.state.robotics.kots import KotsTrajectoryStateBuilder
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.dsl import (
+from rei.backends.state.robotics.kots import KotsTrajectoryStateBuilder
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.dsl import (
     build_trajectory_map,
     build_trajectory_maps_with_derivatives,
     default_steps_from_time,
@@ -705,7 +705,7 @@ DSL 側では `get_state.jac.var = "p"` を指定します。
 
 ## 最小標準セット（pos/rot/frame + (optional) q）
 
-backend から `eiopt` に提供する “標準の最小セット” として、まずは以下に絞るのが扱いやすいです。
+backend から `rei` に提供する “標準の最小セット” として、まずは以下に絞るのが扱いやすいです。
 （誤差の定義は後から Expr/Residual として設計できるように、ここでは **生の状態** を揃えます）
 
 - `dtype="kinematics"`

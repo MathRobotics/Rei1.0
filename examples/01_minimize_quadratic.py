@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.report import format_solve_report
-from eiopt.optimize.solvers import solve
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.report import format_solve_report
+from rei.optimize.solvers import solve
 
 
 def main() -> None:

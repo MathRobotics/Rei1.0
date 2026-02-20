@@ -6,11 +6,11 @@ import types
 import numpy as np
 import pytest
 
-from eiopt.core.expr.types import DirectVectorExpr, RuntimeContext, Variable, VariablePack
-from eiopt.optimize.costs import L2Cost
-from eiopt.problem import NLSProblem
-from eiopt.optimize.runtime import NLSRuntime
-from eiopt.optimize.solvers import solve
+from rei.core.expr.types import DirectVectorExpr, RuntimeContext, Variable, VariablePack
+from rei.optimize.costs import L2Cost
+from rei.problem import NLSProblem
+from rei.optimize.runtime import NLSRuntime
+from rei.optimize.solvers import solve
 
 
 def _build_scalar_runtime(target: float) -> tuple[NLSRuntime, Variable]:

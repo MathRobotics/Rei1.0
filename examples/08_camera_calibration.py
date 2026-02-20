@@ -5,15 +5,15 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.vision.provider import VisionFieldHandler
-from eiopt.backends.state.vision.pinhole import (
+from rei.backends.state.vision.provider import VisionFieldHandler
+from rei.backends.state.vision.pinhole import (
     PINHOLE_RADIAL_PARAM_ORDER,
     build_pinhole_radial_vision_field_handler,
     pinhole_radial_reprojection,
 )
-from eiopt.optimize.report import format_solve_report
-from eiopt.optimize.solvers import solve
-from eiopt.optimize_backends.vision import compile_camera_calibration_problem
+from rei.optimize.report import format_solve_report
+from rei.optimize.solvers import solve
+from rei.optimize_backends.vision import compile_camera_calibration_problem
 
 
 def _build_linear_reprojection_handlers(points: np.ndarray) -> dict[str, VisionFieldHandler]:

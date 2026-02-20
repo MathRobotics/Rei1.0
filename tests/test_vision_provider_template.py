@@ -6,8 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
-from eiopt.core.state_schema import DTYPE_VISION, vision_jac_key, vision_key
+from rei.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
+from rei.core.state_schema import DTYPE_VISION, vision_jac_key, vision_key
 
 def _value_handler(q: np.ndarray, key: Any, state_ref: Any) -> np.ndarray:
     del state_ref

@@ -1,6 +1,8 @@
 /build
 */__pycache__
 /eiopt.egg-info/
+/rei.egg-info/
 *.pyc
 *.png
 uv.lock
+.python-version

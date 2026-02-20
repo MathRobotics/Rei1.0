@@ -6,7 +6,7 @@ import types
 
 import numpy as np
 
-from eiopt.core.state_schema import DTYPE_COORD
+from rei.core.state_schema import DTYPE_COORD
 
 def _ensure_pinocchio_stub() -> None:
     pin = types.ModuleType("pinocchio")
@@ -50,7 +50,7 @@ def _ensure_pinocchio_stub() -> None:
     sys.modules["pinocchio"] = pin
 
 _ensure_pinocchio_stub()
-_pin_opt_mod = importlib.import_module("eiopt.optimize_backends.pinocchio")
+_pin_opt_mod = importlib.import_module("rei.optimize_backends.pinocchio")
 compile_pinocchio_trajectory_problem = _pin_opt_mod.compile_pinocchio_trajectory_problem
 
 class _FakePinModel:

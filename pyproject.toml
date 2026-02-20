@@ -1,5 +1,5 @@
 [project]
-name = "eiopt"
+name = "rei"
 version = "0.1.0"
 description = "Capability-driven numerical problem toolkit"
 readme = "README.md"
@@ -31,7 +31,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["eiopt*"]
+include = ["rei*"]
 
 [tool.uv.sources]
 robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "develop" }

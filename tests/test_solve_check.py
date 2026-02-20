@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.kkt import check_kkt_conditions, check_kkt_residuals
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.kkt import check_kkt_conditions, check_kkt_residuals
 
 class TestSolveCheck:
     def test_check_kkt_conditions_unconstrained_stationarity(self) -> None:

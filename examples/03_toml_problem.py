@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from eiopt.optimize.builder import compile_nls_problem, load_problem_toml
-from eiopt.optimize.report import format_solve_report
-from eiopt.optimize.solvers import solve
+from rei.optimize.builder import compile_nls_problem, load_problem_toml
+from rei.optimize.report import format_solve_report
+from rei.optimize.solvers import solve
 
 
 def main() -> None:

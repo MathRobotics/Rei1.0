@@ -1,7 +1,7 @@
-"""EiOpt package entrypoint.
+"""Rei package entrypoint.
 
 The canonical API is exposed under domain namespaces:
-`eiopt.optimize`, `eiopt.equations`, and `eiopt.flow`.
+`rei.optimize`, `rei.equations`, and `rei.flow`.
 """
 
 from __future__ import annotations

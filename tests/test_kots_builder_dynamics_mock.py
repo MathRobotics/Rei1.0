@@ -9,10 +9,10 @@ import types
 
 import numpy as np
 
-from eiopt.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, DTYPE_KINEMATICS, make_jac_key, make_key
-from eiopt.core.trajectory import TrajectoryMap
-from eiopt.optimize.reductions import build_nullspace_equality_reduction
-from eiopt.optimize.solvers import solve
+from rei.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, DTYPE_KINEMATICS, make_jac_key, make_key
+from rei.core.trajectory import TrajectoryMap
+from rei.optimize.reductions import build_nullspace_equality_reduction
+from rei.optimize.solvers import solve
 
 def _ensure_robokots_state_stub() -> None:
     robokots_mod = types.ModuleType("robokots")
@@ -37,8 +37,8 @@ def _ensure_robokots_state_stub() -> None:
     sys.modules["robokots.core.state"] = state_mod
 
 _ensure_robokots_state_stub()
-_kots_state_mod = importlib.import_module("eiopt.backends.state.robotics.kots")
-_kots_opt_mod = importlib.import_module("eiopt.optimize_backends.kots")
+_kots_state_mod = importlib.import_module("rei.backends.state.robotics.kots")
+_kots_opt_mod = importlib.import_module("rei.optimize_backends.kots")
 KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
 compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem
 

@@ -7,11 +7,11 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.dispatch.composite import CompositeStateBuilder
-from eiopt.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
-from eiopt.core.state_schema import DTYPE_KINEMATICS, make_key
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.solvers import solve
+from rei.backends.state.dispatch.composite import CompositeStateBuilder
+from rei.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
+from rei.core.state_schema import DTYPE_KINEMATICS, make_key
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.solvers import solve
 
 def _ensure_robokots_state_stub() -> None:
     robokots_mod = types.ModuleType("robokots")
@@ -36,10 +36,10 @@ def _ensure_robokots_state_stub() -> None:
     sys.modules["robokots.core.state"] = state_mod
 
 _ensure_robokots_state_stub()
-if "eiopt.backends.state.robotics.kots" in sys.modules:
-    _kots_mod = importlib.reload(sys.modules["eiopt.backends.state.robotics.kots"])
+if "rei.backends.state.robotics.kots" in sys.modules:
+    _kots_mod = importlib.reload(sys.modules["rei.backends.state.robotics.kots"])
 else:
-    _kots_mod = importlib.import_module("eiopt.backends.state.robotics.kots")
+    _kots_mod = importlib.import_module("rei.backends.state.robotics.kots")
 KotsStateBuilder = _kots_mod.KotsStateBuilder
 
 class _FakeKotsModel:

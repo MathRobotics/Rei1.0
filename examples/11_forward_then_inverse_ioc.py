@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from eiopt import (
+from rei import (
     RuntimeStationaritySource,
     build_stationarity_gradient_matrix,
     format_timing_report,
@@ -12,11 +12,11 @@ from eiopt import (
     select_active_stationarity_indices,
     solve_simplex_min_norm,
 )
-from eiopt.optimize.builder import load_problem_toml
-from eiopt.optimize.kkt import check_kkt_conditions
-from eiopt.optimize.reductions import build_nullspace_equality_reduction
-from eiopt.optimize.solvers import solve
-from eiopt.optimize_backends.kots import compile_kots_trajectory_problem
+from rei.optimize.builder import load_problem_toml
+from rei.optimize.kkt import check_kkt_conditions
+from rei.optimize.reductions import build_nullspace_equality_reduction
+from rei.optimize.solvers import solve
+from rei.optimize_backends.kots import compile_kots_trajectory_problem
 
 try:
     from robokots.kots import Kots

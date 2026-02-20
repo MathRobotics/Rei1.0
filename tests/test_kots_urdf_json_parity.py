@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from eiopt.optimize_backends.kots import compile_kots_trajectory_problem
+from rei.optimize_backends.kots import compile_kots_trajectory_problem
 
 try:
     from robokots.kots import Kots

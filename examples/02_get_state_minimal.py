@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from eiopt.core.state_cache import OwnerKey, StateKey
-from eiopt.core.state_schema import DTYPE_KINEMATICS, jac_field
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.report import format_solve_report
-from eiopt.optimize.solvers import solve
+from rei.core.state_cache import OwnerKey, StateKey
+from rei.core.state_schema import DTYPE_KINEMATICS, jac_field
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.report import format_solve_report
+from rei.optimize.solvers import solve
 
 
 def build_state(x_all, *, pack=None, time=None, required=None):

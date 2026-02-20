@@ -7,9 +7,9 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.backends.state.dispatch.composite import CompositeStateBuilder
-from eiopt.backends.state.dispatch.template import BackendDispatchStateBuilder
-from eiopt.core.state_cache import OwnerKey, StateKey
+from rei.backends.state.dispatch.composite import CompositeStateBuilder
+from rei.backends.state.dispatch.template import BackendDispatchStateBuilder
+from rei.core.state_cache import OwnerKey, StateKey
 
 def _key(*, k: int, dtype: str, owner_type: str, owner_name: str, field: str) -> StateKey:
     return StateKey(

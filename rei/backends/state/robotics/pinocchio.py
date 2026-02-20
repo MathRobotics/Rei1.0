@@ -22,7 +22,7 @@ try:
     import pinocchio as pin
 except ImportError as e:  # pragma: no cover
     raise ImportError(
-        "`eiopt.backends.state.robotics.pinocchio` requires the robotics Pinocchio bindings. "
+        "`rei.backends.state.robotics.pinocchio` requires the robotics Pinocchio bindings. "
         "Install Pinocchio (e.g. via conda-forge) and retry."
     ) from e
 

@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.solvers import solve, solve_gauss_newton
-from eiopt.problem import NLSRuntimeConstraintProblem, as_linearized_problem
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.solvers import solve, solve_gauss_newton
+from rei.problem import NLSRuntimeConstraintProblem, as_linearized_problem
 
 
 class TestProblemCapabilities:

@@ -6,8 +6,8 @@ import copy
 
 import numpy as np
 
-from eiopt.optimize.builder import compile_nls_problem
-from eiopt.optimize.dsl import split_terms_by_component
+from rei.optimize.builder import compile_nls_problem
+from rei.optimize.dsl import split_terms_by_component
 
 class TestDslComponentSplit:
     def test_component_expr_selects_rows_and_jacobian(self) -> None:

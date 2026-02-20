@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from eiopt.core.state_schema import DTYPE_VISION
-from eiopt.optimize.dsl import prepare_vision_calibration_problem_dsl
+from rei.core.state_schema import DTYPE_VISION
+from rei.optimize.dsl import prepare_vision_calibration_problem_dsl
 
 class TestVisionCompileCore:
     def test_prepare_vision_calibration_problem_dsl_builds_standard_term(self) -> None:

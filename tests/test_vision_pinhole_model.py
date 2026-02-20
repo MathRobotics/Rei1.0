@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from eiopt.backends.state.vision.pinhole import (
+from rei.backends.state.vision.pinhole import (
     PINHOLE_RADIAL_PARAM_ORDER,
     build_pinhole_radial_vision_field_handler,
     pinhole_radial_reprojection,
     pinhole_radial_reprojection_jacobian,
 )
-from eiopt.optimize.solvers import solve
-from eiopt.optimize_backends.vision import compile_camera_calibration_problem
+from rei.optimize.solvers import solve
+from rei.optimize_backends.vision import compile_camera_calibration_problem
 
 def _points_xy() -> np.ndarray:
     return np.array(

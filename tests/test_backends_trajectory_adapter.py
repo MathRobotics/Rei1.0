@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 
-from eiopt.optimize_backends.trajectory_adapter import compile_trajectory_problem_with_adapter
+from rei.optimize_backends.trajectory_adapter import compile_trajectory_problem_with_adapter
 
 class _NoopStateBuilder:
     def build_state(self, q: np.ndarray, key: Any) -> dict[str, Any]:

@@ -4,7 +4,7 @@ import argparse
 
 import numpy as np
 
-from eiopt import (
+from rei import (
     RuntimeStationaritySource,
     build_reference_simplex_init,
     build_stationarity_gradient_matrix,
