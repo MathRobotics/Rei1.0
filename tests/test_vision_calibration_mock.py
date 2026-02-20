@@ -119,13 +119,15 @@ class TestVisionCalibrationMock:
             field_handlers=_build_handlers(points),
         )
 
-        x_star, initial_cost, cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             compiled.runtime,
             solver="gauss_newton",
             options={"max_iters": 16, "damping": 0.0, "line_search": False},
         )
+        x_star = out.solution
+        stats = out.stats
 
-        assert converged
-        assert initial_cost > 0.0
-        assert cost < 1e-20
+        assert stats.converged
+        assert float(stats.initial_objective or 0.0) > 0.0
+        assert float(stats.objective or 0.0) < 1e-20
         np.testing.assert_allclose(x_star, theta_true, rtol=0.0, atol=1e-10)

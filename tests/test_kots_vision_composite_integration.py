@@ -205,13 +205,14 @@ class TestKotsVisionCompositeIntegration:
         }
 
         runtime = compile_nls_problem(dsl, build_state=composite.build_state)
-        x_star, _cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             runtime,
             solver="gauss_newton",
             options={"max_iters": 20, "damping": 0.0, "line_search": False},
         )
+        x_star = out.solution
 
-        assert converged
-        assert cost < 1e-20
+        assert out.converged
+        assert float(out.stats.objective or 0.0) < 1e-20
         np.testing.assert_allclose(x_star, q_true, rtol=0.0, atol=1e-10)
         assert model.kinematics_calls > 0

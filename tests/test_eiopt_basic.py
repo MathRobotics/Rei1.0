@@ -20,9 +20,11 @@ from eiopt.optimize.dsl import (
 )
 from eiopt.optimize.builder import compile_nls_problem
 from eiopt.optimize.report import (
+    format_timing_report,
     format_solve_report,
     get_named_expr_value,
 )
+from eiopt.core import TimingReport, TimingSpan
 from eiopt.equations import (
     SimplexMinNormProblem,
     RuntimeStationaritySource,
@@ -77,15 +79,14 @@ def _compose_stationarity_weights(
         mode=active_mode,
     )
     inferred = np.zeros((len(contributions),), dtype=float)
-    solve_info = None
+    solve_out = None
     if len(active_idx) > 0:
         x0 = build_reference_simplex_init(contributions, active_idx)
-        w_active, solve_info = solve_simplex_min_norm(
+        solve_out = solve_simplex_min_norm(
             np.asarray(A_col[:, active_idx], dtype=float),
             x0=x0,
-            return_info=True,
         )
-        inferred[np.asarray(active_idx, dtype=int)] = np.asarray(w_active, dtype=float).reshape(-1)
+        inferred[np.asarray(active_idx, dtype=int)] = np.asarray(solve_out.solution, dtype=float).reshape(-1)
 
     return {
         "source": source,
@@ -96,7 +97,7 @@ def _compose_stationarity_weights(
         "active_grad_idx": tuple(int(i) for i in active_grad_idx),
         "active_res_idx": tuple(int(i) for i in active_res_idx),
         "inferred": inferred,
-        "solve_info": solve_info,
+        "solve_info": solve_out,
     }
 
 class TestEiOptBasic:
@@ -116,18 +117,20 @@ class TestEiOptBasic:
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
         x0 = pack.get().copy()
-        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(
+        out = solve_gauss_newton(
             runtime,
             max_iters=5,
             tol_r=1e-14,
             tol_dx=1e-14,
         )
-        assert converged
-        assert cost0 >= cost
-        assert cost < 1e-20
+        x_star = out.solution
+        stats = out.stats
+        assert stats.converged
+        assert float(stats.initial_objective or 0.0) >= float(stats.objective or 0.0)
+        assert float(stats.objective or 0.0) < 1e-20
         assert float(x_star[0]) == pytest.approx(3.0, rel=0.0, abs=10 ** (-(10)))
         assert float(x_var.x[0]) == pytest.approx(3.0, rel=0.0, abs=10 ** (-(10)))
-        report = format_solve_report(runtime, x0=x0, x_star=x_star)
+        report = format_solve_report(runtime, x0=x0, outcome=out)
         assert "x_minus_3" in report
         assert "Variables:" in report
         assert "x0=" in report
@@ -147,14 +150,16 @@ class TestEiOptBasic:
         problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             runtime,
             solver="gauss_newton",
             options={"max_iters": 5, "tol_r": 1e-14, "tol_dx": 1e-14},
         )
-        assert converged
-        assert cost0 >= cost
-        assert cost < 1e-20
+        x_star = out.solution
+        stats = out.stats
+        assert stats.converged
+        assert float(stats.initial_objective or 0.0) >= float(stats.objective or 0.0)
+        assert float(stats.objective or 0.0) < 1e-20
         assert float(x_star[0]) == pytest.approx(2.5, rel=0.0, abs=10 ** (-(10)))
 
     def test_solve_runtime_dispatches_gauss_newton_with_options(self) -> None:
@@ -172,7 +177,7 @@ class TestEiOptBasic:
         problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             runtime,
             solver="gauss_newton",
             options={
@@ -186,9 +191,11 @@ class TestEiOptBasic:
                 "ls_max_iters": 12,
             },
         )
-        assert converged
-        assert cost0 >= cost
-        assert cost < 1e-20
+        x_star = out.solution
+        stats = out.stats
+        assert stats.converged
+        assert float(stats.initial_objective or 0.0) >= float(stats.objective or 0.0)
+        assert float(stats.objective or 0.0) < 1e-20
         assert float(x_star[0]) == pytest.approx(2.5, rel=0.0, abs=10 ** (-(10)))
 
     def test_solve_runtime_raises_for_unknown_solver(self) -> None:
@@ -207,6 +214,25 @@ class TestEiOptBasic:
 
         with pytest.raises(ValueError, match="Unknown solver"):
             _ = solve(runtime, solver="unknown_solver")
+
+    def test_solve_runtime_rejects_solver_aliases(self) -> None:
+        x_var = Variable(name="x", x=np.array([0.0], dtype=float))
+        pack = VariablePack([x_var])
+
+        def value(ctx: RuntimeContext) -> np.ndarray:
+            return np.array([float(ctx.pack.vars[0].x[0])], dtype=float)
+
+        def blocks(ctx: RuntimeContext):
+            return [np.array([[1.0]], dtype=float)]
+
+        expr = DirectVectorExpr(name="x_identity", vars=[x_var], fn_value=value, fn_blocks=blocks)
+        problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+
+        with pytest.raises(ValueError, match="aliases are not supported"):
+            _ = solve(runtime, solver="gn")
+        with pytest.raises(ValueError, match="aliases are not supported"):
+            _ = solve(runtime, solver="scipy")
 
     def test_runtime_set_cost_weight_updates_specific_term_and_invalidates_cache(self) -> None:
         dsl = {
@@ -528,12 +554,13 @@ class TestEiOptBasic:
         x0 = reduction.lift(z0)
         assert float(np.sum(x0)) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(10)))
 
-        z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             reduction.runtime,
             solver="gauss_newton",
             options={"max_iters": 30, "tol_r": 1e-12, "tol_dx": 1e-12},
         )
-        assert converged
+        z_star = out.solution
+        assert out.converged
 
         x_star = reduction.lift(z_star)
         assert np.allclose(x_star, np.array([0.5, 0.5], dtype=float), atol=1e-8)
@@ -884,26 +911,60 @@ class TestEiOptBasic:
         assert np.allclose(A_from_stacked, A)
         assert idx_from_stacked == term_indices
 
-        w, info = solve_simplex_min_norm(A, return_info=True)
+        simplex_out = solve_simplex_min_norm(A)
+        w = simplex_out.solution
+        stats = simplex_out.stats
         assert np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6)
         assert float(np.sum(w)) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(8)))
-        assert bool(info["converged"])
-        assert float(info["objective"]) < 1e-12
+        assert stats.converged
+        assert float(stats.objective or 0.0) < 1e-12
+
+    def test_solve_simplex_min_norm_can_select_method(self) -> None:
+        A = np.array([[-1.0, 1.0]], dtype=float)
+
+        out_qr = solve_simplex_min_norm(
+            A,
+            method="qr_nullspace",
+        )
+        out_pg = solve_simplex_min_norm(
+            A,
+            method="projected_gradient",
+        )
+        w_qr = out_qr.solution
+        w_pg = out_pg.solution
+
+        assert np.allclose(w_qr, np.array([0.5, 0.5], dtype=float), atol=1e-6)
+        assert np.allclose(w_pg, np.array([0.5, 0.5], dtype=float), atol=1e-6)
+        assert np.allclose(w_qr, w_pg, atol=1e-6)
+        assert str(out_qr.meta.get("method", "")) == "qr_nullspace"
+        assert str(out_pg.meta.get("method", "")) == "projected_gradient"
+
+    def test_solve_simplex_min_norm_rejects_unknown_method(self) -> None:
+        A = np.array([[-1.0, 1.0]], dtype=float)
+        with pytest.raises(ValueError, match="method must be one of"):
+            _ = solve_simplex_min_norm(A, method="unknown_method")
+
+    def test_solve_simplex_min_norm_rejects_method_aliases(self) -> None:
+        A = np.array([[-1.0, 1.0]], dtype=float)
+        with pytest.raises(ValueError, match="aliases are not supported"):
+            _ = solve_simplex_min_norm(A, method="pg")
+        with pytest.raises(ValueError, match="aliases are not supported"):
+            _ = solve_simplex_min_norm(A, method="qr")
 
     def test_projected_linearized_solver_on_simplex_problem(self) -> None:
         A = np.array([[-1.0, 1.0]], dtype=float)
         problem = SimplexMinNormProblem(A=A, x=np.array([0.9, 0.1], dtype=float))
 
-        w, info = solve_projected_linearized_min_norm(
+        out = solve_projected_linearized_min_norm(
             problem,
             problem,
-            return_info=True,
         )
+        w = out.solution
         assert np.allclose(w, np.array([0.5, 0.5], dtype=float), atol=1e-6)
         assert float(np.sum(w)) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(8)))
         assert np.all(w >= -1e-12)
-        assert bool(info["converged"])
-        assert float(info["objective"]) < 1e-12
+        assert out.converged
+        assert float(out.stats.objective or 0.0) < 1e-12
 
     def test_stationarity_composition_basic(self) -> None:
         dsl = {
@@ -1203,6 +1264,55 @@ class TestEiOptBasic:
 
         with pytest.raises(ValueError, match="pass `required`"):
             _ = format_solve_report(runtime, include_kkt=True, kkt_kwargs={"required": []})
+
+    def test_format_solve_report_includes_timing_from_outcome(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_to_1",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [1.0]},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        out = solve(
+            runtime,
+            solver="gauss_newton",
+            options={"max_iters": 8, "tol_r": 1e-14, "tol_dx": 1e-14},
+        )
+        report = format_solve_report(
+            runtime,
+            outcome=out,
+            include_named=False,
+            include_kkt=False,
+        )
+        assert "Timing" in report
+        assert "seconds" in report
+        assert "total" in report
+
+    def test_format_timing_report_table(self) -> None:
+        timing = TimingReport(
+            total_seconds=1.5,
+            spans=(
+                TimingSpan(name="solve.setup", seconds=0.2, count=1),
+                TimingSpan(name="solve.backend", seconds=1.0, count=2),
+                TimingSpan(name="solve.finalize", seconds=0.3, count=1),
+            ),
+        )
+        text = format_timing_report(timing, title="solver timing")
+        assert "solver timing" in text
+        assert "span" in text
+        assert "seconds" in text
+        assert "share" in text
+        assert "count" in text
+        assert text.find("solve.backend") < text.find("solve.finalize")
+        assert "total" in text
 
     def test_constraint_kind_validation(self) -> None:
         dsl = {

@@ -436,12 +436,13 @@ class TestKotsTrajectoryDynamicsMock:
         runtime_for_solve = reduction.runtime
         assert runtime_for_solve is reduction.runtime
 
-        z_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             runtime_for_solve,
             solver="gauss_newton",
             options={"max_iters": 30, "tol_r": 1e-12, "tol_dx": 1e-12},
         )
-        assert converged
+        z_star = out.solution
+        assert out.converged
         p_star = reduction.lift(z_star)
         assert np.allclose(p_star, np.array([1.0, 2.0, 0.0, 0.0], dtype=float), atol=1e-8)
 

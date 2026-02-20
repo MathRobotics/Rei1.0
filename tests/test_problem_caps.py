@@ -75,16 +75,18 @@ class TestProblemCapabilities:
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         adapter = as_linearized_problem(runtime)
 
-        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(
+        out = solve_gauss_newton(
             adapter,
             max_iters=16,
             tol_r=1e-14,
             tol_dx=1e-14,
         )
+        x_star = out.solution
+        stats = out.stats
 
-        assert converged
-        assert cost0 >= cost
-        assert cost < 1e-20
+        assert stats.converged
+        assert float(stats.initial_objective or 0.0) >= float(stats.objective or 0.0)
+        assert float(stats.objective or 0.0) < 1e-20
         assert float(x_star[0]) == pytest.approx(2.5, rel=0.0, abs=1e-10)
 
     def test_dispatch_solve_accepts_linearized_problem_adapter(self) -> None:
@@ -105,13 +107,14 @@ class TestProblemCapabilities:
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         adapter = as_linearized_problem(runtime)
 
-        x_star, *_rest, converged = solve(
+        out = solve(
             adapter,
             solver="gauss_newton",
             options={"max_iters": 12, "tol_r": 1e-14, "tol_dx": 1e-14},
         )
+        x_star = out.solution
 
-        assert converged
+        assert out.converged
         assert float(x_star[0]) == pytest.approx(1.0, rel=0.0, abs=1e-10)
 
     def test_constraint_problem_adapter_extracts_eq_terms(self) -> None:

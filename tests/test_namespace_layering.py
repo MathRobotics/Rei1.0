@@ -69,10 +69,12 @@ class TestNamespaceLayering:
         problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
         runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
 
-        x_star, cost0, cost, _iters, _rnorm, _dxnorm, converged = solve_gauss_newton(runtime, max_iters=8)
-        assert converged
-        assert cost0 >= cost
-        assert cost < 1e-20
+        out = solve_gauss_newton(runtime, max_iters=8)
+        x_star = out.solution
+        stats = out.stats
+        assert stats.converged
+        assert float(stats.initial_objective or 0.0) >= float(stats.objective or 0.0)
+        assert float(stats.objective or 0.0) < 1e-20
         assert float(x_star[0]) == pytest.approx(1.0, rel=0.0, abs=10 ** (-(10)))
 
     def test_canonical_solver_entrypoint(self) -> None:

@@ -53,18 +53,20 @@ class TestSolversLiteoptMock:
         monkeypatch.setitem(sys.modules, "liteopt", liteopt_mod)
 
         runtime, x_var = _build_scalar_runtime(target=3.0)
-        x_star, cost0, cost, iters, rnorm, _dxnorm, converged = solve(
+        out = solve(
             runtime,
             solver="liteopt",
             options={"max_iters": 2000, "step_size": 0.1, "tol_grad": 1e-8},
         )
+        x_star = out.solution
+        stats = out.stats
 
         assert calls == {"step_size": 0.1, "max_iters": 2000, "tol_grad": 1e-8}
-        assert converged
-        assert cost0 >= cost
-        assert cost < 1e-12
-        assert rnorm < 1e-6
-        assert iters > 0
+        assert stats.converged
+        assert float(stats.initial_objective or 0.0) >= float(stats.objective or 0.0)
+        assert float(stats.objective or 0.0) < 1e-12
+        assert float(stats.residual_norm or 0.0) < 1e-6
+        assert int(stats.iterations) > 0
         assert float(x_star[0]) == pytest.approx(3.0, rel=0.0, abs=1e-6)
         assert float(x_var.x[0]) == pytest.approx(3.0, rel=0.0, abs=1e-6)
 
@@ -92,7 +94,7 @@ class TestSolversLiteoptMock:
         monkeypatch.setitem(sys.modules, "liteopt", liteopt_mod)
 
         runtime, _x_var = _build_scalar_runtime(target=0.0)
-        _x_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             runtime,
             solver="liteopt",
             options={
@@ -103,7 +105,7 @@ class TestSolversLiteoptMock:
             },
         )
 
-        assert converged
+        assert out.converged
         assert calls == {"step_size": 0.25, "max_iters": 12, "tol_grad": 5e-3}
 
     def test_solve_liteopt_accepts_generic_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,11 +124,11 @@ class TestSolversLiteoptMock:
         monkeypatch.setitem(sys.modules, "liteopt", liteopt_mod)
 
         runtime, _x_var = _build_scalar_runtime(target=0.0)
-        _x_star, _cost0, _cost, _iters, _rnorm, _dxnorm, converged = solve(
+        out = solve(
             runtime,
             solver="liteopt",
             options={"step_size": 0.2, "max_iters": 15, "tol_grad": 1e-5},
         )
 
-        assert converged
+        assert out.converged
         assert calls == {"step_size": 0.2, "max_iters": 15, "tol_grad": 1e-5}
