@@ -34,12 +34,11 @@ where = ["."]
 include = ["eiopt*"]
 
 [tool.uv.sources]
-mathrobo = { git = "https://github.com/MathRobotics/MathRobo.git", rev = "develop" }
 robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "develop" }
 
 [dependency-groups]
 kots = [
-    "mathrobo",
+    "mathrobo>=0.0.2",
     "robokots",
 ]
 pinocchio = [
