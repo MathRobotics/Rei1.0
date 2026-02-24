@@ -17,12 +17,12 @@ solver-cyipopt = [
     "cyipopt>=1.6.1",
 ]
 solver-liteopt = [
-    "liteopt",
+    "liteopt>=0.1.7",
 ]
 solvers = [
     "scipy>=1.17.0",
     "cyipopt>=1.6.1",
-    "liteopt",
+    "liteopt>=0.1.7",
 ]
 
 [build-system]
