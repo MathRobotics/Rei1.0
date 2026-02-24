@@ -38,7 +38,7 @@ robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "develo
 
 [dependency-groups]
 kots = [
-    "mathrobo>=0.0.2",
+    "mathrobo>=0.0.3",
     "robokots",
 ]
 pinocchio = [
