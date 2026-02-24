@@ -134,7 +134,34 @@ from rei import solve
 out = solve(
     runtime,
     solver="liteopt",
-    options={"max_iters": 1000, "step_size": 1e-3, "tol_grad": 1e-4},
+    options={
+        "method": "gd",  # default
+        "verbose": True,
+        "max_iters": 1000,
+        "step_size": 1e-3,
+        "tol_grad": 1e-4,
+        "line_search": True,
+        # optional non-finite guard (step-size retry)
+        "nonfinite_retries": 8,
+        "nonfinite_step_shrink": 0.2,
+        "min_step_size": 1e-12,
+    },
+)
+
+out_gn = solve(
+    runtime,
+    solver="liteopt",
+    options={
+        "method": "gn",
+        "verbose": True,
+        "max_iters": 200,
+        "lambda_": 1e-8,
+        "line_search_method": "strict_decrease",
+        "line_search": True,
+        "ls_beta": 0.5,
+        "ls_min_step": 1e-8,
+        "ls_max_steps": 12,
+    },
 )
 
 out_ipopt = solve(

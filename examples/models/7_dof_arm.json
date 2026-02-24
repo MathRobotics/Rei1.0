@@ -1,0 +1,168 @@
+{
+  "links": [
+    {
+      "id": 0,
+      "name": "world"
+    },
+    {
+      "id": 1,
+      "name": "base",
+      "mass": 10.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.1, 0.1, 0.1, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": 2,
+      "name": "arm1",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": 3,
+      "name": "arm2",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": 4,
+      "name": "arm3",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": 5,
+      "name": "arm4",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": 6,
+      "name": "arm5",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": 7,
+      "name": "arm6",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+    },
+    {
+      "id": 8,
+      "name": "end_effector",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+    }
+  ],
+  "joints": [
+    {
+      "id": 0,
+      "name": "root",
+      "type": "fix",
+      "parent_link_id": 0,
+      "child_link_id": 1,
+      "origin": {
+        "position": [0, 0, 0.0],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 1,
+      "name": "joint1",
+      "type": "revolute",
+      "parent_link_id": 1,
+      "child_link_id": 2,
+      "axis": [0, 0, 1],
+      "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [0, 0, 0.1],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 2,
+      "name": "joint2",
+      "type": "revolute",
+      "parent_link_id": 2,
+      "child_link_id": 3,
+      "axis": [0, 0, 1],
+      "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [1, 0, 0],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 3,
+      "name": "joint3",
+      "type": "revolute",
+      "parent_link_id": 3,
+      "child_link_id": 4,
+      "axis": [0, 0, 1],
+      "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [1, 0, 0],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 4,
+      "name": "joint4",
+      "type": "revolute",
+      "parent_link_id": 4,
+      "child_link_id": 5,
+      "axis": [0, 0, 1],
+      "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [1, 0, 0],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 5,
+      "name": "joint5",
+      "type": "revolute",
+      "parent_link_id": 5,
+      "child_link_id": 6,
+      "axis": [0, 0, 1],
+      "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [0, 0, 0],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 6,
+      "name": "joint6",
+      "type": "revolute",
+      "parent_link_id": 6,
+      "child_link_id": 7,
+      "axis": [0, 0, 1],
+      "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [0, 0, 0.1],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 7,
+      "name": "joint7",
+      "type": "revolute",
+      "parent_link_id": 7,
+      "child_link_id": 8,
+      "axis": [0, 0, 1],
+      "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [1, 0, 0],
+        "orientation": [1, 0, 0, 0]
+      }
+    }
+  ]
+}

@@ -1,0 +1,224 @@
+[time]
+N = 20
+dt = 0.1
+
+[trajectory]
+type = "bspline"
+var = "p"
+degree = 4
+num_ctrl_points = 50
+
+[[variables]]
+name = "p"
+init = { fill = 0.0 }
+
+[[terms]]
+[terms.constraint]
+kind = "eq"
+
+[terms.expr]
+type = "sub"
+name = "q_init"
+
+[terms.expr.a]
+type = "get_state"
+name = "joint_q_init"
+
+[terms.expr.a.key]
+k = 0
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "coord"
+field = "q"
+
+[terms.expr.a.jac]
+var = "p"
+
+[terms.expr.b]
+type = "const"
+var = "p"
+name = "target_q_init"
+value = { fill = 1.57 }
+
+[terms.cost]
+type = "scalar_weight"
+w = 100.0
+
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_q"
+
+[[terms]]
+[terms.constraint]
+kind = "eq"
+
+[terms.expr]
+type = "sub"
+name = "q_terminal"
+
+[terms.expr.a]
+type = "get_state"
+name = "joint_q_terminal"
+
+[terms.expr.a.key]
+k = "last"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "coord"
+field = "q"
+
+[terms.expr.a.jac]
+var = "p"
+
+[terms.expr.b]
+type = "const"
+var = "p"
+name = "target_q_terminal"
+value = { fill = -1.57 }
+
+[terms.cost]
+type = "scalar_weight"
+w = 100.0
+
+[[terms]]
+[terms.constraint]
+kind = "eq"
+[terms.expr]
+type = "sub"
+name = "qdot_init"
+
+[terms.expr.a]
+type = "get_traj_var"
+name = "joint_qdot_init"
+var = "p"
+derivative_order = 1
+derivative_wrt = "time"
+k = 0
+
+[terms.expr.b]
+type = "const"
+var = "p"
+name = "target_qdot_init"
+value = { fill = 0.0 }
+
+[terms.cost]
+type = "scalar_weight"
+w = 100.0
+
+[[terms]]
+[terms.constraint]
+kind = "eq"
+
+[terms.expr]
+type = "sub"
+name = "qdot_terminal"
+
+[terms.expr.a]
+type = "get_traj_var"
+name = "joint_qdot_terminal"
+var = "p"
+derivative_order = 1
+derivative_wrt = "time"
+k = "last"
+
+[terms.expr.b]
+type = "const"
+var = "p"
+name = "target_qdot_terminal"
+value = { fill = 0.0 }
+
+[terms.cost]
+type = "scalar_weight"
+w = 100.0
+
+[[terms]]
+[terms.expr]
+type = "get_traj_var"
+name = "qdot_traj_regularization"
+var = "p"
+derivative_order = 1
+derivative_wrt = "time"
+
+[terms.cost]
+type = "scalar_weight"
+w = 1e-4
+
+[[terms]]
+[terms.expr]
+type = "get_traj_var"
+name = "qdot_traj_regularization"
+var = "p"
+derivative_order = 2
+derivative_wrt = "time"
+
+[terms.cost]
+type = "scalar_weight"
+w = 1e-4
+
+[[terms]]
+[terms.expr]
+type = "stack"
+name = "torque_traj_regularization"
+
+[terms.expr.range]
+k0 = 0
+k1 = "last"
+
+[terms.expr.inner]
+type = "get_state"
+name = "torque_k"
+
+[terms.expr.inner.key]
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque"
+
+[terms.expr.inner.jac]
+var = "p"
+
+[terms.cost]
+type = "scalar_weight"
+w = 1e-4
+
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_torque"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque"
+
+[[terms]]
+[terms.expr]
+type = "stack"
+name = "torque_d1_traj_regularization"
+
+[terms.expr.range]
+k0 = 0
+k1 = "last"
+
+[terms.expr.inner]
+type = "get_state"
+name = "torque_d1_k"
+
+[terms.expr.inner.key]
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque_d1"
+
+[terms.expr.inner.jac]
+var = "p"
+
+[terms.cost]
+type = "scalar_weight"
+w = 1e-10
+
+[terms.attrs.plot]
+type = "state_traj"
+name = "joint_torque_d1"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "dynamics"
+field = "torque_d1"

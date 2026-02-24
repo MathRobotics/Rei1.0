@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from rei import (
     RuntimeStationaritySource,
+    build_ioc_log_sections,
     build_stationarity_gradient_matrix,
     format_timing_report,
+    format_ioc_report,
     filter_stationarity_contributions,
     select_active_stationarity_indices,
     solve_simplex_min_norm,
@@ -16,6 +20,12 @@ from rei.optimize.builder import load_problem_toml
 from rei.optimize.kkt import check_kkt_conditions
 from rei.optimize.reductions import build_nullspace_equality_reduction
 from rei.optimize.solvers import solve
+from rei.optimize.textlog import (
+    build_solver_iter_logger,
+    build_timestamped_log_path,
+    format_solver_text_log,
+    write_text_log,
+)
 from rei.optimize_backends.kots import compile_kots_trajectory_problem
 
 try:
@@ -30,15 +40,53 @@ except ImportError as e:  # pragma: no cover
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 # _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.json"
-_DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"  # up to torque_d1
-_ORDER = 5
+# _MODEL_PATH = _EXAMPLES_DIR / "models" / "7_dof_arm.json"
+# _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"  # up to torque_d1
+_DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics.toml"  # up to torque_d1
+_ORDER = 4
+_LOG_DIR = _EXAMPLES_DIR / "logs"
+_LOG_PREFIX = "11_forward_then_inverse_ioc"
+_PLOT_OUTPUT_DEFAULT = _LOG_DIR / "11_forward_plot.png"
 
 # Simple fixed settings (edit directly if needed)
 _FORWARD_SOLVER = "gauss_newton"  # "gauss_newton" | "scipy_minimize" | "cyipopt" | "liteopt"
-_FORWARD_OPTIONS = {"max_iters": 120, "tol_dx": 1e-8}
-if _FORWARD_SOLVER == "cyipopt":
-    # solve(..., solver="cyipopt") forwards unknown keys to IPOPT backend options.
-    _FORWARD_OPTIONS.update({"print_level": 5, "print_timing_statistics": "yes"})
+if _FORWARD_SOLVER == "gauss_newton":
+    _FORWARD_OPTIONS = {
+        "max_iters": 120,
+        "tol_dx": 1e-12,
+        "line_search": True,
+        "ls_beta": 0.5,
+        "ls_min_step": 1e-10,
+        "ls_max_iters": 50,
+        "verbose": True,
+        "verbose_every": 1,
+    }
+elif _FORWARD_SOLVER == "liteopt":
+    _FORWARD_OPTIONS = {
+        "method": "gn",
+        "max_iters": 300,
+        "tol_r": 1e-8,
+        "tol_dx": 1e-10,
+        "lambda_": 1e-8,
+        "line_search_method": "strict_decrease",
+        "verbose": True,
+        "line_search": True,
+        "ls_beta": 0.5,
+        # "ls_min_step": 1e-8,
+        "ls_max_steps": 20,
+    }
+elif _FORWARD_SOLVER == "scipy_minimize":
+    _FORWARD_OPTIONS = {"max_iters": 120, "tol": 1e-8}
+elif _FORWARD_SOLVER == "cyipopt":
+    _FORWARD_OPTIONS = {
+        "max_iters": 120,
+        "tol": 1e-8,
+        # solve(..., solver="cyipopt") forwards unknown keys to IPOPT backend options.
+        "print_level": 5,
+        "print_timing_statistics": "yes",
+    }
+else:
+    raise ValueError(f"Unsupported _FORWARD_SOLVER={_FORWARD_SOLVER!r}")
 _ACTIVE_MODE = "gradient"
 _IOC_MAX_ITERS = 10000
 _IKKT_TOL = 1e-6
@@ -54,8 +102,23 @@ def _normalize_simplex(v: np.ndarray) -> np.ndarray:
     return x / s
 
 
-
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Forward-then-inverse IOC example with optional forward plot export."
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Save forward plot series declared in term.attrs.plot.",
+    )
+    parser.add_argument(
+        "--plot-output",
+        type=Path,
+        default=_PLOT_OUTPUT_DEFAULT,
+        help="Output image path used with --plot.",
+    )
+    args = parser.parse_args()
+
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _DSL_PATH.is_file():
@@ -66,18 +129,26 @@ def main() -> int:
     kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
 
     # 1) Forward optimization (solve in nullspace-reduced coordinates)
-    runtime_fwd_full = compile_kots_trajectory_problem(
+    compiled_fwd = compile_kots_trajectory_problem(
         dsl,
         model=kots,
         data=kots.state_dict_,
-    ).runtime
+    )
+    runtime_fwd_full = compiled_fwd.runtime
     reduction_fwd = build_nullspace_equality_reduction(runtime_fwd_full)
     runtime_fwd = reduction_fwd.runtime
 
+    forward_options_requested = dict(_FORWARD_OPTIONS)
+    forward_options, on_iter_fwd, forward_iter_history = build_solver_iter_logger(
+        _FORWARD_SOLVER,
+        forward_options_requested,
+        print_prefix="forward",
+    )
     out_fwd = solve(
         runtime_fwd,
         solver=_FORWARD_SOLVER,
-        options=_FORWARD_OPTIONS,
+        options=forward_options,
+        on_iter=on_iter_fwd,
     )
     z_star = np.asarray(out_fwd.solution, dtype=float).reshape(-1)
     x_star_full = np.asarray(reduction_fwd.lift(z_star), dtype=float).reshape(-1)
@@ -171,35 +242,126 @@ def main() -> int:
         f"dxnorm={float(stats_fwd.step_norm or 0.0):.3e}"
     )
     print(format_timing_report(out_fwd.timing, title="forward timing"))
+
     print(
-        f"KKT: ok={kkt.ok} stationarity_inf={kkt.stationarity_inf:.3e} "
-        f"eq_violation_inf={kkt.eq_violation_inf:.3e} ineq_violation_inf={kkt.ineq_violation_inf:.3e}"
-    )
-    print(
-        f"iKKT(active stationarity): ok={ikkt_ok} residual_norm={ikkt_residual:.3e} tol={_IKKT_TOL:.3e}"
-    )
-    if not ioc_identifiable:
-        print(
-            "iKKT note: no active objective stationarity terms were selected. "
-            "This IOC setup is unidentifiable at the current forward solution."
+        format_ioc_report(
+            active_mode=_ACTIVE_MODE,
+            active_idx=list(active_idx),
+            active_grad_idx=list(active_grad_idx),
+            active_res_idx=list(active_res_idx),
+            term_indices=list(term_indices),
+            w_true=w_true,
+            w_hat=w_hat,
+            ioc_identifiable=ioc_identifiable,
+            ikkt_ok=ikkt_ok,
+            ikkt_residual=ikkt_residual,
+            ikkt_tol=_IKKT_TOL,
+            kkt=kkt,
+            simplex_out=simplex_out,
         )
-    print(f"active local idx (selected)={list(active_idx)}")
-    print(f"active local idx (gradient)={list(active_grad_idx)}")
-    print(f"active local idx (residual)={list(active_res_idx)}")
-    print(f"term_indices={list(term_indices)}")
-    print(f"w_true={w_true}")
-    print(f"w_hat={w_hat}")
-    print(f"L1 error={float(np.linalg.norm(w_hat - w_true, ord=1)):.3e}")
+    )
     if simplex_out is not None:
-        simplex_stats = simplex_out.stats
-        print(
-            "simplex: "
-            f"status={simplex_stats.status} "
-            f"converged={simplex_stats.converged} "
-            f"iters={simplex_stats.iterations} "
-            f"objective={float(simplex_stats.objective or float('nan')):.3e}"
-        )
         print(format_timing_report(simplex_out.timing, title="simplex timing"))
+
+    extra_sections = build_ioc_log_sections(
+        callback_rows=len(forward_iter_history),
+        active_mode=_ACTIVE_MODE,
+        active_idx=list(active_idx),
+        active_grad_idx=list(active_grad_idx),
+        active_res_idx=list(active_res_idx),
+        term_indices=list(term_indices),
+        w_true=w_true,
+        w_hat=w_hat,
+        ioc_identifiable=ioc_identifiable,
+        ikkt_ok=ikkt_ok,
+        ikkt_residual=ikkt_residual,
+        ikkt_tol=_IKKT_TOL,
+        ioc_max_iters=_IOC_MAX_ITERS,
+        kkt=kkt,
+        simplex_out=simplex_out,
+    )
+
+    log_text = format_solver_text_log(
+        title="11_forward_then_inverse_ioc log",
+        solver=_FORWARD_SOLVER,
+        outcome=out_fwd,
+        requested_options=forward_options_requested,
+        solve_options=forward_options,
+        iter_history=forward_iter_history,
+        header={
+            "model": str(_MODEL_PATH),
+            "dsl": str(_DSL_PATH),
+            "order": int(_ORDER),
+        },
+        timing_title="forward timing",
+        extra_sections=extra_sections,
+    )
+    log_path = build_timestamped_log_path(_LOG_DIR, prefix=_LOG_PREFIX)
+    write_text_log(log_path, log_text)
+    print(f"text log saved: {log_path}")
+
+    if args.plot:
+        from rei.optimize.plot import (
+            collect_plot_series_from_term_attrs,
+            collect_trajectory_derivative_plot_series,
+        )
+        import matplotlib.pyplot as plt
+
+        groups: dict[str, list[Any]] = {}
+        group_order: list[str] = []
+
+        def _add_group(name: str, item: Any) -> None:
+            key = str(name)
+            if key not in groups:
+                groups[key] = []
+                group_order.append(key)
+            groups[key].append(item)
+
+        plot_series = list(collect_plot_series_from_term_attrs(runtime_fwd_full, strict=False))
+        plot_series.extend(
+            collect_trajectory_derivative_plot_series(
+                compiled_fwd,
+                derivative_orders=(1, 2),
+            )
+        )
+        for item in plot_series:
+            _add_group(item.name, item)
+
+        if len(group_order) == 0:
+            raise ValueError(
+                "forward plot: no plot series found. "
+                "Add term.attrs.plot entries or ensure trajectory derivatives are available."
+            )
+
+        fig, axes = plt.subplots(nrows=len(group_order), ncols=1, sharex=True)
+        if len(group_order) == 1:
+            axes_list = [axes]
+        else:
+            axes_list = list(np.asarray(axes, dtype=object).reshape(-1))
+
+        has_time_axis_any = False
+        for group_name, ax_i in zip(group_order, axes_list):
+            items = groups[group_name]
+            has_time_axis = any(item.x_axis == "time" for item in items)
+            has_time_axis_any = has_time_axis_any or has_time_axis
+            for item in items:
+                for j in range(int(item.y.shape[1])):
+                    ax_i.plot(item.x, item.y[:, j], label=item.line_label(j))
+            ax_i.set_ylabel("value")
+            ax_i.set_title(group_name)
+            ax_i.grid(True, alpha=0.3)
+            handles, _labels = ax_i.get_legend_handles_labels()
+            if len(handles) > 0:
+                ax_i.legend()
+
+        axes_list[-1].set_xlabel("time [s]" if has_time_axis_any else "k")
+        fig.suptitle("11_forward_then_inverse_ioc (forward)")
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
+
+        plot_path = Path(args.plot_output)
+        plot_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(plot_path, dpi=200)
+        print(f"forward plot saved: {plot_path} (groups={len(group_order)})")
 
     return 0
 

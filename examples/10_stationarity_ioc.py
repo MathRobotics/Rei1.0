@@ -10,9 +10,9 @@ from rei import (
     build_stationarity_gradient_matrix,
     compile_nls_problem,
     filter_stationarity_contributions,
+    format_ioc_report,
     select_active_stationarity_indices,
     solve_simplex_min_norm,
-    term_constraint_kind,
 )
 
 
@@ -97,38 +97,25 @@ def main() -> None:
 
     print("=== 10_stationarity_ioc ===")
     print(f"x_demo={x_demo}")
-    print(f"term_indices={list(term_indices)}")
     print(f"A shape={A_col.shape}")
-    print(f"active local idx ({args.active_mode})={list(active_idx)}")
-    print(f"active local idx (gradient)={list(active_grad_idx)}")
-    print(f"active local idx (residual)={list(active_res_idx)}")
-    print(f"inferred={w_hat}")
     x0_ref = build_reference_simplex_init(contributions, active_idx)
     if x0_ref is not None:
         print(f"reference normalized (active only)={x0_ref}")
-    if simplex_out is not None:
-        stats = simplex_out.stats
-        print(
-            "simplex solver: "
-            f"status={stats.status} "
-            f"converged={stats.converged} "
-            f"iters={stats.iterations} "
-            f"objective={float(stats.objective or float('nan')):.3e}"
+    print(
+        format_ioc_report(
+            title="IOC",
+            active_mode=str(args.active_mode),
+            active_idx=list(active_idx),
+            active_grad_idx=list(active_grad_idx),
+            active_res_idx=list(active_res_idx),
+            term_indices=list(term_indices),
+            w_hat=w_hat,
+            ioc_identifiable=(len(active_idx) > 0),
+            simplex_out=simplex_out,
+            contributions=contributions,
+            include_stationarity_terms=True,
         )
-
-    print()
-    for i, term in enumerate(contributions):
-        is_constraint, kind = term_constraint_kind(dict(term.attrs))
-        kind_str = "" if kind is None else f", kind={kind}"
-        ttype = "constraint" if is_constraint else "objective"
-        grad_norm = float(np.linalg.norm(np.asarray(term.gradient, dtype=float).reshape(-1)))
-        print(
-            f"[stationarity] term[{term.term_index}] {term.name} ({ttype}{kind_str}) "
-            f"local={i} "
-            f"||J^T r||={grad_norm:.6e} "
-            f"||r_w||={float(term.weighted_residual_norm or 0.0):.6e} "
-            f"w_hat={float(w_hat[i]):.6e}"
-        )
+    )
 
 
 if __name__ == "__main__":

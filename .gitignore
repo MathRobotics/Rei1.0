@@ -6,3 +6,4 @@
 *.png
 uv.lock
 .python-version
+*/logs
