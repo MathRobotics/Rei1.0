@@ -28,18 +28,20 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
-_MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
+# _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
+_MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.json"
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"  # up to torque_d1
 _ORDER = 5
 
 # Simple fixed settings (edit directly if needed)
-_FORWARD_SOLVER = "gauss_newton"
+_FORWARD_SOLVER = "gauss_newton"  # "gauss_newton" | "scipy_minimize" | "cyipopt" | "liteopt"
 _FORWARD_OPTIONS = {"max_iters": 120, "tol_dx": 1e-8}
+if _FORWARD_SOLVER == "cyipopt":
+    # solve(..., solver="cyipopt") forwards unknown keys to IPOPT backend options.
+    _FORWARD_OPTIONS.update({"print_level": 5, "print_timing_statistics": "yes"})
 _ACTIVE_MODE = "gradient"
 _IOC_MAX_ITERS = 10000
 _IKKT_TOL = 1e-6
-
-
 
 def _normalize_simplex(v: np.ndarray) -> np.ndarray:
     x = np.asarray(v, dtype=float).reshape(-1)
@@ -137,9 +139,10 @@ def main() -> int:
     )
 
     w_hat = np.zeros((len(contrib_inv),), dtype=float)
-    ikkt_residual = 0.0
+    ikkt_residual = float("nan")
     simplex_out = None
-    if len(active_idx) > 0:
+    ioc_identifiable = len(active_idx) > 0
+    if ioc_identifiable:
         A_active = np.asarray(A_col[:, active_idx], dtype=float)
         simplex_out = solve_simplex_min_norm(
             A_active,
@@ -150,9 +153,9 @@ def main() -> int:
         w_hat[np.asarray(active_idx, dtype=int)] = np.asarray(simplex_out.solution, dtype=float).reshape(-1)
 
     w_hat = _normalize_simplex(w_hat)
-    if len(active_idx) > 0:
+    if ioc_identifiable:
         ikkt_residual = float(np.linalg.norm(np.asarray(A_col[:, active_idx], dtype=float) @ w_hat[np.asarray(active_idx, dtype=int)]))
-    ikkt_ok = bool(ikkt_residual <= float(_IKKT_TOL))
+    ikkt_ok = bool(ioc_identifiable and ikkt_residual <= float(_IKKT_TOL))
 
     # 3) Report
     print("=== 11_forward_then_inverse_ioc ===")
@@ -175,6 +178,11 @@ def main() -> int:
     print(
         f"iKKT(active stationarity): ok={ikkt_ok} residual_norm={ikkt_residual:.3e} tol={_IKKT_TOL:.3e}"
     )
+    if not ioc_identifiable:
+        print(
+            "iKKT note: no active objective stationarity terms were selected. "
+            "This IOC setup is unidentifiable at the current forward solution."
+        )
     print(f"active local idx (selected)={list(active_idx)}")
     print(f"active local idx (gradient)={list(active_grad_idx)}")
     print(f"active local idx (residual)={list(active_res_idx)}")

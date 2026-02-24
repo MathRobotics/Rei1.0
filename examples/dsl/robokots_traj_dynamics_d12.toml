@@ -38,7 +38,7 @@ var = "p"
 type = "const"
 var = "p"
 name = "target_q_init"
-value = [1.57, 0.0]
+value = { fill = 1.57 }
 
 [terms.cost]
 type = "scalar_weight"
@@ -74,7 +74,7 @@ var = "p"
 type = "const"
 var = "p"
 name = "target_q_terminal"
-value = [-1.57, 0.0]
+value = { fill = -1.57 }
 
 [terms.cost]
 type = "scalar_weight"
