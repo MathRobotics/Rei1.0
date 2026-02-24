@@ -17,6 +17,111 @@ Array = np.ndarray
 SolveResult = SolveOutcome
 IterCallback = Callable[[int, float, float], None]
 
+_COMMON_SOLVE_OPTION_KEYS = frozenset(
+    {
+        "weighted",
+        "term_indices",
+    }
+)
+
+_SOLVER_REI_OPTION_KEYS: dict[str, frozenset[str]] = {
+    "gauss_newton": frozenset(
+        {
+            "max_iters",
+            "tol_r",
+            "tol_dx",
+            "damping",
+            "line_search",
+            "ls_beta",
+            "ls_min_step",
+            "ls_max_iters",
+        }
+    ),
+    "scipy_minimize": frozenset(
+        {
+            "method",
+            "max_iters",
+            "tol",
+            "bounds",
+        }
+    ),
+    "cyipopt": frozenset(
+        {
+            "max_iters",
+            "tol",
+            "bounds",
+        }
+    ),
+    "liteopt": frozenset(
+        {
+            "max_iters",
+            "step_size",
+            "tol_grad",
+        }
+    ),
+}
+
+_ALL_REI_SOLVER_OPTION_KEYS = frozenset().union(*_SOLVER_REI_OPTION_KEYS.values())
+
+
+def _allowed_solve_option_keys(solver_key: str) -> frozenset[str]:
+    allowed = set(_COMMON_SOLVE_OPTION_KEYS)
+    allowed.update(_SOLVER_REI_OPTION_KEYS[solver_key])
+    if solver_key != "gauss_newton":
+        allowed.add("backend_options")
+    return frozenset(allowed)
+
+
+def _format_option_names(keys: Iterable[str]) -> str:
+    return ", ".join(sorted(str(k) for k in keys))
+
+
+def _normalize_backend_options_for_solver(
+    options: Mapping[str, Any],
+    *,
+    solver_key: str,
+) -> Mapping[str, Any] | None:
+    allowed = _allowed_solve_option_keys(solver_key)
+    unknown = tuple(k for k in options if k not in allowed)
+    if not unknown:
+        if solver_key == "gauss_newton":
+            return None
+        return _as_options_mapping(
+            options.get("backend_options", None),
+            where=f"solve({solver_key})",
+        )
+
+    if solver_key == "gauss_newton":
+        allowed_text = _format_option_names(_allowed_solve_option_keys("gauss_newton"))
+        raise ValueError(
+            "solve(gauss_newton): unsupported option(s): "
+            f"{_format_option_names(unknown)}. "
+            f"Allowed options are: {allowed_text}."
+        )
+
+    foreign_rei = tuple(
+        k for k in unknown if str(k) in (_ALL_REI_SOLVER_OPTION_KEYS - _SOLVER_REI_OPTION_KEYS[solver_key])
+    )
+    if foreign_rei:
+        allowed_text = _format_option_names(_allowed_solve_option_keys(solver_key))
+        raise ValueError(
+            f"solve({solver_key}): unsupported solver option(s): "
+            f"{_format_option_names(foreign_rei)}. "
+            f"Allowed options are: {allowed_text}. "
+            "Backend-specific options must be under options['backend_options'] "
+            "or additional top-level keys that are not rei solver options."
+        )
+
+    backend = _as_options_mapping(
+        options.get("backend_options", None),
+        where=f"solve({solver_key})",
+    )
+    backend_local: dict[str, Any] = {} if backend is None else dict(backend)
+    for k in unknown:
+        if k not in backend_local:
+            backend_local[k] = options[k]
+    return backend_local
+
 
 class _LinearizedObjective:
     def __init__(
@@ -463,18 +568,30 @@ def solve(
 
     scipy_minimize:
       method, max_iters, tol, bounds, backend_options
+      (unknown top-level keys are forwarded to scipy's options dict)
 
     cyipopt:
       max_iters, tol, bounds, backend_options
+      (unknown top-level keys are forwarded to IPOPT options dict)
 
     liteopt:
       max_iters, step_size, tol_grad, backend_options
+      (unknown top-level keys are forwarded to liteopt.gd kwargs)
     """
 
     key = str(solver).strip().lower()
+    if key not in _SOLVER_REI_OPTION_KEYS:
+        raise ValueError(
+            "Unknown solver. Use one of: "
+            "'gauss_newton', 'scipy_minimize', 'cyipopt', 'liteopt'. "
+            "Solver aliases are not supported. "
+            f"Got solver={solver!r}."
+        )
+
     opts = _merge_options(options)
     weighted = bool(opts.get("weighted", True))
     term_indices = _normalize_term_indices_option(opts.get("term_indices", None))
+    backend_options = _normalize_backend_options_for_solver(opts, solver_key=key)
 
     if key == "gauss_newton":
         return solve_gauss_newton(
@@ -505,7 +622,7 @@ def solve(
             max_iters=int(opts.get("max_iters", 200)),
             tol=(None if tol is None else float(tol)),
             bounds=opts.get("bounds", None),
-            options=_as_options_mapping(opts.get("backend_options", None), where="solve(scipy)"),
+            options=backend_options,
             on_iter=on_iter,
             profiler=profiler,
         )
@@ -520,7 +637,7 @@ def solve(
             max_iters=int(opts.get("max_iters", 200)),
             tol=(None if tol is None else float(tol)),
             bounds=opts.get("bounds", None),
-            options=_as_options_mapping(opts.get("backend_options", None), where="solve(cyipopt)"),
+            options=backend_options,
             on_iter=on_iter,
             profiler=profiler,
         )
@@ -534,17 +651,11 @@ def solve(
             max_iters=int(opts.get("max_iters", 200)),
             step_size=float(opts.get("step_size", 1e-3)),
             tol_grad=float(opts.get("tol_grad", 1e-4)),
-            options=_as_options_mapping(opts.get("backend_options", None), where="solve(liteopt)"),
+            options=backend_options,
             on_iter=on_iter,
             profiler=profiler,
         )
-
-    raise ValueError(
-        "Unknown solver. Use one of: "
-        "'gauss_newton', 'scipy_minimize', 'cyipopt', 'liteopt'. "
-        "Solver aliases are not supported. "
-        f"Got solver={solver!r}."
-    )
+    raise RuntimeError(f"internal error: unsupported solver dispatch key {key!r}.")
 
 __all__ = [
     "nls",
