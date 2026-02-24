@@ -439,6 +439,197 @@ def collect_plot_series_from_term_attrs(
     return out
 
 
+def _default_joint_series_name(order: int) -> str:
+    if order == 0:
+        return "joint_q"
+    if order == 1:
+        return "joint_qdot"
+    if order == 2:
+        return "joint_qddot"
+    return f"joint_q_d{order}"
+
+
+def _default_joint_series_field(order: int) -> str:
+    if order == 0:
+        return "q"
+    if order == 1:
+        return "qdot"
+    if order == 2:
+        return "qddot"
+    return f"q_d{order}"
+
+
+def _resolve_runtime_pack_var(
+    runtime: NLSRuntime,
+    *,
+    var_name: str,
+) -> Array:
+    pack = getattr(runtime, "pack", None)
+    if pack is None:
+        raise ValueError("collect_trajectory_derivative_plot_series: runtime.pack is None.")
+
+    vars_list = getattr(pack, "vars", None)
+    if vars_list is None:
+        raise ValueError("collect_trajectory_derivative_plot_series: runtime.pack.vars is missing.")
+
+    var_name_norm = str(var_name)
+    for var in vars_list:
+        if str(getattr(var, "name", "")) != var_name_norm:
+            continue
+        return np.asarray(getattr(var, "x"), dtype=float).reshape(-1).copy()
+
+    raise ValueError(
+        "collect_trajectory_derivative_plot_series: "
+        f"variable {var_name_norm!r} was not found in runtime.pack.vars."
+    )
+
+
+def _resolve_traj_x_values(
+    *,
+    runtime: NLSRuntime,
+    steps: int,
+    dt: float | None,
+) -> tuple[Array, str]:
+    time = runtime.time
+    if time is not None and hasattr(time, "t"):
+        try:
+            x_time = np.asarray([float(time.t(int(k))) for k in range(int(steps))], dtype=float)
+            if x_time.size <= 1:
+                return x_time, "time"
+            dx = np.diff(x_time)
+            if np.any(np.abs(dx) > 0.0):
+                return x_time, "time"
+        except Exception:
+            pass
+
+    if dt is not None:
+        dt_f = float(dt)
+        if dt_f > 0.0:
+            return dt_f * np.arange(int(steps), dtype=float), "time"
+
+    return np.arange(int(steps), dtype=float), "index"
+
+
+def collect_trajectory_derivative_plot_series(
+    compiled: Any,
+    *,
+    derivative_orders: Iterable[int] = (1, 2),
+    names: Mapping[int, str] | None = None,
+    p: Array | None = None,
+    strict: bool = False,
+) -> list[TermAttrPlotSeries]:
+    """Collect trajectory derivative plot series from a compiled trajectory problem.
+
+    The `compiled` object is expected to expose:
+      - `runtime`
+      - `trajectory_derivative_maps`
+      - `p_var` (used when `p` is not given)
+      - optional `dt`
+    """
+
+    runtime = getattr(compiled, "runtime", None)
+    if not isinstance(runtime, NLSRuntime):
+        raise TypeError(
+            "collect_trajectory_derivative_plot_series: "
+            "compiled.runtime must be an NLSRuntime."
+        )
+
+    maps_raw = getattr(compiled, "trajectory_derivative_maps", None)
+    if not isinstance(maps_raw, Mapping):
+        raise TypeError(
+            "collect_trajectory_derivative_plot_series: "
+            "compiled.trajectory_derivative_maps must be a mapping."
+        )
+    maps = {int(k): v for k, v in maps_raw.items()}
+
+    order_list: list[int] = []
+    seen_orders: set[int] = set()
+    for order_raw in derivative_orders:
+        order = int(order_raw)
+        if order < 0:
+            raise ValueError(
+                "collect_trajectory_derivative_plot_series: "
+                f"derivative order must be >= 0, got {order}."
+            )
+        if order in seen_orders:
+            continue
+        seen_orders.add(order)
+        order_list.append(order)
+
+    if p is None:
+        p_var = str(getattr(compiled, "p_var", "")).strip()
+        if p_var == "":
+            raise ValueError(
+                "collect_trajectory_derivative_plot_series: "
+                "compiled.p_var must be non-empty when `p` is omitted."
+            )
+        p_vec = _resolve_runtime_pack_var(runtime, var_name=p_var)
+    else:
+        p_vec = np.asarray(p, dtype=float).reshape(-1).copy()
+
+    dt_raw = getattr(compiled, "dt", None)
+    dt = None if dt_raw is None else float(dt_raw)
+    name_overrides: dict[int, str] = {}
+    if names is not None:
+        name_overrides = {int(k): str(v) for k, v in names.items()}
+
+    out: list[TermAttrPlotSeries] = []
+    for order in order_list:
+        traj = maps.get(int(order), None)
+        if traj is None:
+            if strict:
+                raise ValueError(
+                    "collect_trajectory_derivative_plot_series: "
+                    f"trajectory derivative map for order={order} was not found."
+                )
+            continue
+
+        A = np.asarray(getattr(traj, "A"), dtype=float)
+        b = np.asarray(getattr(traj, "b"), dtype=float).reshape(-1)
+        steps = int(getattr(traj, "steps"))
+        q_dim = int(getattr(traj, "q_dim"))
+        if A.ndim != 2:
+            raise ValueError(
+                "collect_trajectory_derivative_plot_series: "
+                f"trajectory map A must be 2D, got shape {A.shape} for order={order}."
+            )
+        if int(A.shape[1]) != int(p_vec.size):
+            raise ValueError(
+                "collect_trajectory_derivative_plot_series: "
+                "parameter size mismatch while evaluating trajectory map. "
+                f"order={order}, A shape={A.shape}, p size={p_vec.size}."
+            )
+
+        y = (A @ p_vec + b).reshape(steps, q_dim)
+        x, x_axis = _resolve_traj_x_values(runtime=runtime, steps=steps, dt=dt)
+
+        name_raw = name_overrides.get(order, _default_joint_series_name(order))
+        name = str(name_raw).strip()
+        if name == "":
+            name = _default_joint_series_name(order)
+
+        out.append(
+            TermAttrPlotSeries(
+                term_index=-(int(order) + 1),
+                term_name="trajectory",
+                name=name,
+                owner_type="total_joint",
+                owner_name="trajectory",
+                dtype="coord",
+                field=_default_joint_series_field(order),
+                frame=None,
+                rel_frame=None,
+                ks=tuple(range(steps)),
+                x=x.copy(),
+                y=y.copy(),
+                x_axis=x_axis,
+                component_labels=tuple(f"{name}[{i}]" for i in range(int(q_dim))),
+            )
+        )
+
+    return out
+
+
 def plot_term_attrs(
     runtime: NLSRuntime,
     *,
@@ -448,6 +639,8 @@ def plot_term_attrs(
     title: str | None = None,
     legend: bool = True,
     grid: bool = True,
+    subplot_by: str | None = None,
+    sharex: bool = True,
 ) -> tuple[Any, Any, list[TermAttrPlotSeries]]:
     """Plot trajectories declared by `term.attrs.plot`.
 
@@ -468,6 +661,68 @@ def plot_term_attrs(
         raise ImportError(
             "plot_term_attrs requires matplotlib. Install project dependencies and retry."
         ) from e
+
+    subplot_key = "" if subplot_by is None else str(subplot_by).strip().lower()
+    if subplot_key not in ("", "name"):
+        raise ValueError(
+            "plot_term_attrs: subplot_by must be None or 'name'. "
+            f"Got {subplot_by!r}."
+        )
+
+    if subplot_key == "name":
+        if ax is not None:
+            raise ValueError("plot_term_attrs: ax cannot be used when subplot_by='name'.")
+
+        group_order: list[str] = []
+        groups: dict[str, list[TermAttrPlotSeries]] = {}
+        for item in series:
+            key = str(item.name)
+            if key not in groups:
+                groups[key] = []
+                group_order.append(key)
+            groups[key].append(item)
+
+        nrows = int(len(group_order))
+        fig, axes = plt.subplots(nrows=nrows, ncols=1, sharex=bool(sharex))
+        if nrows == 1:
+            axes_list = [axes]
+            axes_out: Any = axes
+        else:
+            axes_list = list(axes)
+            axes_out = axes
+
+        x_label_text = "k"
+        for i, (group_name, ax_i) in enumerate(zip(group_order, axes_list)):
+            has_time_axis = False
+            for item in groups[group_name]:
+                if item.x_axis == "time":
+                    has_time_axis = True
+                for j in range(int(item.y.shape[1])):
+                    ax_i.plot(item.x, item.y[:, j], label=item.line_label(j))
+
+            if has_time_axis:
+                x_label_text = "time [s]"
+
+            ax_i.set_ylabel("value")
+            ax_i.set_title(group_name)
+            if grid:
+                ax_i.grid(True, alpha=0.3)
+            if legend:
+                handles, _labels = ax_i.get_legend_handles_labels()
+                if len(handles) > 0:
+                    ax_i.legend()
+            if (not bool(sharex)) or i == nrows - 1:
+                ax_i.set_xlabel("time [s]" if has_time_axis else x_label_text)
+
+        if sharex and nrows > 1:
+            axes_list[-1].set_xlabel(x_label_text)
+
+        if title is None:
+            title = "term.attrs.plot"
+        if str(title).strip() != "":
+            fig.suptitle(str(title))
+
+        return fig, axes_out, series
 
     if ax is None:
         fig, ax = plt.subplots()
@@ -502,5 +757,6 @@ def plot_term_attrs(
 __all__ = [
     "TermAttrPlotSeries",
     "collect_plot_series_from_term_attrs",
+    "collect_trajectory_derivative_plot_series",
     "plot_term_attrs",
 ]

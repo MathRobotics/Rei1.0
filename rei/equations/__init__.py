@@ -7,6 +7,10 @@ from .problem import (
     OperatorEquation,
     as_linear_equation_problem,
 )
+from .report import (
+    build_ioc_log_sections,
+    format_ioc_report,
+)
 from .simplex import (
     SimplexMinNormProblem,
     solve_projected_linearized_min_norm,
@@ -30,6 +34,8 @@ __all__ = [
     "LinearizedEquation",
     "OperatorEquation",
     "as_linear_equation_problem",
+    "build_ioc_log_sections",
+    "format_ioc_report",
     "SimplexMinNormProblem",
     "solve_projected_linearized_min_norm",
     "solve_simplex_min_norm",
