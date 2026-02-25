@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -38,15 +36,15 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
-# _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
-_MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.json"
+_MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
+# _MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.json"
 # _MODEL_PATH = _EXAMPLES_DIR / "models" / "7_dof_arm.json"
-# _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"  # up to torque_d1
+# _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics.toml"  # up to torque_d1
 _ORDER = 4
 _LOG_DIR = _EXAMPLES_DIR / "logs"
 _LOG_PREFIX = "11_forward_then_inverse_ioc"
-_PLOT_OUTPUT_DEFAULT = _LOG_DIR / "11_forward_plot.png"
+_TRAJ_CSV_PREFIX = "11_forward_then_inverse_ioc_trajectory"
 
 # Simple fixed settings (edit directly if needed)
 _FORWARD_SOLVER = "gauss_newton"  # "gauss_newton" | "scipy_minimize" | "cyipopt" | "liteopt"
@@ -91,6 +89,7 @@ _ACTIVE_MODE = "gradient"
 _IOC_MAX_ITERS = 10000
 _IKKT_TOL = 1e-6
 
+
 def _normalize_simplex(v: np.ndarray) -> np.ndarray:
     x = np.asarray(v, dtype=float).reshape(-1)
     if x.size == 0:
@@ -103,22 +102,6 @@ def _normalize_simplex(v: np.ndarray) -> np.ndarray:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Forward-then-inverse IOC example with optional forward plot export."
-    )
-    parser.add_argument(
-        "--plot",
-        action="store_true",
-        help="Save forward plot series declared in term.attrs.plot.",
-    )
-    parser.add_argument(
-        "--plot-output",
-        type=Path,
-        default=_PLOT_OUTPUT_DEFAULT,
-        help="Output image path used with --plot.",
-    )
-    args = parser.parse_args()
-
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _DSL_PATH.is_file():
@@ -300,68 +283,35 @@ def main() -> int:
     write_text_log(log_path, log_text)
     print(f"text log saved: {log_path}")
 
-    if args.plot:
-        from rei.optimize.plot import (
-            collect_plot_series_from_term_attrs,
-            collect_trajectory_derivative_plot_series,
+    from rei.optimize.plot import (
+        collect_plot_series_from_compiled_term_attrs,
+        write_plot_series_csv,
+    )
+
+    series_all = list(
+        collect_plot_series_from_compiled_term_attrs(
+            compiled_fwd,
+            strict=True,
         )
-        import matplotlib.pyplot as plt
-
-        groups: dict[str, list[Any]] = {}
-        group_order: list[str] = []
-
-        def _add_group(name: str, item: Any) -> None:
-            key = str(name)
-            if key not in groups:
-                groups[key] = []
-                group_order.append(key)
-            groups[key].append(item)
-
-        plot_series = list(collect_plot_series_from_term_attrs(runtime_fwd_full, strict=False))
-        plot_series.extend(
-            collect_trajectory_derivative_plot_series(
-                compiled_fwd,
-                derivative_orders=(1, 2),
-            )
+    )
+    if len(series_all) == 0:
+        raise ValueError(
+            "forward trajectory CSV: no plot series found. "
+            "Add term.attrs.plot entries or ensure trajectory derivatives are available."
         )
-        for item in plot_series:
-            _add_group(item.name, item)
 
-        if len(group_order) == 0:
-            raise ValueError(
-                "forward plot: no plot series found. "
-                "Add term.attrs.plot entries or ensure trajectory derivatives are available."
-            )
-
-        fig, axes = plt.subplots(nrows=len(group_order), ncols=1, sharex=True)
-        if len(group_order) == 1:
-            axes_list = [axes]
-        else:
-            axes_list = list(np.asarray(axes, dtype=object).reshape(-1))
-
-        has_time_axis_any = False
-        for group_name, ax_i in zip(group_order, axes_list):
-            items = groups[group_name]
-            has_time_axis = any(item.x_axis == "time" for item in items)
-            has_time_axis_any = has_time_axis_any or has_time_axis
-            for item in items:
-                for j in range(int(item.y.shape[1])):
-                    ax_i.plot(item.x, item.y[:, j], label=item.line_label(j))
-            ax_i.set_ylabel("value")
-            ax_i.set_title(group_name)
-            ax_i.grid(True, alpha=0.3)
-            handles, _labels = ax_i.get_legend_handles_labels()
-            if len(handles) > 0:
-                ax_i.legend()
-
-        axes_list[-1].set_xlabel("time [s]" if has_time_axis_any else "k")
-        fig.suptitle("11_forward_then_inverse_ioc (forward)")
-        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
-
-        plot_path = Path(args.plot_output)
-        plot_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(plot_path, dpi=200)
-        print(f"forward plot saved: {plot_path} (groups={len(group_order)})")
+    csv_path = build_timestamped_log_path(
+        _LOG_DIR,
+        prefix=_TRAJ_CSV_PREFIX,
+        suffix=".csv",
+    )
+    csv_path = write_plot_series_csv(series_all, csv_path)
+    series_count = len(series_all)
+    group_count = len({str(item.name) for item in series_all})
+    print(
+        f"forward trajectory CSV saved: {csv_path} "
+        f"(series={series_count}, groups={group_count})"
+    )
 
     return 0
 

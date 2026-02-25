@@ -70,8 +70,18 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "get_named_expr_value": ("rei.optimize.report", "get_named_expr_value"),
     "TermAttrPlotSeries": ("rei.optimize.plot", "TermAttrPlotSeries"),
     "collect_plot_series_from_term_attrs": ("rei.optimize.plot", "collect_plot_series_from_term_attrs"),
+    "collect_plot_series_from_compiled_term_attrs": (
+        "rei.optimize.plot",
+        "collect_plot_series_from_compiled_term_attrs",
+    ),
     "collect_trajectory_derivative_plot_series": ("rei.optimize.plot", "collect_trajectory_derivative_plot_series"),
+    "collect_trajectory_derivative_plot_series_from_term_attrs": (
+        "rei.optimize.plot",
+        "collect_trajectory_derivative_plot_series_from_term_attrs",
+    ),
+    "plot_series": ("rei.optimize.plot", "plot_series"),
     "plot_term_attrs": ("rei.optimize.plot", "plot_term_attrs"),
+    "write_plot_series_csv": ("rei.optimize.plot", "write_plot_series_csv"),
     "build_term_gradient_matrix": ("rei.optimize.term_gradient_matrix", "build_term_gradient_matrix"),
     "build_term_gradient_matrix_from_stacked": (
         "rei.optimize.term_gradient_matrix",

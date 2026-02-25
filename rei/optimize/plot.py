@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import csv
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -11,6 +13,10 @@ from ..core.state_schema import canonical_dtype_name, canonical_field_name
 from .runtime import NLSRuntime
 
 Array = np.ndarray
+_PLOT_TYPE_STATE_TRAJ = "state_traj"
+_PLOT_TYPES_TRAJ_DERIVATIVE = frozenset(
+    ("traj_derivative", "trajectory_derivative", "joint_traj_derivative")
+)
 
 
 @dataclass(frozen=True)
@@ -343,8 +349,13 @@ def collect_plot_series_from_term_attrs(
 ) -> list[TermAttrPlotSeries]:
     """Collect state trajectories declared by `term.attrs.plot` metadata.
 
-    Supported spec type:
+    Supported spec type in this collector:
       - `type = "state_traj"`
+
+    Notes:
+      - `type = "traj_derivative"` and aliases are ignored here.
+        Use `collect_trajectory_derivative_plot_series_from_term_attrs`
+        or `collect_plot_series_from_compiled_term_attrs` for those.
     """
 
     out: list[TermAttrPlotSeries] = []
@@ -366,12 +377,15 @@ def collect_plot_series_from_term_attrs(
 
         for j, spec in enumerate(specs):
             where = f"term[{idx}].attrs.plot[{j}]"
-            typ = str(spec.get("type", spec.get("kind", "state_traj"))).strip().lower()
-            if typ != "state_traj":
+            typ = str(spec.get("type", spec.get("kind", _PLOT_TYPE_STATE_TRAJ))).strip().lower()
+            if typ in _PLOT_TYPES_TRAJ_DERIVATIVE:
+                continue
+            if typ != _PLOT_TYPE_STATE_TRAJ:
                 if strict:
                     raise ValueError(
                         f"{where}: unsupported plot type {typ!r}. "
-                        "Supported type is exactly 'state_traj'."
+                        "Supported types are 'state_traj' (this collector) "
+                        "and trajectory-derivative plot types for compiled collectors."
                     )
                 continue
 
@@ -437,6 +451,88 @@ def collect_plot_series_from_term_attrs(
             )
 
     return out
+
+
+def _parse_derivative_order(raw: Any, *, where: str, strict: bool) -> int | None:
+    if raw is None:
+        if strict:
+            raise ValueError(
+                f"{where}: missing derivative order. Use `derivative_order` or `order`."
+            )
+        return None
+
+    try:
+        order = int(raw)
+    except Exception as e:
+        if strict:
+            raise ValueError(f"{where}: derivative order must be an integer, got {raw!r}.") from e
+        return None
+
+    if order < 0:
+        if strict:
+            raise ValueError(f"{where}: derivative order must be >= 0, got {order}.")
+        return None
+
+    return int(order)
+
+
+def _collect_derivative_plot_requests_from_term_attrs(
+    runtime: NLSRuntime,
+    *,
+    term_indices: Iterable[int] | None = None,
+    strict: bool = True,
+) -> tuple[list[int], dict[int, str]]:
+    indices = _normalize_term_indices(runtime, term_indices=term_indices)
+
+    orders: list[int] = []
+    seen_orders: set[int] = set()
+    names: dict[int, str] = {}
+    for idx in indices:
+        attrs = runtime.problem.term_attrs_at(idx)
+        specs = _coerce_plot_specs(
+            attrs.get("plot", None),
+            where=f"term[{idx}].attrs.plot",
+            strict=strict,
+        )
+        if len(specs) == 0:
+            continue
+
+        for j, spec in enumerate(specs):
+            where = f"term[{idx}].attrs.plot[{j}]"
+            typ = str(spec.get("type", spec.get("kind", _PLOT_TYPE_STATE_TRAJ))).strip().lower()
+            if typ not in _PLOT_TYPES_TRAJ_DERIVATIVE:
+                continue
+
+            order = _parse_derivative_order(
+                spec.get("derivative_order", spec.get("order", None)),
+                where=where,
+                strict=strict,
+            )
+            if order is None:
+                continue
+
+            if order not in seen_orders:
+                seen_orders.add(order)
+                orders.append(int(order))
+
+            if "name" not in spec:
+                continue
+
+            name = str(spec.get("name", "")).strip()
+            if name == "":
+                if strict:
+                    raise ValueError(f"{where}: name must be non-empty when provided.")
+                continue
+
+            existing = names.get(int(order), None)
+            if existing is not None and existing != name and strict:
+                raise ValueError(
+                    f"{where}: conflicting name for derivative order={order}. "
+                    f"Existing={existing!r}, got={name!r}."
+                )
+            names[int(order)] = name
+
+    return orders, names
 
 
 def _default_joint_series_name(order: int) -> str:
@@ -630,6 +726,369 @@ def collect_trajectory_derivative_plot_series(
     return out
 
 
+def collect_trajectory_derivative_plot_series_from_term_attrs(
+    compiled: Any,
+    *,
+    term_indices: Iterable[int] | None = None,
+    p: Array | None = None,
+    strict: bool = True,
+) -> list[TermAttrPlotSeries]:
+    """Collect derivative plot series requested by `term.attrs.plot`.
+
+    Expected DSL plot spec type:
+      - `type = "traj_derivative"` (aliases supported)
+      - required: `derivative_order` or `order`
+      - optional: `name`
+    """
+
+    runtime = getattr(compiled, "runtime", None)
+    if not isinstance(runtime, NLSRuntime):
+        raise TypeError(
+            "collect_trajectory_derivative_plot_series_from_term_attrs: "
+            "compiled.runtime must be an NLSRuntime."
+        )
+
+    derivative_orders, name_overrides = _collect_derivative_plot_requests_from_term_attrs(
+        runtime,
+        term_indices=term_indices,
+        strict=strict,
+    )
+    if len(derivative_orders) == 0:
+        return []
+
+    names = None if len(name_overrides) == 0 else name_overrides
+    return collect_trajectory_derivative_plot_series(
+        compiled,
+        derivative_orders=tuple(derivative_orders),
+        names=names,
+        p=p,
+        strict=strict,
+    )
+
+
+def collect_plot_series_from_compiled_term_attrs(
+    compiled: Any,
+    *,
+    term_indices: Iterable[int] | None = None,
+    p: Array | None = None,
+    strict: bool = True,
+) -> list[TermAttrPlotSeries]:
+    """Collect all DSL-declared plot series from a compiled trajectory problem.
+
+    This combines:
+      - `state_traj` specs via runtime state collection
+      - `traj_derivative` specs via trajectory derivative maps
+    """
+
+    runtime = getattr(compiled, "runtime", None)
+    if not isinstance(runtime, NLSRuntime):
+        raise TypeError(
+            "collect_plot_series_from_compiled_term_attrs: "
+            "compiled.runtime must be an NLSRuntime."
+        )
+
+    out = list(
+        collect_plot_series_from_term_attrs(
+            runtime,
+            term_indices=term_indices,
+            strict=strict,
+        )
+    )
+    out.extend(
+        collect_trajectory_derivative_plot_series_from_term_attrs(
+            compiled,
+            term_indices=term_indices,
+            p=p,
+            strict=strict,
+        )
+    )
+    return out
+
+
+def write_plot_series_csv(
+    series: Iterable[TermAttrPlotSeries],
+    path: str | Path,
+) -> Path:
+    """Write `TermAttrPlotSeries` to a wide-format CSV file.
+
+    Output columns:
+      - `x_axis`, `k`, `x`
+      - one column per plotted line label (e.g. `joint_q[0]`, `joint_qdot[1]`)
+
+    Each row corresponds to one `(x_axis, k, x)` sample.
+    """
+
+    series_list = list(series)
+    if len(series_list) == 0:
+        raise ValueError("write_plot_series_csv: no series were provided.")
+
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _format_float(v: float) -> str:
+        val = float(v)
+        if np.isfinite(val):
+            return f"{val:.12g}"
+        return str(val)
+
+    def _unique_label(raw: str, used: set[str]) -> str:
+        base = str(raw).strip()
+        if base == "":
+            base = "value"
+        if base not in used:
+            used.add(base)
+            return base
+        i = 2
+        while True:
+            cand = f"{base}_{i}"
+            if cand not in used:
+                used.add(cand)
+                return cand
+            i += 1
+
+    line_columns: list[str] = []
+    line_col_for: dict[tuple[int, int], str] = {}
+    used_labels: set[str] = set()
+    for s_idx, item in enumerate(series_list):
+        y = np.asarray(item.y, dtype=float)
+        if y.ndim == 1:
+            y = y.reshape(-1, 1)
+        if y.ndim != 2:
+            raise ValueError(
+                "write_plot_series_csv: expected each series.y to be 2D. "
+                f"Got shape {y.shape} for series {item.name!r}."
+            )
+        for j in range(int(y.shape[1])):
+            col = _unique_label(item.line_label(j), used_labels)
+            line_columns.append(col)
+            line_col_for[(int(s_idx), int(j))] = col
+
+    rows: dict[tuple[str, int, float], dict[str, float | int | str]] = {}
+    for s_idx, item in enumerate(series_list):
+        x = np.asarray(item.x, dtype=float).reshape(-1)
+        y = np.asarray(item.y, dtype=float)
+        if y.ndim == 1:
+            y = y.reshape(-1, 1)
+        if y.ndim != 2:
+            raise ValueError(
+                "write_plot_series_csv: expected each series.y to be 2D. "
+                f"Got shape {y.shape} for series {item.name!r}."
+            )
+
+        n_rows = int(y.shape[0])
+        n_cols = int(y.shape[1])
+        if int(x.size) != n_rows:
+            raise ValueError(
+                "write_plot_series_csv: x/y length mismatch. "
+                f"series={item.name!r}, x={x.size}, y_rows={n_rows}."
+            )
+        ks = tuple(int(k) for k in item.ks)
+        if len(ks) != n_rows:
+            raise ValueError(
+                "write_plot_series_csv: ks/y length mismatch. "
+                f"series={item.name!r}, ks={len(ks)}, y_rows={n_rows}."
+            )
+
+        axis = str(item.x_axis)
+        for i in range(n_rows):
+            key = (axis, int(ks[i]), float(x[i]))
+            row = rows.get(key, None)
+            if row is None:
+                row = {"x_axis": axis, "k": int(ks[i]), "x": float(x[i])}
+                rows[key] = row
+            for j in range(n_cols):
+                col = line_col_for[(int(s_idx), int(j))]
+                y_val = float(y[i, j])
+                if col in row:
+                    prev = float(row[col])  # type: ignore[arg-type]
+                    if not np.isclose(prev, y_val, rtol=1e-12, atol=1e-12, equal_nan=True):
+                        raise ValueError(
+                            "write_plot_series_csv: conflicting values detected while merging rows. "
+                            f"key={key}, column={col!r}, prev={prev}, new={y_val}."
+                        )
+                else:
+                    row[col] = y_val
+
+    with out_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        columns = ["x_axis", "k", "x", *line_columns]
+        writer.writerow(columns)
+
+        for key in sorted(rows.keys(), key=lambda t: (str(t[0]), int(t[1]), float(t[2]))):
+            row = rows[key]
+            out_row: list[str] = []
+            for col in columns:
+                if col not in row:
+                    out_row.append("")
+                    continue
+                val = row[col]
+                if isinstance(val, float):
+                    out_row.append(_format_float(val))
+                else:
+                    out_row.append(str(val))
+            writer.writerow(out_row)
+
+    return out_path
+
+
+def _group_series_by_name(
+    series: Sequence[TermAttrPlotSeries],
+) -> tuple[list[str], dict[str, list[TermAttrPlotSeries]]]:
+    group_order: list[str] = []
+    groups: dict[str, list[TermAttrPlotSeries]] = {}
+    for item in series:
+        key = str(item.name)
+        if key not in groups:
+            groups[key] = []
+            group_order.append(key)
+        groups[key].append(item)
+    return group_order, groups
+
+
+def _prioritize_group_order(
+    group_order: Sequence[str],
+    *,
+    groups: Mapping[str, Sequence[TermAttrPlotSeries]],
+    group_priorities: Sequence[str] | None,
+) -> list[str]:
+    if group_priorities is None:
+        return list(group_order)
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in group_priorities:
+        key = str(raw)
+        if key in groups and key not in seen:
+            out.append(key)
+            seen.add(key)
+
+    for key in group_order:
+        if key in seen:
+            continue
+        out.append(str(key))
+
+    return out
+
+
+def plot_series(
+    series: Iterable[TermAttrPlotSeries],
+    *,
+    ax: Any = None,
+    title: str | None = None,
+    legend: bool = True,
+    grid: bool = True,
+    subplot_by: str | None = None,
+    sharex: bool = True,
+    group_priorities: Sequence[str] | None = None,
+) -> tuple[Any, Any, list[TermAttrPlotSeries]]:
+    """Plot pre-collected `TermAttrPlotSeries`.
+
+    Returns `(fig, ax, series_list)`.
+    """
+
+    series_list = list(series)
+    if len(series_list) == 0:
+        raise ValueError("plot_series: no series were provided.")
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as e:  # pragma: no cover
+        raise ImportError(
+            "plot_series requires matplotlib. Install project dependencies and retry."
+        ) from e
+
+    subplot_key = "" if subplot_by is None else str(subplot_by).strip().lower()
+    if subplot_key not in ("", "name"):
+        raise ValueError(
+            "plot_series: subplot_by must be None or 'name'. "
+            f"Got {subplot_by!r}."
+        )
+
+    if subplot_key != "name" and group_priorities is not None:
+        raise ValueError(
+            "plot_series: group_priorities can only be used when subplot_by='name'."
+        )
+
+    if subplot_key == "name":
+        if ax is not None:
+            raise ValueError("plot_series: ax cannot be used when subplot_by='name'.")
+
+        group_order, groups = _group_series_by_name(series_list)
+        group_order = _prioritize_group_order(
+            group_order,
+            groups=groups,
+            group_priorities=group_priorities,
+        )
+
+        nrows = int(len(group_order))
+        fig, axes = plt.subplots(nrows=nrows, ncols=1, sharex=bool(sharex))
+        if nrows == 1:
+            axes_list = [axes]
+            axes_out: Any = axes
+        else:
+            axes_list = list(np.asarray(axes, dtype=object).reshape(-1))
+            axes_out = axes
+
+        has_time_axis_any = False
+        for group_name, ax_i in zip(group_order, axes_list):
+            items = groups[group_name]
+            has_time_axis = any(item.x_axis == "time" for item in items)
+            has_time_axis_any = has_time_axis_any or has_time_axis
+            for item in items:
+                for j in range(int(item.y.shape[1])):
+                    ax_i.plot(item.x, item.y[:, j], label=item.line_label(j))
+
+            ax_i.set_ylabel("value")
+            ax_i.set_title(group_name)
+            if grid:
+                ax_i.grid(True, alpha=0.3)
+            if legend:
+                handles, _labels = ax_i.get_legend_handles_labels()
+                if len(handles) > 0:
+                    ax_i.legend()
+            if not bool(sharex):
+                ax_i.set_xlabel("time [s]" if has_time_axis else "k")
+
+        if bool(sharex):
+            axes_list[-1].set_xlabel("time [s]" if has_time_axis_any else "k")
+
+        if title is None:
+            title = "plot series"
+        if str(title).strip() != "":
+            fig.suptitle(str(title))
+
+        return fig, axes_out, series_list
+
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = getattr(ax, "figure", None)
+        if fig is None:
+            raise TypeError("plot_series: ax must be a matplotlib Axes instance.")
+
+    has_time_axis = False
+    for item in series_list:
+        if item.x_axis == "time":
+            has_time_axis = True
+        for i in range(int(item.y.shape[1])):
+            ax.plot(item.x, item.y[:, i], label=item.line_label(i))
+
+    ax.set_xlabel("time [s]" if has_time_axis else "k")
+    ax.set_ylabel("value")
+    if title is None:
+        title = "plot series"
+    if str(title).strip() != "":
+        ax.set_title(str(title))
+    if grid:
+        ax.grid(True, alpha=0.3)
+    if legend:
+        handles, _labels = ax.get_legend_handles_labels()
+        if len(handles) > 0:
+            ax.legend()
+
+    return fig, ax, series_list
+
+
 def plot_term_attrs(
     runtime: NLSRuntime,
     *,
@@ -641,6 +1100,7 @@ def plot_term_attrs(
     grid: bool = True,
     subplot_by: str | None = None,
     sharex: bool = True,
+    group_priorities: Sequence[str] | None = None,
 ) -> tuple[Any, Any, list[TermAttrPlotSeries]]:
     """Plot trajectories declared by `term.attrs.plot`.
 
@@ -655,108 +1115,27 @@ def plot_term_attrs(
     if len(series) == 0:
         raise ValueError("plot_term_attrs: no plot series found in term.attrs.plot.")
 
-    try:
-        import matplotlib.pyplot as plt
-    except Exception as e:  # pragma: no cover
-        raise ImportError(
-            "plot_term_attrs requires matplotlib. Install project dependencies and retry."
-        ) from e
-
-    subplot_key = "" if subplot_by is None else str(subplot_by).strip().lower()
-    if subplot_key not in ("", "name"):
-        raise ValueError(
-            "plot_term_attrs: subplot_by must be None or 'name'. "
-            f"Got {subplot_by!r}."
-        )
-
-    if subplot_key == "name":
-        if ax is not None:
-            raise ValueError("plot_term_attrs: ax cannot be used when subplot_by='name'.")
-
-        group_order: list[str] = []
-        groups: dict[str, list[TermAttrPlotSeries]] = {}
-        for item in series:
-            key = str(item.name)
-            if key not in groups:
-                groups[key] = []
-                group_order.append(key)
-            groups[key].append(item)
-
-        nrows = int(len(group_order))
-        fig, axes = plt.subplots(nrows=nrows, ncols=1, sharex=bool(sharex))
-        if nrows == 1:
-            axes_list = [axes]
-            axes_out: Any = axes
-        else:
-            axes_list = list(axes)
-            axes_out = axes
-
-        x_label_text = "k"
-        for i, (group_name, ax_i) in enumerate(zip(group_order, axes_list)):
-            has_time_axis = False
-            for item in groups[group_name]:
-                if item.x_axis == "time":
-                    has_time_axis = True
-                for j in range(int(item.y.shape[1])):
-                    ax_i.plot(item.x, item.y[:, j], label=item.line_label(j))
-
-            if has_time_axis:
-                x_label_text = "time [s]"
-
-            ax_i.set_ylabel("value")
-            ax_i.set_title(group_name)
-            if grid:
-                ax_i.grid(True, alpha=0.3)
-            if legend:
-                handles, _labels = ax_i.get_legend_handles_labels()
-                if len(handles) > 0:
-                    ax_i.legend()
-            if (not bool(sharex)) or i == nrows - 1:
-                ax_i.set_xlabel("time [s]" if has_time_axis else x_label_text)
-
-        if sharex and nrows > 1:
-            axes_list[-1].set_xlabel(x_label_text)
-
-        if title is None:
-            title = "term.attrs.plot"
-        if str(title).strip() != "":
-            fig.suptitle(str(title))
-
-        return fig, axes_out, series
-
-    if ax is None:
-        fig, ax = plt.subplots()
-    else:
-        fig = getattr(ax, "figure", None)
-        if fig is None:
-            raise TypeError("plot_term_attrs: ax must be a matplotlib Axes instance.")
-
-    has_time_axis = False
-    for item in series:
-        if item.x_axis == "time":
-            has_time_axis = True
-        for i in range(int(item.y.shape[1])):
-            ax.plot(item.x, item.y[:, i], label=item.line_label(i))
-
-    ax.set_xlabel("time [s]" if has_time_axis else "k")
-    ax.set_ylabel("value")
-    if title is None:
-        title = "term.attrs.plot"
-    if str(title).strip() != "":
-        ax.set_title(str(title))
-    if grid:
-        ax.grid(True, alpha=0.3)
-    if legend:
-        handles, _labels = ax.get_legend_handles_labels()
-        if len(handles) > 0:
-            ax.legend()
-
-    return fig, ax, series
+    title_text = "term.attrs.plot" if title is None else title
+    fig, axes, series_list = plot_series(
+        series,
+        ax=ax,
+        title=title_text,
+        legend=legend,
+        grid=grid,
+        subplot_by=subplot_by,
+        sharex=sharex,
+        group_priorities=group_priorities,
+    )
+    return fig, axes, series_list
 
 
 __all__ = [
     "TermAttrPlotSeries",
     "collect_plot_series_from_term_attrs",
+    "collect_plot_series_from_compiled_term_attrs",
     "collect_trajectory_derivative_plot_series",
+    "collect_trajectory_derivative_plot_series_from_term_attrs",
+    "plot_series",
     "plot_term_attrs",
+    "write_plot_series_csv",
 ]
