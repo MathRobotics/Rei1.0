@@ -1,6 +1,6 @@
 [time]
-N = 20
-dt = 0.1
+N = 200
+dt = 0.01
 
 [trajectory]
 type = "bspline"
@@ -131,6 +131,14 @@ value = { fill = 0.0 }
 type = "scalar_weight"
 w = 100.0
 
+[[terms.attrs.plot]]
+type = "state_traj"
+name = "joint_q"
+owner_type = "total_joint"
+owner_name = "robot"
+dtype = "coord"
+field = "q"
+
 [[terms]]
 [terms.expr]
 type = "get_traj_var"
@@ -143,6 +151,11 @@ derivative_wrt = "time"
 type = "scalar_weight"
 w = 1e-4
 
+[terms.attrs.plot]
+type = "traj_derivative"
+name = "joint_qdot"
+derivative_order = 1
+
 [[terms]]
 [terms.expr]
 type = "get_traj_var"
@@ -154,6 +167,11 @@ derivative_wrt = "time"
 [terms.cost]
 type = "scalar_weight"
 w = 1e-4
+
+[terms.attrs.plot]
+type = "traj_derivative"
+name = "joint_qddot"
+derivative_order = 2
 
 [[terms]]
 [terms.expr]
@@ -213,7 +231,7 @@ var = "p"
 
 [terms.cost]
 type = "scalar_weight"
-w = 1e-10
+w = 1e-4
 
 [terms.attrs.plot]
 type = "state_traj"
