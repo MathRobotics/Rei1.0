@@ -70,3 +70,7 @@ python examples/11_forward_then_inverse_ioc.py
 - `dsl/robokots_traj_dynamics_d12_per_joint.toml`: 上記 d12 の per-joint 版（`expr.type="component"` 利用）
 - `models/planar2.urdf`: Pinocchio 用 2 自由度平面アーム
 - `models/planar2.json`: RoboKots 用 2 自由度平面アーム
+- `models/sample_robot.json`: RoboKots 用 3 自由度サンプルロボット
+- `models/sample_robot.urdf`: `sample_robot.json` と同等の URDF 版
+- `models/7_dof_arm.json`: RoboKots 用 7 自由度アーム
+- `models/7_dof_arm.urdf`: `7_dof_arm.json` と同等の URDF 版

@@ -36,21 +36,22 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
-_MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
+# _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 # _MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.json"
+_MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.urdf"
 # _MODEL_PATH = _EXAMPLES_DIR / "models" / "7_dof_arm.json"
-# _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"
-_DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics.toml"  # up to torque_d1
+_DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"
+# _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics.toml"  # up to torque_d1
 _ORDER = 4
 _LOG_DIR = _EXAMPLES_DIR / "logs"
 _LOG_PREFIX = "11_forward_then_inverse_ioc"
-_TRAJ_CSV_PREFIX = "11_forward_then_inverse_ioc_trajectory"
+_TRAJ_CSV_PREFIX = "11_forward_then_inverse_ioc"
 
 # Simple fixed settings (edit directly if needed)
 _FORWARD_SOLVER = "gauss_newton"  # "gauss_newton" | "scipy_minimize" | "cyipopt" | "liteopt"
 if _FORWARD_SOLVER == "gauss_newton":
     _FORWARD_OPTIONS = {
-        "max_iters": 120,
+        "max_iters": 500,
         "tol_dx": 1e-12,
         "line_search": True,
         "ls_beta": 0.5,
@@ -109,7 +110,8 @@ def main() -> int:
 
     dsl = load_problem_toml(_DSL_PATH)
 
-    kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
+    # kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
+    kots = Kots.from_urdf_file(str(_MODEL_PATH), order=_ORDER)
 
     # 1) Forward optimization (solve in nullspace-reduced coordinates)
     compiled_fwd = compile_kots_trajectory_problem(
