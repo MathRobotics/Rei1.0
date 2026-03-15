@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -38,8 +39,9 @@ except ImportError as e:  # pragma: no cover
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 # _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 # _MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.json"
-_MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.urdf"
+# _MODEL_PATH = _EXAMPLES_DIR / "models" / "sample_robot.urdf"
 # _MODEL_PATH = _EXAMPLES_DIR / "models" / "7_dof_arm.json"
+_MODEL_PATH = _EXAMPLES_DIR / "models" / "7_dof_arm.urdf"
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"
 # _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics.toml"  # up to torque_d1
 _ORDER = 4
@@ -108,6 +110,7 @@ def main() -> int:
     if not _DSL_PATH.is_file():
         raise SystemExit(f"DSL file not found: {_DSL_PATH}")
 
+    run_timestamp = datetime.now().astimezone()
     dsl = load_problem_toml(_DSL_PATH)
 
     # kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
@@ -264,6 +267,7 @@ def main() -> int:
         ioc_max_iters=_IOC_MAX_ITERS,
         kkt=kkt,
         simplex_out=simplex_out,
+        contributions=contrib_inv,
     )
 
     log_text = format_solver_text_log(
@@ -278,10 +282,15 @@ def main() -> int:
             "dsl": str(_DSL_PATH),
             "order": int(_ORDER),
         },
+        timestamp=run_timestamp,
         timing_title="forward timing",
         extra_sections=extra_sections,
     )
-    log_path = build_timestamped_log_path(_LOG_DIR, prefix=_LOG_PREFIX)
+    log_path = build_timestamped_log_path(
+        _LOG_DIR,
+        prefix=_LOG_PREFIX,
+        timestamp=run_timestamp,
+    )
     write_text_log(log_path, log_text)
     print(f"text log saved: {log_path}")
 
@@ -305,6 +314,7 @@ def main() -> int:
     csv_path = build_timestamped_log_path(
         _LOG_DIR,
         prefix=_TRAJ_CSV_PREFIX,
+        timestamp=run_timestamp,
         suffix=".csv",
     )
     csv_path = write_plot_series_csv(series_all, csv_path)
