@@ -46,6 +46,12 @@ def _format_vector(
     return f"{s} (len={arr.size})"
 
 
+def _format_optional_scalar(value: float | None, *, precision: int = 6) -> str:
+    if value is None:
+        return "n/a"
+    return f"{float(value):.{int(precision)}g}"
+
+
 def build_ioc_log_sections(
     *,
     active_mode: str,
@@ -63,6 +69,7 @@ def build_ioc_log_sections(
     kkt: Any | None = None,
     simplex_out: SolveOutcome | None = None,
     callback_rows: int | None = None,
+    contributions: Iterable[StationarityTermContribution] | None = None,
     precision: int = 6,
 ) -> list[tuple[str, object]]:
     """Build IOC-focused extra sections for text logs."""
@@ -142,6 +149,36 @@ def build_ioc_log_sections(
                 },
             )
         )
+
+    if contributions is not None:
+        contrib_list = list(contributions)
+        objective_lines: list[str] = []
+        active_idx_set = set(active_idx_l)
+        active_grad_idx_set = set(active_grad_idx_l)
+        active_res_idx_set = set(active_res_idx_l)
+        w_true_vec = None if w_true is None else _as_vector(w_true, name="w_true")
+        for local_idx, term in enumerate(contrib_list):
+            grad_norm = float(np.linalg.norm(np.asarray(term.gradient, dtype=float).reshape(-1)))
+            cost_text = str(term.cost_name) if term.cost_name not in (None, "") else "unknown"
+            weighted_res_text = _format_optional_scalar(
+                term.weighted_residual_norm,
+                precision=int(precision),
+            )
+            w_hat_i = float(w_hat_vec[local_idx]) if local_idx < w_hat_vec.size else float("nan")
+            w_true_i = None
+            if w_true_vec is not None and local_idx < w_true_vec.size:
+                w_true_i = float(w_true_vec[local_idx])
+            objective_lines.append(
+                f"[local={local_idx}] term[{int(term.term_index)}] {term.name} | "
+                f"cost={cost_text} | "
+                f"active(selected/grad/res)="
+                f"{local_idx in active_idx_set}/{local_idx in active_grad_idx_set}/{local_idx in active_res_idx_set} | "
+                f"||J^T r||={grad_norm:.{int(precision)}g} | "
+                f"||r_w||={weighted_res_text} | "
+                f"w_true={_format_optional_scalar(w_true_i, precision=int(precision))} | "
+                f"w_hat={w_hat_i:.{int(precision)}g}"
+            )
+        sections.append(("ioc.objective_terms", objective_lines if len(objective_lines) > 0 else ["(empty)"]))
 
     return sections
 
@@ -241,8 +278,11 @@ def format_ioc_report(
             ttype = "constraint" if is_constraint else "objective"
             grad_norm = float(np.linalg.norm(np.asarray(term.gradient, dtype=float).reshape(-1)))
             w_hat_i = float(w_hat_vec[i]) if i < w_hat_vec.size else float("nan")
+            cost_str = ""
+            if term.cost_name not in (None, ""):
+                cost_str = f", cost={term.cost_name}"
             lines.append(
-                f"- [local={i}] term[{int(term.term_index)}] {term.name} ({ttype}{kind_str}) "
+                f"- [local={i}] term[{int(term.term_index)}] {term.name} ({ttype}{kind_str}{cost_str}) "
                 f"||J^T r||={grad_norm:.3e} "
                 f"||r_w||={float(term.weighted_residual_norm or 0.0):.3e} "
                 f"w_hat={w_hat_i:.3e}"

@@ -21,6 +21,7 @@ class StationarityTermContribution:
     name: str
     attrs: Mapping[str, Any]
     gradient: Array
+    cost_name: str | None = None
     residual_size: int | None = None
     residual_norm: float | None = None
     weighted_residual_norm: float | None = None
@@ -294,12 +295,15 @@ class RuntimeStationaritySource:
                 )
 
             reference_weight = None
+            cost_name = None
             if problem is not None:
                 try:
                     _expr, cost = problem.terms[int(term_raw.term_index)]
                     reference_weight = _scalar_weight_from_cost(cost)
+                    cost_name = str(getattr(cost, "name", cost.__class__.__name__))
                 except Exception:
                     reference_weight = None
+                    cost_name = None
 
             r = np.asarray(term_raw.residual, dtype=float).reshape(-1)
             r_w = np.asarray(term_w.residual, dtype=float).reshape(-1)
@@ -309,6 +313,7 @@ class RuntimeStationaritySource:
                     name=str(term_raw.name),
                     attrs=dict(term_raw.attrs),
                     gradient=np.asarray(A_col[:, j], dtype=float).reshape(-1).copy(),
+                    cost_name=cost_name,
                     residual_size=int(r.size),
                     residual_norm=float(np.linalg.norm(r)),
                     weighted_residual_norm=float(np.linalg.norm(r_w)),

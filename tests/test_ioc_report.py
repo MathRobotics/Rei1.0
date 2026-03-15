@@ -51,6 +51,7 @@ def test_format_ioc_report_stationarity_terms() -> None:
             name="demo_term",
             attrs={"is_constraint": False},
             gradient=np.array([1.0, -2.0], dtype=float),
+            cost_name="scalar_weight",
             weighted_residual_norm=0.2,
         )
     ]
@@ -66,6 +67,7 @@ def test_format_ioc_report_stationarity_terms() -> None:
     )
     assert "Stationarity terms:" in text
     assert "term[4]" in text
+    assert "cost=scalar_weight" in text
     assert "w_hat=1.000e+00" in text
 
     with pytest.raises(ValueError, match="contributions is required"):
@@ -82,6 +84,24 @@ def test_format_ioc_report_stationarity_terms() -> None:
 
 def test_build_ioc_log_sections() -> None:
     out = _dummy_simplex_outcome()
+    contrib = [
+        StationarityTermContribution(
+            term_index=3,
+            name="q_terminal",
+            attrs={"is_constraint": False},
+            gradient=np.array([1.0, 0.0], dtype=float),
+            cost_name="scalar_weight",
+            weighted_residual_norm=0.3,
+        ),
+        StationarityTermContribution(
+            term_index=5,
+            name="torque_regularization",
+            attrs={"is_constraint": False},
+            gradient=np.array([0.0, 2.0], dtype=float),
+            cost_name="huber",
+            weighted_residual_norm=0.0,
+        ),
+    ]
     sections = build_ioc_log_sections(
         callback_rows=12,
         active_mode="gradient",
@@ -97,9 +117,16 @@ def test_build_ioc_log_sections() -> None:
         ikkt_tol=1.0e-6,
         ioc_max_iters=1000,
         simplex_out=out,
+        contributions=contrib,
     )
     names = [name for name, _body in sections]
     assert "solve.iter_meta" in names
     assert "ioc.settings" in names
     assert "ioc.result" in names
+    assert "ioc.objective_terms" in names
     assert "simplex.result" in names
+
+    objective_terms = dict(sections)["ioc.objective_terms"]
+    assert any("q_terminal" in line for line in objective_terms)
+    assert any("cost=scalar_weight" in line for line in objective_terms)
+    assert any("cost=huber" in line for line in objective_terms)
