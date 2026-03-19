@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -105,6 +106,16 @@ def _normalize_simplex(v: np.ndarray) -> np.ndarray:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Forward then inverse IOC example.",
+    )
+    parser.add_argument(
+        "--plot",
+        action="store_true",
+        help="Plot series declared in term.attrs.plot.",
+    )
+    args = parser.parse_args()
+
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _DSL_PATH.is_file():
@@ -296,6 +307,7 @@ def main() -> int:
 
     from rei.optimize.plot import (
         collect_plot_series_from_compiled_term_attrs,
+        plot_series,
         write_plot_series_csv,
     )
 
@@ -324,6 +336,14 @@ def main() -> int:
         f"forward trajectory CSV saved: {csv_path} "
         f"(series={series_count}, groups={group_count})"
     )
+
+    if args.plot:
+        fig, _ax, series = plot_series(
+            series_all,
+            title="11_forward_then_inverse_ioc",
+        )
+        print(f"plotted series={len(series)} from term.attrs.plot")
+        fig.savefig("trajectory.png", dpi=200)
 
     return 0
 

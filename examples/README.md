@@ -45,6 +45,7 @@ python examples/07_robokots_trajectory_dynamics.py
 python examples/07_robokots_trajectory_dynamics.py --plot
 python examples/09_kots_vision_composite.py
 python examples/11_forward_then_inverse_ioc.py
+python examples/11_forward_then_inverse_ioc.py --plot
 ```
 
 ## サンプル一覧
@@ -59,7 +60,7 @@ python examples/11_forward_then_inverse_ioc.py
 - `08_camera_calibration.py`: `dtype="vision"` の camera calibration（`--model linear|pinhole`）
 - `09_kots_vision_composite.py`: `CompositeStateBuilder` でロボット状態とカメラ状態を合成して同時最適化
 - `10_stationarity_ioc.py`: Stationarity 方程式ベースの IOC 風重み推定
-- `11_forward_then_inverse_ioc.py`: RoboKots 軌道を順最適化し、解から重みを逆推定
+- `11_forward_then_inverse_ioc.py`: RoboKots 軌道を順最適化し、解から重みを逆推定（`--plot` 対応）
 
 ## DSL / モデルファイル
 
