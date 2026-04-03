@@ -356,6 +356,10 @@ def format_solve_report(
         x_star = np.asarray(outcome.solution, dtype=float).reshape(-1).copy()
     if outcome is not None and solve_summary is None:
         solve_summary = outcome.to_summary()
+    if x0 is None and outcome is not None:
+        x0_meta = outcome.meta.get("x0", None)
+        if x0_meta is not None:
+            x0 = np.asarray(x0_meta, dtype=float).reshape(-1).copy()
 
     if solve_summary is not None:
         _append_solve_summary(lines, solve_summary)

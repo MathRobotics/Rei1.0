@@ -7,3 +7,11 @@
 uv.lock
 .python-version
 */logs
+/records
+*.log
+*.csv
+*.json
+*.txt
+*.stl
+*.dae
+*.obj

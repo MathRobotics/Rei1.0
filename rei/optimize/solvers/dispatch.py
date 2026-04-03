@@ -19,6 +19,7 @@ IterCallback = Callable[[int, float, float], None]
 
 _COMMON_SOLVE_OPTION_KEYS = frozenset(
     {
+        "x0",
         "weighted",
         "term_indices",
     }
@@ -221,9 +222,21 @@ def _normalize_term_indices_option(raw: Any) -> tuple[int, ...] | None:
     return vals
 
 
+def _initialize_linear_problem_point(
+    linear_problem: LinearizedProblem,
+    *,
+    x0: Array | Any = None,
+) -> Array:
+    n_total = int(linear_problem.n_total)
+    if x0 is not None:
+        linear_problem.set_point(as_vec(x0, expected_size=n_total, name="x0"))
+    return np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
+
+
 def solve_scipy_minimize(
     problem: Any,
     *,
+    x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
     weighted: bool = True,
     term_indices: Iterable[int] | None = None,
@@ -251,11 +264,11 @@ def solve_scipy_minimize(
             weighted=bool(weighted),
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
-        x0 = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
+        x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
         req = linear_problem.required_list(required)
         objective = _LinearizedObjective(linear_problem, required=req)
-        n_total = int(x0.size)
-        initial_cost, _grad0, _rnorm0 = objective.eval(x0)
+        n_total = int(x0_init.size)
+        initial_cost, _grad0, _rnorm0 = objective.eval(x0_init)
 
     options_local: dict[str, Any] = {} if options is None else dict(options)
     if max_iters is not None and "maxiter" not in options_local:
@@ -263,7 +276,7 @@ def solve_scipy_minimize(
 
     iter_count = 0
     last_dxnorm = 0.0
-    prev_x = x0.copy()
+    prev_x = x0_init.copy()
 
     def fun(x: Array) -> float:
         fx, _gx, _rnorm = objective.eval(x)
@@ -288,7 +301,7 @@ def solve_scipy_minimize(
     with prof.span("solve.backend"):
         result = minimize(
             fun=fun,
-            x0=x0,
+            x0=x0_init,
             jac=jac,
             method=str(method),
             tol=tol,
@@ -298,13 +311,13 @@ def solve_scipy_minimize(
         )
 
     with prof.span("solve.finalize"):
-        x_star = as_vec(getattr(result, "x", x0), expected_size=n_total, name="result.x")
+        x_star = as_vec(getattr(result, "x", x0_init), expected_size=n_total, name="result.x")
         cost, _grad, rnorm = objective.eval(x_star)
     iters = int(getattr(result, "nit", iter_count))
     if iters <= 0:
         iters = int(iter_count)
     if iter_count <= 0:
-        last_dxnorm = float(np.linalg.norm(x_star - x0))
+        last_dxnorm = float(np.linalg.norm(x_star - x0_init))
     converged = bool(getattr(result, "success", False))
     status = "converged" if converged else "failed"
     message = str(getattr(result, "message", "") or "")
@@ -321,13 +334,18 @@ def solve_scipy_minimize(
             message=message,
         ),
         timing=prof.snapshot(),
-        meta={"solver": "scipy_minimize", "method": str(method)},
+        meta={
+            "solver": "scipy_minimize",
+            "method": str(method),
+            "x0": x0_init.copy(),
+        },
     )
 
 
 def solve_cyipopt_minimize(
     problem: Any,
     *,
+    x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
     weighted: bool = True,
     term_indices: Iterable[int] | None = None,
@@ -354,11 +372,11 @@ def solve_cyipopt_minimize(
             weighted=bool(weighted),
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
-        x0 = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
+        x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
         req = linear_problem.required_list(required)
         objective = _LinearizedObjective(linear_problem, required=req)
-        n_total = int(x0.size)
-        initial_cost, _grad0, _rnorm0 = objective.eval(x0)
+        n_total = int(x0_init.size)
+        initial_cost, _grad0, _rnorm0 = objective.eval(x0_init)
 
     options_local: dict[str, Any] = {} if options is None else dict(options)
     if max_iters is not None and "max_iter" not in options_local:
@@ -366,7 +384,7 @@ def solve_cyipopt_minimize(
 
     iter_count = 0
     last_dxnorm = 0.0
-    prev_x = x0.copy()
+    prev_x = x0_init.copy()
 
     def fun(x: Array) -> float:
         fx, _gx, _rnorm = objective.eval(x)
@@ -390,7 +408,7 @@ def solve_cyipopt_minimize(
 
     kwargs: dict[str, Any] = {
         "fun": fun,
-        "x0": x0,
+        "x0": x0_init,
         "jac": jac,
         "bounds": bounds,
         "options": options_local,
@@ -410,13 +428,13 @@ def solve_cyipopt_minimize(
             result = minimize_ipopt(**kwargs)
 
     with prof.span("solve.finalize"):
-        x_star = as_vec(getattr(result, "x", x0), expected_size=n_total, name="result.x")
+        x_star = as_vec(getattr(result, "x", x0_init), expected_size=n_total, name="result.x")
         cost, _grad, rnorm = objective.eval(x_star)
     iters = int(getattr(result, "nit", iter_count))
     if iters <= 0:
         iters = int(iter_count)
     if iter_count <= 0:
-        last_dxnorm = float(np.linalg.norm(x_star - x0))
+        last_dxnorm = float(np.linalg.norm(x_star - x0_init))
     converged = bool(getattr(result, "success", False))
     status = "converged" if converged else "failed"
     message = str(getattr(result, "message", "") or "")
@@ -433,7 +451,10 @@ def solve_cyipopt_minimize(
             message=message,
         ),
         timing=prof.snapshot(),
-        meta={"solver": "cyipopt_minimize"},
+        meta={
+            "solver": "cyipopt_minimize",
+            "x0": x0_init.copy(),
+        },
     )
 
 
@@ -519,6 +540,7 @@ def _parse_liteopt_gn_result(
 def solve_liteopt_gd(
     problem: Any,
     *,
+    x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
     weighted: bool = True,
     term_indices: Iterable[int] | None = None,
@@ -563,11 +585,11 @@ def solve_liteopt_gd(
             weighted=bool(weighted),
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
-        x0 = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
+        x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
         req = linear_problem.required_list(required)
         objective = _LinearizedObjective(linear_problem, required=req)
-        n_total = int(x0.size)
-        initial_cost, _grad0, _rnorm0 = objective.eval(x0)
+        n_total = int(x0_init.size)
+        initial_cost, _grad0, _rnorm0 = objective.eval(x0_init)
 
     method_key = str(method).strip().lower()
     if method_key not in {"gd", "gn"}:
@@ -578,7 +600,7 @@ def solve_liteopt_gd(
 
     iter_count = 0
     last_dxnorm = 0.0
-    prev_x = x0.copy()
+    prev_x = x0_init.copy()
 
     def _is_nonfinite_error(exc: BaseException) -> bool:
         if isinstance(exc, FloatingPointError):
@@ -671,7 +693,7 @@ def solve_liteopt_gd(
         failure_message = ""
         with prof.span("solve.backend"):
             try:
-                result = liteopt.gn(residual, jacobian, x0.copy(), **options_local)
+                result = liteopt.gn(residual, jacobian, x0_init.copy(), **options_local)
             except Exception as e:
                 if not _is_nonfinite_error(e):
                     raise
@@ -679,7 +701,7 @@ def solve_liteopt_gd(
                 result = None
 
         converged = False
-        x_star = x0.copy()
+        x_star = x0_init.copy()
         iters = int(max_iters) if max_iters is not None else 0
         cost = float("nan")
         rnorm = float("nan")
@@ -731,6 +753,7 @@ def solve_liteopt_gd(
             meta={
                 "solver": "liteopt_gn",
                 "method": "gn",
+                "x0": x0_init.copy(),
             },
         )
 
@@ -831,9 +854,9 @@ def solve_liteopt_gd(
         for attempt in range(nonfinite_retries + 1):
             options_attempt = dict(options_local)
             options_attempt["step_size"] = float(step_size_used)
-            prev_x = x0.copy()
+            prev_x = x0_init.copy()
             try:
-                result = liteopt.gd(fun, grad, x0.copy(), **options_attempt)
+                result = liteopt.gd(fun, grad, x0_init.copy(), **options_attempt)
                 break
             except Exception as e:
                 if not _is_nonfinite_error(e):
@@ -848,7 +871,7 @@ def solve_liteopt_gd(
 
     converged = False
     iters_from_result: int | None = None
-    x_star = x0.copy()
+    x_star = x0_init.copy()
     if result is not None:
         x_star, converged, iters_from_result = _parse_liteopt_gd_result(
             result,
@@ -872,7 +895,7 @@ def solve_liteopt_gd(
         iters = int(max_iters) if max_iters is not None else 0
 
     if iter_count <= 0:
-        last_dxnorm = float(np.linalg.norm(x_star - x0))
+        last_dxnorm = float(np.linalg.norm(x_star - x0_init))
 
     finite_objective = bool(np.isfinite(cost)) and bool(np.isfinite(rnorm))
     status = "converged" if bool(converged and finite_objective) else "failed"
@@ -907,6 +930,7 @@ def solve_liteopt_gd(
             "method": "gd",
             "retry_count": int(retry_count),
             "step_size_used": float(step_size_used),
+            "x0": x0_init.copy(),
         },
     )
 
@@ -915,6 +939,7 @@ def solve(
     problem: Any,
     *,
     solver: str = "gauss_newton",
+    x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
     on_iter: IterCallback | None = None,
     options: Mapping[str, Any] | None = None,
@@ -926,6 +951,7 @@ def solve(
       SolveOutcome(solution, stats, timing, meta)
 
     Solver parameters are provided via `options`.
+    `x0` may be passed directly or as `options["x0"]` (but not both).
 
     gauss_newton:
       max_iters, tol_r, tol_dx, damping, line_search, ls_beta, ls_min_step, ls_max_iters
@@ -961,6 +987,9 @@ def solve(
         )
 
     opts = _merge_options(options)
+    if x0 is not None and "x0" in opts:
+        raise ValueError("solve: pass x0 either as keyword argument or options['x0'], not both.")
+    x0_override = opts.get("x0", x0)
     weighted = bool(opts.get("weighted", True))
     term_indices = _normalize_term_indices_option(opts.get("term_indices", None))
     backend_options = _normalize_backend_options_for_solver(opts, solver_key=key)
@@ -968,6 +997,7 @@ def solve(
     if key == "gauss_newton":
         return solve_gauss_newton(
             problem,
+            x0=x0_override,
             required=required,
             weighted=weighted,
             term_indices=term_indices,
@@ -987,6 +1017,7 @@ def solve(
         tol = opts.get("tol", None)
         return solve_scipy_minimize(
             problem,
+            x0=x0_override,
             required=required,
             weighted=weighted,
             term_indices=term_indices,
@@ -1003,6 +1034,7 @@ def solve(
         tol = opts.get("tol", None)
         return solve_cyipopt_minimize(
             problem,
+            x0=x0_override,
             required=required,
             weighted=weighted,
             term_indices=term_indices,
@@ -1023,6 +1055,7 @@ def solve(
         if method_liteopt == "gn":
             return solve_liteopt_gd(
                 problem,
+                x0=x0_override,
                 required=required,
                 weighted=weighted,
                 term_indices=term_indices,
@@ -1060,6 +1093,7 @@ def solve(
 
         return solve_liteopt_gd(
             problem,
+            x0=x0_override,
             required=required,
             weighted=weighted,
             term_indices=term_indices,

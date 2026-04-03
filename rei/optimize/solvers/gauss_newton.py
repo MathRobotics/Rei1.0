@@ -8,6 +8,7 @@ from ...core.outcome import SolveOutcome, SolveStats
 from ...core.state_cache import StateKey
 from ...core.timing import Profiler, ensure_profiler
 from ...problem import LinearizedProblem, as_linearized_problem
+from ...xops import as_vec
 
 Array = np.ndarray
 
@@ -15,6 +16,7 @@ def solve_gauss_newton(
     problem: Any,
     max_iters: int = 20,
     *,
+    x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
     weighted: bool = True,
     term_indices: Iterable[int] | None = None,
@@ -41,6 +43,10 @@ def solve_gauss_newton(
             weighted=bool(weighted),
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
+        n_total = int(linear_problem.n_total)
+        if x0 is not None:
+            linear_problem.set_point(as_vec(x0, expected_size=n_total, name="x0"))
+        x0_start = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
         req = linear_problem.required_list(required)
         r_init, _J_init = linear_problem.linearize(required=req)
         initial_cost = float(r_init @ r_init)
@@ -71,7 +77,10 @@ def solve_gauss_newton(
                 message=str(message),
             ),
             timing=prof.snapshot(),
-            meta={"solver": "gauss_newton"},
+            meta={
+                "solver": "gauss_newton",
+                "x0": x0_start.copy(),
+            },
         )
 
     for k in range(int(max_iters)):

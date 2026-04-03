@@ -89,6 +89,37 @@ class TestProblemCapabilities:
         assert float(stats.objective or 0.0) < 1e-20
         assert float(x_star[0]) == pytest.approx(2.5, rel=0.0, abs=1e-10)
 
+    def test_solve_gauss_newton_x0_overrides_adapter_current_point(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_to_2_5",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [2.5]},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        adapter = as_linearized_problem(runtime)
+
+        out = solve_gauss_newton(
+            adapter,
+            x0=np.array([1.0], dtype=float),
+            max_iters=16,
+            tol_r=1e-14,
+            tol_dx=1e-14,
+        )
+
+        assert out.converged
+        assert float(out.stats.initial_objective or 0.0) == pytest.approx(2.25, rel=0.0, abs=1e-14)
+        assert np.allclose(np.asarray(out.meta["x0"], dtype=float), np.array([1.0], dtype=float))
+        assert float(out.solution[0]) == pytest.approx(2.5, rel=0.0, abs=1e-10)
+
     def test_dispatch_solve_accepts_linearized_problem_adapter(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [0.0]}],

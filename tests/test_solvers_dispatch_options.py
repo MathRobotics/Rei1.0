@@ -28,6 +28,33 @@ def _build_scalar_runtime(target: float = 0.0):
 
 
 class TestSolverDispatchOptions:
+    def test_solve_gauss_newton_accepts_x0_via_options(self) -> None:
+        runtime = _build_scalar_runtime(target=2.0)
+        out = solve(
+            runtime,
+            solver="gauss_newton",
+            options={
+                "x0": [1.0],
+                "max_iters": 8,
+                "tol_r": 1e-14,
+                "tol_dx": 1e-14,
+            },
+        )
+
+        assert out.converged
+        assert float(out.stats.initial_objective or 0.0) == pytest.approx(1.0, rel=0.0, abs=1e-14)
+        assert np.allclose(np.asarray(out.meta["x0"], dtype=float), np.array([1.0], dtype=float))
+
+    def test_solve_rejects_duplicate_x0_sources(self) -> None:
+        runtime = _build_scalar_runtime(target=0.0)
+        with pytest.raises(ValueError, match="either as keyword argument or options\\['x0'\\]"):
+            _ = solve(
+                runtime,
+                solver="gauss_newton",
+                x0=np.array([1.0], dtype=float),
+                options={"x0": [0.0]},
+            )
+
     def test_solve_cyipopt_forwards_unknown_top_level_options_to_backend(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

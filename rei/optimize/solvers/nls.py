@@ -54,7 +54,10 @@ def nls(
                 step_norm=float(dxnorm_local),
             ),
             timing=prof.snapshot(),
-            meta={"solver": "nls"},
+            meta={
+                "solver": "nls",
+                "x0": np.asarray(x0, dtype=float).reshape(-1).copy(),
+            },
         )
 
     for k in range(int(max_iters)):

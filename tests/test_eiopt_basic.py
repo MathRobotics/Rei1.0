@@ -1296,6 +1296,38 @@ class TestReiBasic:
         assert "seconds" in report
         assert "total" in report
 
+    def test_format_solve_report_uses_outcome_meta_x0_when_x0_is_omitted(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_to_2",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [2.0]},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        out = solve(
+            runtime,
+            solver="gauss_newton",
+            x0=np.array([0.5], dtype=float),
+            options={"max_iters": 8, "tol_r": 1e-14, "tol_dx": 1e-14},
+        )
+        report = format_solve_report(
+            runtime,
+            outcome=out,
+            include_named=False,
+            include_kkt=False,
+        )
+
+        assert "x0=[0.5]" in report
+        assert "x*=[2." in report
+
     def test_format_timing_report_table(self) -> None:
         timing = TimingReport(
             total_seconds=1.5,

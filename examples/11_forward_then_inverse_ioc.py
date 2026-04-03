@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
-import argparse
 from pathlib import Path
 
 import numpy as np
 
 from rei import (
     RuntimeStationaritySource,
-    build_ioc_log_sections,
     build_stationarity_gradient_matrix,
-    format_timing_report,
     format_ioc_report,
     filter_stationarity_contributions,
     select_active_stationarity_indices,
@@ -20,12 +16,6 @@ from rei.optimize.builder import load_problem_toml
 from rei.optimize.kkt import check_kkt_conditions
 from rei.optimize.reductions import build_nullspace_equality_reduction
 from rei.optimize.solvers import solve
-from rei.optimize.textlog import (
-    build_solver_iter_logger,
-    build_timestamped_log_path,
-    format_solver_text_log,
-    write_text_log,
-)
 from rei.optimize_backends.kots import compile_kots_trajectory_problem
 
 try:
@@ -46,9 +36,6 @@ _MODEL_PATH = _EXAMPLES_DIR / "models" / "7_dof_arm.urdf"
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"
 # _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics.toml"  # up to torque_d1
 _ORDER = 4
-_LOG_DIR = _EXAMPLES_DIR / "logs"
-_LOG_PREFIX = "11_forward_then_inverse_ioc"
-_TRAJ_CSV_PREFIX = "11_forward_then_inverse_ioc"
 
 # Simple fixed settings (edit directly if needed)
 _FORWARD_SOLVER = "gauss_newton"  # "gauss_newton" | "scipy_minimize" | "cyipopt" | "liteopt"
@@ -60,8 +47,6 @@ if _FORWARD_SOLVER == "gauss_newton":
         "ls_beta": 0.5,
         "ls_min_step": 1e-10,
         "ls_max_iters": 50,
-        "verbose": True,
-        "verbose_every": 1,
     }
 elif _FORWARD_SOLVER == "liteopt":
     _FORWARD_OPTIONS = {
@@ -106,22 +91,11 @@ def _normalize_simplex(v: np.ndarray) -> np.ndarray:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Forward then inverse IOC example.",
-    )
-    parser.add_argument(
-        "--plot",
-        action="store_true",
-        help="Plot series declared in term.attrs.plot.",
-    )
-    args = parser.parse_args()
-
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _DSL_PATH.is_file():
         raise SystemExit(f"DSL file not found: {_DSL_PATH}")
 
-    run_timestamp = datetime.now().astimezone()
     dsl = load_problem_toml(_DSL_PATH)
 
     # kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
@@ -137,17 +111,10 @@ def main() -> int:
     reduction_fwd = build_nullspace_equality_reduction(runtime_fwd_full)
     runtime_fwd = reduction_fwd.runtime
 
-    forward_options_requested = dict(_FORWARD_OPTIONS)
-    forward_options, on_iter_fwd, forward_iter_history = build_solver_iter_logger(
-        _FORWARD_SOLVER,
-        forward_options_requested,
-        print_prefix="forward",
-    )
     out_fwd = solve(
         runtime_fwd,
         solver=_FORWARD_SOLVER,
-        options=forward_options,
-        on_iter=on_iter_fwd,
+        options=_FORWARD_OPTIONS,
     )
     z_star = np.asarray(out_fwd.solution, dtype=float).reshape(-1)
     x_star_full = np.asarray(reduction_fwd.lift(z_star), dtype=float).reshape(-1)
@@ -240,7 +207,6 @@ def main() -> int:
         f"rnorm={float(stats_fwd.residual_norm or 0.0):.3e} "
         f"dxnorm={float(stats_fwd.step_norm or 0.0):.3e}"
     )
-    print(format_timing_report(out_fwd.timing, title="forward timing"))
 
     print(
         format_ioc_report(
@@ -259,91 +225,6 @@ def main() -> int:
             simplex_out=simplex_out,
         )
     )
-    if simplex_out is not None:
-        print(format_timing_report(simplex_out.timing, title="simplex timing"))
-
-    extra_sections = build_ioc_log_sections(
-        callback_rows=len(forward_iter_history),
-        active_mode=_ACTIVE_MODE,
-        active_idx=list(active_idx),
-        active_grad_idx=list(active_grad_idx),
-        active_res_idx=list(active_res_idx),
-        term_indices=list(term_indices),
-        w_true=w_true,
-        w_hat=w_hat,
-        ioc_identifiable=ioc_identifiable,
-        ikkt_ok=ikkt_ok,
-        ikkt_residual=ikkt_residual,
-        ikkt_tol=_IKKT_TOL,
-        ioc_max_iters=_IOC_MAX_ITERS,
-        kkt=kkt,
-        simplex_out=simplex_out,
-        contributions=contrib_inv,
-    )
-
-    log_text = format_solver_text_log(
-        title="11_forward_then_inverse_ioc log",
-        solver=_FORWARD_SOLVER,
-        outcome=out_fwd,
-        requested_options=forward_options_requested,
-        solve_options=forward_options,
-        iter_history=forward_iter_history,
-        header={
-            "model": str(_MODEL_PATH),
-            "dsl": str(_DSL_PATH),
-            "order": int(_ORDER),
-        },
-        timestamp=run_timestamp,
-        timing_title="forward timing",
-        extra_sections=extra_sections,
-    )
-    log_path = build_timestamped_log_path(
-        _LOG_DIR,
-        prefix=_LOG_PREFIX,
-        timestamp=run_timestamp,
-    )
-    write_text_log(log_path, log_text)
-    print(f"text log saved: {log_path}")
-
-    from rei.optimize.plot import (
-        collect_plot_series_from_compiled_term_attrs,
-        plot_series,
-        write_plot_series_csv,
-    )
-
-    series_all = list(
-        collect_plot_series_from_compiled_term_attrs(
-            compiled_fwd,
-            strict=True,
-        )
-    )
-    if len(series_all) == 0:
-        raise ValueError(
-            "forward trajectory CSV: no plot series found. "
-            "Add term.attrs.plot entries or ensure trajectory derivatives are available."
-        )
-
-    csv_path = build_timestamped_log_path(
-        _LOG_DIR,
-        prefix=_TRAJ_CSV_PREFIX,
-        timestamp=run_timestamp,
-        suffix=".csv",
-    )
-    csv_path = write_plot_series_csv(series_all, csv_path)
-    series_count = len(series_all)
-    group_count = len({str(item.name) for item in series_all})
-    print(
-        f"forward trajectory CSV saved: {csv_path} "
-        f"(series={series_count}, groups={group_count})"
-    )
-
-    if args.plot:
-        fig, _ax, series = plot_series(
-            series_all,
-            title="11_forward_then_inverse_ioc",
-        )
-        print(f"plotted series={len(series)} from term.attrs.plot")
-        fig.savefig("trajectory.png", dpi=200)
 
     return 0
 

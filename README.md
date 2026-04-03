@@ -133,6 +133,7 @@ from rei import solve
 
 out = solve(
     runtime,
+    x0=[0.5],  # optional initial point override
     solver="liteopt",
     options={
         "method": "gd",  # default
@@ -177,6 +178,8 @@ out_ipopt = solve(
 ```
 
 返り値は `SolveOutcome` で、主に `out.solution`, `out.stats`, `out.timing` を使います。
+初期点は `solve(..., x0=...)` で直接渡せます。`solve(..., options={"x0": ...})` も利用できますが、
+`x0=` の方を推奨します。
 `scipy_minimize` / `cyipopt` / `liteopt` では未知の top-level key を backend option として転送します。
 ただし他 solver 用の key（例: `cyipopt` で `tol_dx`）はエラーにします。
 
