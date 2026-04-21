@@ -23,6 +23,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 0
+nullspace_eq = true
 
 [terms.expr]
 type = "component"
@@ -64,6 +65,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 1
+nullspace_eq = true
 
 [terms.expr]
 type = "component"
@@ -105,6 +107,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 0
+nullspace_eq = true
 
 [terms.expr]
 type = "component"
@@ -146,6 +149,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 1
+nullspace_eq = true
 
 [terms.expr]
 type = "component"
@@ -187,6 +191,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 0
+nullspace_eq = true
 
 [terms.expr]
 type = "component"
@@ -222,6 +227,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 1
+nullspace_eq = true
 
 [terms.expr]
 type = "component"
@@ -257,6 +263,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 0
+nullspace_eq = true
 
 [terms.expr]
 type = "component"
@@ -292,6 +299,7 @@ kind = "eq"
 
 [terms.attrs]
 joint_component = 1
+nullspace_eq = true
 
 [terms.expr]
 type = "component"

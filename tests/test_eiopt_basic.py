@@ -683,6 +683,104 @@ class TestReiBasic:
         with pytest.raises(ValueError, match="constraint.kind='eq'"):
             _ = build_nullspace_equality_reduction(runtime, eq_term_indices=[1])
 
+    def test_build_nullspace_equality_reduction_supports_selector_attr(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 2, "init": [1.0, 2.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "attrs": {"nullspace_eq": True},
+                    "expr": {
+                        "type": "get_state",
+                        "name": "eq_x0",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "demo",
+                            "owner_name": "sys",
+                            "dtype": "vec",
+                            "field": "eq_x0",
+                        },
+                        "jac": {"var": "x"},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {
+                        "type": "get_state",
+                        "name": "eq_x1",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "demo",
+                            "owner_name": "sys",
+                            "dtype": "vec",
+                            "field": "eq_x1",
+                        },
+                        "jac": {"var": "x"},
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {"type": "get_var", "name": "x_reg", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        def build_state(x_all: np.ndarray, *, required=None, **_kwargs) -> dict[StateKey, object]:
+            x = np.asarray(x_all, dtype=float).reshape(-1)
+            req = [] if required is None else list(required)
+            out: dict[StateKey, object] = {}
+            for key in req:
+                if key.owner.owner_type != "demo" or key.owner.owner_name != "sys":
+                    continue
+                if key.field == "eq_x0":
+                    out[key] = np.array([x[0]], dtype=float)
+                    continue
+                if key.field == "eq_x0_J_x":
+                    out[key] = np.array([[1.0, 0.0]], dtype=float)
+                    continue
+                if key.field == "eq_x1":
+                    out[key] = np.array([x[1]], dtype=float)
+                    continue
+                if key.field == "eq_x1_J_x":
+                    out[key] = np.array([[0.0, 1.0]], dtype=float)
+            return out
+
+        runtime = compile_nls_problem(dsl, build_state=build_state)
+        reduction = build_nullspace_equality_reduction(
+            runtime,
+            eq_selector_attr="nullspace_eq",
+            objective_term_indices=[2],
+        )
+
+        assert reduction.eq_term_indices == (0,)
+        assert reduction.objective_term_indices == (2,)
+        assert reduction.runtime.pack.n_total == 1
+
+    def test_build_nullspace_equality_reduction_rejects_non_eq_selector_match(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "constraint": {"kind": "eq"},
+                    "expr": {"type": "get_var", "name": "eq_x", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "attrs": {"nullspace_eq": True},
+                    "expr": {"type": "get_var", "name": "obj_x", "var": "x"},
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        with pytest.raises(ValueError, match="eq_selector_attr matched term"):
+            _ = build_nullspace_equality_reduction(
+                runtime,
+                eq_selector_attr="nullspace_eq",
+            )
+
     def test_build_nullspace_equality_reduction_manual_switch(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 2, "init": [0.0, 0.0]}],

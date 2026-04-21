@@ -36,6 +36,7 @@ _MODEL_PATH = _EXAMPLES_DIR / "models" / "7_dof_arm.urdf"
 _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics_d12.toml"
 # _DSL_PATH = _EXAMPLES_DIR / "dsl" / "robokots_traj_dynamics.toml"  # up to torque_d1
 _ORDER = 4
+_NULLSPACE_EQ_SELECTOR_ATTR = "nullspace_eq"
 
 # Simple fixed settings (edit directly if needed)
 _FORWARD_SOLVER = "gauss_newton"  # "gauss_newton" | "scipy_minimize" | "cyipopt" | "liteopt"
@@ -108,7 +109,10 @@ def main() -> int:
         data=kots.state_dict_,
     )
     runtime_fwd_full = compiled_fwd.runtime
-    reduction_fwd = build_nullspace_equality_reduction(runtime_fwd_full)
+    reduction_fwd = build_nullspace_equality_reduction(
+        runtime_fwd_full,
+        eq_selector_attr=_NULLSPACE_EQ_SELECTOR_ATTR,
+    )
     runtime_fwd = reduction_fwd.runtime
 
     out_fwd = solve(
@@ -155,7 +159,10 @@ def main() -> int:
         if i not in constraint_indices:
             runtime_inv_full.set_cost_weight(i, 1.0)
 
-    reduction_inv = build_nullspace_equality_reduction(runtime_inv_full)
+    reduction_inv = build_nullspace_equality_reduction(
+        runtime_inv_full,
+        eq_selector_attr=_NULLSPACE_EQ_SELECTOR_ATTR,
+    )
     runtime_inv = reduction_inv.runtime
     z_star_inv = np.asarray(reduction_inv.project(x_star_full), dtype=float).reshape(-1)
 

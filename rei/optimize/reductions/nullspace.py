@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -283,6 +284,8 @@ def build_nullspace_equality_reduction(
     runtime: NLSRuntime,
     *,
     eq_term_indices: Iterable[int] | None = None,
+    eq_selector_attr: str | None = None,
+    eq_selector_value: Any = True,
     objective_term_indices: Iterable[int] | None = None,
     required: Iterable[StateKey] | None = None,
     z_var_name: str = "z_nullspace",
@@ -339,11 +342,9 @@ def build_nullspace_equality_reduction(
         n_terms=n_terms,
         term_indices=runtime.find_constraint_term_indices(kind="eq"),
     )
-    if eq_term_indices is None:
-        eq_idxs = eq_idxs_auto
-    else:
+    eq_auto_set = set(eq_idxs_auto)
+    if eq_term_indices is not None:
         eq_idxs = _normalize_term_indices(n_terms=n_terms, term_indices=eq_term_indices)
-        eq_auto_set = set(eq_idxs_auto)
         invalid = [idx for idx in eq_idxs if idx not in eq_auto_set]
         if len(invalid) > 0:
             invalid_details: list[str] = []
@@ -360,6 +361,34 @@ def build_nullspace_equality_reduction(
                 "constraint.kind='eq'. Invalid index(es): "
                 f"[{detail}]."
             )
+    elif eq_selector_attr is not None:
+        selector_attr = str(eq_selector_attr).strip()
+        if selector_attr == "":
+            raise ValueError(
+                "build_nullspace_equality_reduction: eq_selector_attr must be non-empty."
+            )
+        eq_idxs = _normalize_term_indices(
+            n_terms=n_terms,
+            term_indices=runtime.find_term_indices(attr=selector_attr, value=eq_selector_value),
+        )
+        invalid = [idx for idx in eq_idxs if idx not in eq_auto_set]
+        if len(invalid) > 0:
+            invalid_details = []
+            for idx in invalid:
+                attrs = runtime.problem.term_attrs_at(idx)
+                kind = attrs.get("constraint_kind", None)
+                is_constraint = bool(attrs.get("is_constraint", False))
+                invalid_details.append(
+                    f"{idx}(constraint_kind={kind!r}, is_constraint={is_constraint})"
+                )
+            detail = ", ".join(invalid_details)
+            raise ValueError(
+                "build_nullspace_equality_reduction: eq_selector_attr matched term(s) that are not "
+                "constraint.kind='eq'. Invalid index(es): "
+                f"[{detail}]."
+            )
+    else:
+        eq_idxs = eq_idxs_auto
 
     if objective_term_indices is None:
         eq_set = set(eq_idxs)

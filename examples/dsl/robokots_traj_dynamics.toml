@@ -44,6 +44,9 @@ value = { fill = 1.57 }
 type = "scalar_weight"
 w = 100.0
 
+[terms.attrs]
+nullspace_eq = true
+
 [terms.attrs.plot]
 type = "state_traj"
 name = "joint_q"
@@ -80,6 +83,9 @@ value = { fill = -1.57 }
 type = "scalar_weight"
 w = 100.0
 
+[terms.attrs]
+nullspace_eq = true
+
 [[terms]]
 [terms.constraint]
 kind = "eq"
@@ -104,6 +110,9 @@ value = { fill = 0.0 }
 [terms.cost]
 type = "scalar_weight"
 w = 100.0
+
+[terms.attrs]
+nullspace_eq = true
 
 [[terms]]
 [terms.constraint]
@@ -130,6 +139,9 @@ value = { fill = 0.0 }
 [terms.cost]
 type = "scalar_weight"
 w = 100.0
+
+[terms.attrs]
+nullspace_eq = true
 
 [[terms.attrs.plot]]
 type = "state_traj"
