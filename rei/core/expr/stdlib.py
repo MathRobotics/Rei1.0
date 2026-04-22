@@ -583,17 +583,173 @@ def build_hinge(ctx, dsl):
     return HingeExpr(name=dsl.get("name", "hinge"), base=base)
 
 
+def _infer_root_trajectory_q_dim(ctx) -> int | None:
+    root_dsl = getattr(ctx, "root_dsl", None)
+    if not isinstance(root_dsl, dict):
+        return None
+    traj_dsl = root_dsl.get("trajectory", None)
+    if not isinstance(traj_dsl, dict):
+        return None
+
+    traj_var_raw = traj_dsl.get("var", None)
+    traj_var = None if traj_var_raw is None else str(traj_var_raw).strip()
+    if traj_var == "":
+        traj_var = None
+
+    v = None
+    if traj_var is not None:
+        v = next((x for x in ctx.pack.vars if x.name == traj_var), None)
+    elif len(ctx.pack.vars) == 1:
+        v = ctx.pack.vars[0]
+
+    default_q_dim = None
+    if v is not None and str(traj_dsl.get("type", "")).strip().lower() == "bspline":
+        default_q_dim = infer_bspline_q_dim_from_var(traj_dsl, var_dim=int(v.dim()))
+
+    resolve_traj = getattr(ctx, "resolve_trajectory_map", None)
+    if callable(resolve_traj):
+        try:
+            traj = resolve_traj(traj_dsl, default_q_dim=default_q_dim)
+            return int(traj.q_dim)
+        except Exception:
+            pass
+
+    typ = str(traj_dsl.get("type", "")).strip().lower()
+    if typ == "":
+        return None
+    q_dim_raw = pick_trajectory_value(traj_dsl, section=typ, key="q_dim")
+    if q_dim_raw is not None:
+        try:
+            q_dim = int(q_dim_raw)
+        except Exception:
+            return None
+        return q_dim if q_dim > 0 else None
+    if v is not None and typ == "bspline":
+        return infer_bspline_q_dim_from_var(traj_dsl, var_dim=int(v.dim()))
+    return None
+
+
+def _infer_get_var_segment_dim(expr: GetVarExpr, ctx) -> int | None:
+    if len(expr.vars) != 1:
+        return None
+    n_total = int(expr.vars[0].dim())
+    if n_total <= 0:
+        return None
+
+    steps = _time_steps_from_ctx(ctx)
+    if steps is not None and steps > 1 and n_total % steps == 0:
+        return int(n_total // steps)
+    return int(n_total)
+
+
+def _infer_get_state_segment_dim(expr: GetStateExpr, ctx) -> int | None:
+    owner = getattr(expr.key_value, "owner", None)
+    owner_type = getattr(owner, "owner_type", None)
+    if str(owner_type).strip().lower() != "total_joint":
+        return None
+    return _infer_root_trajectory_q_dim(ctx)
+
+
+def _infer_const_segment_dim(expr: ConstantExpr, ctx) -> int | None:
+    value = np.asarray(expr.value, dtype=float).reshape(-1)
+    if value.size == 0:
+        return None
+
+    traj_dim = None
+    if len(expr.vars) == 1:
+        v = expr.vars[0]
+        traj_dim = _infer_const_fill_dim_from_trajectory(
+            ctx,
+            var_name=str(v.name),
+            var_dim=int(v.dim()),
+        )
+    if traj_dim is None:
+        traj_dim = _infer_root_trajectory_q_dim(ctx)
+
+    if traj_dim is not None:
+        traj_dim = int(traj_dim)
+        steps = _time_steps_from_ctx(ctx)
+        if value.size == traj_dim:
+            return traj_dim
+        if steps is not None and value.size == steps * traj_dim:
+            return traj_dim
+
+    return int(value.size)
+
+
+def _merge_inferred_segment_dims(*dims: int | None) -> int | None:
+    found = [int(d) for d in dims if d is not None]
+    if len(found) == 0:
+        return None
+    first = int(found[0])
+    if any(int(d) != first for d in found[1:]):
+        raise ValueError(
+            "inferred segment_dim mismatch: "
+            + ", ".join(str(int(d)) for d in found)
+        )
+    return first
+
+
+def _infer_expr_segment_dim(expr, ctx) -> int | None:
+    if isinstance(expr, ComponentExpr):
+        return 1
+    if isinstance(expr, TimeDiffExpr):
+        return int(expr.segment_dim)
+    if isinstance(expr, TrajectoryVarExpr):
+        return int(expr.trajectory.q_dim)
+    if isinstance(expr, TrajectoryVarDerivativesExpr):
+        if len(expr.trajectories) == 0:
+            return None
+        return int(expr.trajectories[0].q_dim)
+    if isinstance(expr, GetVarExpr):
+        return _infer_get_var_segment_dim(expr, ctx)
+    if isinstance(expr, GetStateExpr):
+        return _infer_get_state_segment_dim(expr, ctx)
+    if isinstance(expr, ConstantExpr):
+        return _infer_const_segment_dim(expr, ctx)
+    if isinstance(expr, RepeatConstantExpr):
+        value = np.asarray(expr.value, dtype=float).reshape(-1)
+        return int(value.size) if value.size > 0 else None
+    if isinstance(expr, StackExpr):
+        if len(expr.parts) == 0:
+            return None
+        dims = [_infer_expr_segment_dim(part, ctx) for part in expr.parts]
+        return _merge_inferred_segment_dims(*dims)
+    if isinstance(expr, SubExpr):
+        return _merge_inferred_segment_dims(
+            _infer_expr_segment_dim(expr.a, ctx),
+            _infer_expr_segment_dim(expr.b, ctx),
+        )
+    if isinstance(expr, HingeExpr):
+        return _infer_expr_segment_dim(expr.base, ctx)
+    return None
+
+
+def _resolve_segment_dim(ctx, dsl, *, base, where: str) -> int:
+    raw = dsl.get("segment_dim", None)
+    if raw is not None:
+        if isinstance(raw, str) and raw.strip().lower() == "auto":
+            raw = None
+        else:
+            try:
+                out = int(raw)
+            except Exception as e:
+                raise ValueError(f"{where}: segment_dim must be an integer or 'auto', got {raw!r}.") from e
+            if out <= 0:
+                raise ValueError(f"{where}: segment_dim must be > 0, got {out}.")
+            return int(out)
+
+    inferred = _infer_expr_segment_dim(base, ctx)
+    if inferred is None:
+        raise ValueError(f"{where}: segment_dim is required when it cannot be inferred from the base expr.")
+    if inferred <= 0:
+        raise ValueError(f"{where}: inferred segment_dim must be > 0, got {inferred}.")
+    return int(inferred)
+
+
 def build_component(ctx, dsl):
     base = ctx.build_expr(dsl["base"])
-    segment_dim_raw = dsl.get("segment_dim", None)
-    if segment_dim_raw is None:
-        raise ValueError("component: segment_dim is required.")
-    try:
-        segment_dim = int(segment_dim_raw)
-    except Exception as e:
-        raise ValueError(f"component: segment_dim must be an integer, got {segment_dim_raw!r}.") from e
-    if segment_dim <= 0:
-        raise ValueError(f"component: segment_dim must be > 0, got {segment_dim}.")
+    segment_dim = _resolve_segment_dim(ctx, dsl, base=base, where="component")
 
     index_raw = dsl.get("index", dsl.get("component", None))
     if index_raw is None:
@@ -615,15 +771,7 @@ def build_component(ctx, dsl):
 
 def build_time_diff(ctx, dsl):
     base = ctx.build_expr(dsl["base"])
-    segment_dim_raw = dsl.get("segment_dim", None)
-    if segment_dim_raw is None:
-        raise ValueError("time_diff: segment_dim is required.")
-    try:
-        segment_dim = int(segment_dim_raw)
-    except Exception as e:
-        raise ValueError(f"time_diff: segment_dim must be an integer, got {segment_dim_raw!r}.") from e
-    if segment_dim <= 0:
-        raise ValueError(f"time_diff: segment_dim must be > 0, got {segment_dim}.")
+    segment_dim = _resolve_segment_dim(ctx, dsl, base=base, where="time_diff")
 
     wrt = str(dsl.get("wrt", dsl.get("derivative_wrt", "index"))).strip().lower()
     divide_by_dt = bool(dsl.get("divide_by_dt", False))

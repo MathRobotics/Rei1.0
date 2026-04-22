@@ -16,6 +16,7 @@ init = { fill = 0.0 }
 # - This file is a per-joint version for planar2 (q_dim=2).
 # - Each term is split into j0 / j1 by wrapping the original expression
 #   with `type = "component"`.
+# - `segment_dim` is omitted here and inferred as q_dim=2 at compile time.
 
 [[terms]]
 [terms.constraint]
@@ -28,7 +29,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "q_init_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -70,7 +70,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "q_init_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]
@@ -112,7 +111,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "q_terminal_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -154,7 +152,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "q_terminal_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]
@@ -196,7 +193,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "qdot_init_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -232,7 +228,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "qdot_init_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]
@@ -268,7 +263,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "qdot_terminal_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -304,7 +298,6 @@ nullspace_eq = true
 [terms.expr]
 type = "component"
 name = "qdot_terminal_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]
@@ -336,7 +329,6 @@ joint_component = 0
 [terms.expr]
 type = "component"
 name = "qdot_traj_regularization_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -357,7 +349,6 @@ joint_component = 1
 [terms.expr]
 type = "component"
 name = "qdot_traj_regularization_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]
@@ -378,7 +369,6 @@ joint_component = 0
 [terms.expr]
 type = "component"
 name = "torque_traj_regularization_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -413,7 +403,6 @@ joint_component = 1
 [terms.expr]
 type = "component"
 name = "torque_traj_regularization_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]
@@ -448,7 +437,6 @@ joint_component = 0
 [terms.expr]
 type = "component"
 name = "torque_d1_traj_regularization_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -483,7 +471,6 @@ joint_component = 1
 [terms.expr]
 type = "component"
 name = "torque_d1_traj_regularization_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]
@@ -518,7 +505,6 @@ joint_component = 0
 [terms.expr]
 type = "component"
 name = "torque_d2_traj_regularization_j0"
-segment_dim = 2
 index = 0
 
 [terms.expr.base]
@@ -553,7 +539,6 @@ joint_component = 1
 [terms.expr]
 type = "component"
 name = "torque_d2_traj_regularization_j1"
-segment_dim = 2
 index = 1
 
 [terms.expr.base]

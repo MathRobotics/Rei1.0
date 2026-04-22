@@ -67,6 +67,8 @@ runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
 out = solve(runtime)
 ```
 
+DSL の書き方をまとめたガイドは `docs/dsl.md` を参照してください。
+
 ## Canonical Namespace
 
 - `rei.optimize`: 最適化 API 入口（`compile_nls_problem`, `solve` など）

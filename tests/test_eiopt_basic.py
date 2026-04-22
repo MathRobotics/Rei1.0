@@ -2304,7 +2304,6 @@ class TestReiBasic:
                     "expr": {
                         "type": "time_diff",
                         "name": "traj_smooth",
-                        "segment_dim": 2,
                         "base": {"type": "get_traj_var", "name": "q_traj", "var": "p"},
                     },
                     "cost": {"type": "l2"},
@@ -2345,7 +2344,7 @@ class TestReiBasic:
                     "expr": {
                         "type": "time_diff",
                         "name": "dqdt",
-                        "segment_dim": 2,
+                        "segment_dim": "auto",
                         "wrt": "time",
                         "base": {"type": "get_var", "var": "q"},
                     },
