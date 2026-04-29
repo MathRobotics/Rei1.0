@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -147,6 +149,36 @@ def compile_nls_problem(
     required = collect_required_state_keys(problem)
     return NLSRuntime.from_problem(problem, state=cache, time=time, required=required)
 
+
+def compile_nls_problem_spec(
+    spec: Mapping[str, Any],
+    *,
+    build_state: Callable[..., dict],
+    expr_register: ExprRegister | None = None,
+) -> NLSRuntime:
+    from .dsl.spec import problem_spec_to_dsl
+
+    return compile_nls_problem(
+        problem_spec_to_dsl(spec),
+        build_state=build_state,
+        expr_register=expr_register,
+    )
+
+
+def compile_nls_problem_spec_json(
+    path: str | Path,
+    *,
+    build_state: Callable[..., dict],
+    expr_register: ExprRegister | None = None,
+) -> NLSRuntime:
+    from .dsl.spec import load_problem_spec_json
+
+    return compile_nls_problem(
+        load_problem_spec_json(path),
+        build_state=build_state,
+        expr_register=expr_register,
+    )
+
 __all__ = [
     "NLSProblem",
     "NLSRuntime",
@@ -158,5 +190,7 @@ __all__ = [
     "build_nls_problem",
     "collect_required_state_keys",
     "compile_nls_problem",
+    "compile_nls_problem_spec",
+    "compile_nls_problem_spec_json",
     "load_problem_toml",
 ]

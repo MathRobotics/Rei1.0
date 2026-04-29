@@ -1,0 +1,18 @@
+{
+  "variables": {
+    "q": {
+      "dim": 2,
+      "init": [0.0, 0.0]
+    }
+  },
+  "terms": [
+    {
+      "name": "q_minus_target",
+      "weight": 1.0,
+      "residual": {
+        "var": "q",
+        "target": [0.5, -1.2]
+      }
+    }
+  ]
+}

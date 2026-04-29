@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from rei.optimize.builder import compile_nls_problem
-from rei.optimize.report import format_solve_report
-from rei.optimize.solvers import solve
+from rei import compile_nls_problem_spec, format_solve_report, solve
 
 
 def main() -> None:
@@ -20,25 +18,22 @@ def main() -> None:
     args = parser.parse_args()
     target = [float(args.target[0]), float(args.target[1])]
 
-    dsl = {
-        "variables": [
-            {"name": "q", "dim": 2, "init": [0.0, 0.0]},
-        ],
+    spec = {
+        "variables": {
+            "q": {"dim": 2, "init": [0.0, 0.0]},
+        },
         "terms": [
             {
-                "expr": {
-                    "type": "sub",
-                    "name": "q_minus_target",
-                    "a": {"type": "get_var", "var": "q"},
-                    "b": {"type": "const", "var": "q", "value": target},
+                "name": "q_minus_target",
+                "residual": {
+                    "var": "q",
+                    "target": target,
                 },
-                "cost": {"type": "l2"},
             }
         ],
     }
-
-    runtime = compile_nls_problem(
-        dsl,
+    runtime = compile_nls_problem_spec(
+        spec,
         build_state=lambda *_args, **_kwargs: {},
     )
 
@@ -51,7 +46,7 @@ def main() -> None:
     x_star = out.solution
     stats = out.stats
 
-    print("=== 01_minimize_quadratic ===")
+    print("=== minimize_quadratic ===")
     print(f"target={target}")
     print(
         f"status={stats.status} converged={stats.converged} iters={stats.iterations} "

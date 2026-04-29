@@ -425,8 +425,7 @@ var = "x"
 
 ### 実例: 特定の関節だけを扱う
 
-`examples/dsl/robokots_traj_dynamics_d12_per_joint.toml` は、
-全関節ベクトルの式を `component` で関節ごとに分けた実例です。
+全関節ベクトルの式は、`component` で関節ごとに分けられます。
 
 考え方は次の 2 段です。
 
@@ -1010,9 +1009,5 @@ w = 100.0
 - 制約として扱いたい項目には `constraint = "eq"` または `"ineq"` を付ける
 - 多変数問題では `var` / `jac.var` を省略しない
 
-実例は次のファイルが一番近いです。
-
-- `examples/dsl/basic.toml`
-- `examples/dsl/ik_pos.toml`
-- `examples/dsl/pinocchio_traj_dynamics.toml`
-- `examples/dsl/robokots_traj_dynamics_d12.toml`
+通常は `examples/spec/*.json` を入口にしてください。DSL は spec 変換後の
+内部表現や高度な式を直接扱うときのために残しています。

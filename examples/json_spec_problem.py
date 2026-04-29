@@ -2,17 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rei.optimize.builder import compile_nls_problem, load_problem_toml
-from rei.optimize.report import format_solve_report
-from rei.optimize.solvers import solve
+from rei import compile_nls_problem_spec_json, format_solve_report, solve
 
 
 def main() -> None:
-    dsl_path = Path(__file__).resolve().parent / "dsl" / "basic.toml"
-    dsl = load_problem_toml(dsl_path)
+    spec_path = Path(__file__).resolve().parent / "spec" / "basic.json"
 
-    runtime = compile_nls_problem(
-        dsl,
+    runtime = compile_nls_problem_spec_json(
+        spec_path,
         build_state=lambda *_args, **_kwargs: {},
     )
 
@@ -21,8 +18,8 @@ def main() -> None:
     x_star = out.solution
     stats = out.stats
 
-    print("=== 03_toml_problem ===")
-    print(f"dsl={dsl_path}")
+    print("=== json_spec_problem ===")
+    print(f"spec={spec_path}")
     print(
         f"status={stats.status} converged={stats.converged} iters={stats.iterations} "
         f"cost0={float(stats.initial_objective or 0.0):.3e} "

@@ -3,9 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from rei.optimize.builder import load_problem_toml
-from rei.optimize.report import format_solve_report
-from rei.optimize.solvers import solve
+from rei import format_solve_report, load_problem_spec_json, solve
 from rei.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
 
 try:
@@ -14,12 +12,12 @@ except ImportError as e:  # pragma: no cover
     raise SystemExit(
         "This example requires the robotics Pinocchio bindings.\n"
         "Install dependencies (e.g. `uv sync --group pinocchio`) and re-run:\n"
-        "  PYTHONPATH=. python examples/06_pinocchio_trajectory_dynamics.py"
+        "  PYTHONPATH=. python examples/pinocchio_trajectory_dynamics.py"
     ) from e
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.urdf"
-_DSL_PATH = _EXAMPLES_DIR / "dsl" / "pinocchio_traj_dynamics.toml"
+_SPEC_PATH = _EXAMPLES_DIR / "spec" / "pinocchio_traj_dynamics.json"
 
 
 def main() -> None:
@@ -33,15 +31,15 @@ def main() -> None:
 
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
-    if not _DSL_PATH.is_file():
-        raise SystemExit(f"DSL file not found: {_DSL_PATH}")
+    if not _SPEC_PATH.is_file():
+        raise SystemExit(f"JSON spec file not found: {_SPEC_PATH}")
 
-    dsl = load_problem_toml(_DSL_PATH)
+    problem = load_problem_spec_json(_SPEC_PATH)
     model = pin.buildModelFromUrdf(str(_MODEL_PATH))
     data = model.createData()
 
     compiled = compile_pinocchio_trajectory_problem(
-        dsl,
+        problem,
         model=model,
         data=data,
     )
@@ -53,12 +51,10 @@ def main() -> None:
         solver="gauss_newton",
         options={"max_iters": 400, "tol_dx": 1e-8},
     )
-    x_star = out.solution
-
     steps = int(compiled.trajectory_map.steps)
 
-    print("=== 06_pinocchio_trajectory_dynamics ===")
-    print(f"dsl={_DSL_PATH}")
+    print("=== pinocchio_trajectory_dynamics ===")
+    print(f"spec={_SPEC_PATH}")
     print(f"model={_MODEL_PATH}")
     print(
         format_solve_report(
@@ -80,7 +76,7 @@ def main() -> None:
 
         fig, _ax, series = plot_term_attrs(
             runtime,
-            title="06_pinocchio_trajectory_dynamics",
+            title="pinocchio_trajectory_dynamics",
         )
         del fig
         print(f"plotted series={len(series)} from term.attrs.plot")

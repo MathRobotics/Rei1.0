@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from rei import compile_nls_problem_spec, format_solve_report, solve
 from rei.core.state_cache import OwnerKey, StateKey
 from rei.core.state_schema import DTYPE_KINEMATICS, jac_field
-from rei.optimize.builder import compile_nls_problem
-from rei.optimize.report import format_solve_report
-from rei.optimize.solvers import solve
 
 
 def build_state(x_all, *, pack=None, time=None, required=None):
@@ -56,34 +54,28 @@ def build_state(x_all, *, pack=None, time=None, required=None):
 
 
 def main() -> None:
-    dsl = {
-        "variables": [
-            {"name": "q", "dim": 2, "init": [0.0, 0.0]},
-        ],
+    spec = {
+        "variables": {
+            "q": {"dim": 2, "init": [0.0, 0.0]},
+        },
         "terms": [
             {
-                "expr": {
-                    "type": "sub",
-                    "name": "ee_pos_error",
-                    "a": {
-                        "type": "get_state",
-                        "key": {
-                            "k": 0,
-                            "owner_type": "link",
-                            "owner_name": "ee",
-                            "dtype": DTYPE_KINEMATICS,
-                            "field": "pos",
-                        },
-                        "jac": {"var": "q"},
-                    },
-                    "b": {"type": "const", "var": "q", "value": [1.5, -0.5, 0.0]},
+                "name": "ee_pos_error",
+                "residual": {
+                    "state": "ee_pos",
+                    "var": "q",
+                    "at": 0,
+                    "owner_type": "link",
+                    "owner": "ee",
+                    "dtype": DTYPE_KINEMATICS,
+                    "field": "pos",
+                    "frame": "world",
+                    "target": [1.5, -0.5, 0.0],
                 },
-                "cost": {"type": "l2"},
             }
         ],
     }
-
-    runtime = compile_nls_problem(dsl, build_state=build_state)
+    runtime = compile_nls_problem_spec(spec, build_state=build_state)
 
     x0 = runtime.pack.get().copy()
     out = solve(
@@ -94,7 +86,7 @@ def main() -> None:
     x_star = out.solution
     stats = out.stats
 
-    print("=== 02_get_state_minimal ===")
+    print("=== get_state_minimal ===")
     print(
         f"status={stats.status} converged={stats.converged} iters={stats.iterations} "
         f"cost0={float(stats.initial_objective or 0.0):.3e} "

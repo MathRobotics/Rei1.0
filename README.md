@@ -3,9 +3,10 @@
 `rei` is a Python toolkit for building, linearizing, and solving numerical
 optimization problems through capability-oriented APIs.
 
-Problems are described with Python dictionaries or TOML DSL files. Backend code
-connects through a single `build_state()` function, so the optimization layer can
-stay independent from robotics, vision, or other state providers.
+Hand-written problems are described with compact JSON spec files, which are
+converted to Rei's lower-level DSL before compilation. Backend code connects
+through a single `build_state()` function, so the optimization layer can stay
+independent from robotics, vision, or other state providers.
 
 ## Requirements
 
@@ -25,7 +26,7 @@ uv sync
 Run commands through the managed environment:
 
 ```bash
-uv run python examples/01_minimize_quadratic.py
+uv run python examples/minimize_quadratic.py
 uv run python -m pytest tests
 ```
 
@@ -43,40 +44,37 @@ For editable pip installs outside the recommended `uv` workflow, use
 ## Quick Start
 
 ```python
-from rei import compile_nls_problem, solve
+from rei import compile_nls_problem_spec_json, solve
 
-dsl = {
-    "variables": [{"name": "q", "dim": 2, "init": [0.0, 0.0]}],
-    "terms": [
-        {
-            "expr": {
-                "type": "sub",
-                "a": {"type": "get_var", "var": "q"},
-                "b": {"type": "const", "var": "q", "value": [3.0, -1.0]},
-            },
-            "cost": {"type": "l2"},
-        }
-    ],
-}
-
-runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+runtime = compile_nls_problem_spec_json(
+    "examples/spec/basic.json",
+    build_state=lambda *_args, **_kwargs: {},
+)
 out = solve(runtime, solver="gauss_newton")
 
 print(out.solution)
 print(out.stats.status)
 ```
 
-Loading the same kind of problem from TOML:
+The same structure can also be built from a Python dict:
 
 ```python
-from rei import compile_nls_problem, load_problem_toml, solve
+from rei import compile_nls_problem_spec, solve
 
-dsl = load_problem_toml("examples/dsl/basic.toml")
-runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+spec = {
+    "variables": {"q": {"dim": 2, "init": [0.0, 0.0]}},
+    "terms": [
+        {
+            "name": "q_minus_target",
+            "residual": {"var": "q", "target": [0.5, -1.2]},
+        }
+    ],
+}
+runtime = compile_nls_problem_spec(spec, build_state=lambda *_args, **_kwargs: {})
 out = solve(runtime)
 ```
 
-DSL の書き方をまとめたガイドは `docs/dsl.md` を参照してください。
+JSON spec は人間向けの入口です。低レベル DSL は compile/debug/advanced 用の内部表現として残しています。
 
 ## Canonical Namespace
 
@@ -177,28 +175,25 @@ forwarded to the backend. Options that belong to another solver are rejected.
 Run examples from the repository root:
 
 ```bash
-uv run python examples/01_minimize_quadratic.py
-uv run python examples/02_get_state_minimal.py
-uv run python examples/03_toml_problem.py
-uv run python examples/08_camera_calibration.py
-uv run python examples/10_stationarity_ioc.py
+uv run python examples/minimize_quadratic.py
+uv run python examples/get_state_minimal.py
+uv run python examples/json_spec_problem.py
+uv run python examples/stationarity_ioc.py
 ```
 
 Backend examples:
 
 ```bash
 uv sync --group pinocchio
-uv run python examples/04_pinocchio_ik.py
-uv run python examples/06_pinocchio_trajectory_dynamics.py
+uv run python examples/pinocchio_ik.py
+uv run python examples/pinocchio_trajectory_dynamics.py
 
 uv sync --group kots
-uv run python examples/05_robokots_ik.py
-uv run python examples/07_robokots_trajectory_dynamics.py
-uv run python examples/09_kots_vision_composite.py
-uv run python examples/11_forward_then_inverse_ioc.py
+uv run python examples/robokots_ik.py
+uv run python examples/robokots_trajectory_dynamics.py
 ```
 
-See `examples/README.md` for the full sample list and DSL/model file guide.
+See `examples/README.md` for the full sample list and spec/DSL/model file guide.
 
 ## Development
 
@@ -213,10 +208,6 @@ Compile-check the package:
 ```bash
 uv run python -m compileall -q rei
 ```
-
-`uv run python -m pytest` also collects files under `examples/`; depending on
-the local `liteopt` version, `examples/test_liteopt.py` may require updating or
-skipping.
 
 ## Removed Import Paths
 

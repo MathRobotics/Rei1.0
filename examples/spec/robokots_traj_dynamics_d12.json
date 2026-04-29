@@ -1,0 +1,177 @@
+{
+  "time": {
+    "N": 200,
+    "dt": 0.01
+  },
+  "trajectory": {
+    "type": "bspline",
+    "var": "p",
+    "degree": 5,
+    "num_ctrl_points": 50
+  },
+  "variables": {
+    "p": {
+      "init": {
+        "fill": 0.0
+      }
+    }
+  },
+  "terms": [
+    {
+      "name": "q_init",
+      "kind": "eq",
+      "weight": 100.0,
+      "attrs": {
+        "nullspace_eq": true,
+        "plot": {
+          "type": "state_traj",
+          "name": "joint_q"
+        }
+      },
+      "residual": {
+        "state": "joint_q_init",
+        "var": "p",
+        "at": 0,
+        "owner_type": "total_joint",
+        "owner": "robot",
+        "dtype": "coord",
+        "field": "q",
+        "target": {
+          "fill": 1.57
+        }
+      }
+    },
+    {
+      "name": "q_terminal",
+      "kind": "eq",
+      "weight": 100.0,
+      "attrs": {
+        "nullspace_eq": true
+      },
+      "residual": {
+        "state": "joint_q_terminal",
+        "var": "p",
+        "at": "last",
+        "owner_type": "total_joint",
+        "owner": "robot",
+        "dtype": "coord",
+        "field": "q",
+        "target": {
+          "fill": -1.57
+        }
+      }
+    },
+    {
+      "name": "qdot_init",
+      "kind": "eq",
+      "weight": 100.0,
+      "attrs": {
+        "nullspace_eq": true
+      },
+      "residual": {
+        "traj": {
+          "name": "joint_qdot_init",
+          "var": "p",
+          "derivative": 1,
+          "derivative_wrt": "time",
+          "at": 0
+        },
+        "target": {
+          "fill": 0.0
+        }
+      }
+    },
+    {
+      "name": "qdot_terminal",
+      "kind": "eq",
+      "weight": 100.0,
+      "attrs": {
+        "nullspace_eq": true
+      },
+      "residual": {
+        "traj": {
+          "name": "joint_qdot_terminal",
+          "var": "p",
+          "derivative": 1,
+          "derivative_wrt": "time",
+          "at": "last"
+        },
+        "target": {
+          "fill": 0.0
+        }
+      }
+    },
+    {
+      "name": "joint_q_upper_violation",
+      "kind": "ineq",
+      "weight": 1e5,
+      "residual": {
+        "op": "hinge",
+        "base": {
+          "op": "sub",
+          "name": "joint_q_minus_qmax",
+          "a": {
+            "traj": {
+              "name": "joint_q_traj",
+              "var": "p"
+            }
+          },
+          "b": {
+            "const_repeat": {
+              "fill": 3.14159
+            },
+            "name": "joint_q_max",
+            "var": "p"
+          }
+        }
+      }
+    },
+    {
+      "name": "joint_q_lower_violation",
+      "kind": "ineq",
+      "weight": 1e5,
+      "residual": {
+        "op": "hinge",
+        "base": {
+          "op": "sub",
+          "name": "joint_qmin_minus_q",
+          "a": {
+            "const_repeat": {
+              "fill": -3.14159
+            },
+            "name": "joint_q_min",
+            "var": "p"
+          },
+          "b": {
+            "traj": {
+              "name": "joint_q_traj_again",
+              "var": "p"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "qdot_traj_regularization",
+      "weight": 1e-4,
+      "residual": {
+        "traj": {
+          "var": "p",
+          "derivative": 1,
+          "derivative_wrt": "time"
+        }
+      }
+    },
+    {
+      "name": "qddot_traj_regularization",
+      "weight": 1e-4,
+      "residual": {
+        "traj": {
+          "var": "p",
+          "derivative": 2,
+          "derivative_wrt": "time"
+        }
+      }
+    }
+  ]
+}

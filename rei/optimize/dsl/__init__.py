@@ -9,6 +9,7 @@ from .dsl_ops import (
 )
 from .environment import DslBuildEnv
 from .io import load_problem_toml
+from .spec import load_problem_spec_json, problem_spec_to_dsl
 from .trajectory import (
     build_trajectory_map,
     build_trajectory_map_with_derivative,
@@ -24,6 +25,8 @@ from .variable_utils import expand_variable_init, normalize_variable_dsl, resolv
 __all__ = [
     "DslBuildEnv",
     "load_problem_toml",
+    "load_problem_spec_json",
+    "problem_spec_to_dsl",
     "iter_nodes",
     "rewrite_get_state_owner_name",
     "find_const_expr",

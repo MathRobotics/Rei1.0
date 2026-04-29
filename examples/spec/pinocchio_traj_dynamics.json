@@ -1,0 +1,131 @@
+{
+  "time": {
+    "N": 20,
+    "dt": 0.1
+  },
+  "trajectory": {
+    "type": "bspline",
+    "var": "p",
+    "degree": 4,
+    "num_ctrl_points": 8
+  },
+  "variables": {
+    "p": {
+      "init": {
+        "fill": 0.0
+      }
+    }
+  },
+  "terms": [
+    {
+      "name": "q_init",
+      "kind": "eq",
+      "weight": 100.0,
+      "attrs": {
+        "plot": {
+          "type": "state_traj",
+          "name": "joint_q"
+        }
+      },
+      "residual": {
+        "state": "joint_q_init",
+        "var": "p",
+        "at": 0,
+        "owner_type": "total_joint",
+        "owner": "robot",
+        "dtype": "coord",
+        "field": "q",
+        "target": [1.57, 0.0]
+      }
+    },
+    {
+      "name": "q_terminal",
+      "kind": "eq",
+      "weight": 100.0,
+      "residual": {
+        "state": "joint_q_terminal",
+        "var": "p",
+        "at": "last",
+        "owner_type": "total_joint",
+        "owner": "robot",
+        "dtype": "coord",
+        "field": "q",
+        "target": [-1.57, 0.0]
+      }
+    },
+    {
+      "name": "qdot_init",
+      "kind": "eq",
+      "weight": 100.0,
+      "residual": {
+        "traj": {
+          "name": "joint_qdot_init",
+          "var": "p",
+          "derivative": 1,
+          "derivative_wrt": "time",
+          "at": 0
+        },
+        "target": {
+          "fill": 0.0
+        }
+      }
+    },
+    {
+      "name": "qdot_terminal",
+      "kind": "eq",
+      "weight": 100.0,
+      "residual": {
+        "traj": {
+          "name": "joint_qdot_terminal",
+          "var": "p",
+          "derivative": 1,
+          "derivative_wrt": "time",
+          "at": "last"
+        },
+        "target": {
+          "fill": 0.0
+        }
+      }
+    },
+    {
+      "name": "qdot_traj_regularization",
+      "weight": 1e-3,
+      "residual": {
+        "traj": {
+          "var": "p",
+          "derivative": 1,
+          "derivative_wrt": "time"
+        }
+      }
+    },
+    {
+      "name": "torque_traj_regularization",
+      "weight": 1e-10,
+      "attrs": {
+        "plot": {
+          "type": "state_traj",
+          "name": "joint_torque",
+          "owner_type": "total_joint",
+          "owner_name": "robot",
+          "dtype": "dynamics",
+          "field": "torque"
+        }
+      },
+      "residual": {
+        "op": "stack",
+        "range": {
+          "k0": 0,
+          "k1": "last"
+        },
+        "inner": {
+          "state": "torque_k",
+          "var": "p",
+          "owner_type": "total_joint",
+          "owner": "robot",
+          "dtype": "dynamics",
+          "field": "torque"
+        }
+      }
+    }
+  ]
+}

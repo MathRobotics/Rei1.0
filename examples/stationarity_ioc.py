@@ -8,7 +8,7 @@ from rei import (
     RuntimeStationaritySource,
     build_reference_simplex_init,
     build_stationarity_gradient_matrix,
-    compile_nls_problem,
+    compile_nls_problem_spec,
     filter_stationarity_contributions,
     format_ioc_report,
     select_active_stationarity_indices,
@@ -17,34 +17,37 @@ from rei import (
 
 
 def build_demo_runtime(*, x_demo: float) -> object:
-    dsl = {
-        "variables": [{"name": "x", "dim": 1, "init": [float(x_demo)]}],
+    spec = {
+        "variables": {
+            "x": {"dim": 1, "init": [float(x_demo)]},
+        },
         "terms": [
             {
-                "expr": {
-                    "type": "sub",
-                    "name": "x_to_1",
-                    "a": {"type": "get_var", "var": "x"},
-                    "b": {"type": "const", "var": "x", "value": [1.0]},
+                "name": "x_to_1",
+                "weight": 1.0,
+                "residual": {
+                    "var": "x",
+                    "target": [1.0],
                 },
-                "cost": {"type": "scalar_weight", "w": 1.0},
             },
             {
-                "expr": {
-                    "type": "sub",
-                    "name": "x_to_minus_1",
-                    "a": {"type": "get_var", "var": "x"},
-                    "b": {"type": "const", "var": "x", "value": [-1.0]},
+                "name": "x_to_minus_1",
+                "weight": 1.0,
+                "residual": {
+                    "var": "x",
+                    "target": [-1.0],
                 },
-                "cost": {"type": "scalar_weight", "w": 1.0},
             },
             {
-                "expr": {"type": "get_var", "name": "x_keep", "var": "x"},
-                "cost": {"type": "scalar_weight", "w": 0.2},
+                "name": "x_keep",
+                "weight": 0.2,
+                "residual": {
+                    "var": "x",
+                },
             },
         ],
     }
-    return compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+    return compile_nls_problem_spec(spec, build_state=lambda *_args, **_kwargs: {})
 
 
 def main() -> None:
@@ -95,7 +98,7 @@ def main() -> None:
         )
         w_hat[np.asarray(active_idx, dtype=int)] = np.asarray(simplex_out.solution, dtype=float).reshape(-1)
 
-    print("=== 10_stationarity_ioc ===")
+    print("=== stationarity_ioc ===")
     print(f"x_demo={x_demo}")
     print(f"A shape={A_col.shape}")
     x0_ref = build_reference_simplex_init(contributions, active_idx)
