@@ -209,6 +209,10 @@ Compile-check the package:
 uv run python -m compileall -q rei
 ```
 
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
+
 ## Removed Import Paths
 
 Legacy flat import paths have been removed. Use the canonical namespaces above.
