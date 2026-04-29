@@ -9,6 +9,7 @@ import numpy as np
 from ..core.state_cache import StateKey
 from ..xops import as_vec, set_runtime_x
 from .caps import Array, ConstraintProblem, LinearizedProblem
+from .runtime_helpers import runtime_n_total, runtime_point, runtime_required_list
 
 
 @dataclass
@@ -21,34 +22,17 @@ class NLSRuntimeLinearProblem:
 
     @property
     def n_total(self) -> int:
-        pack = getattr(self.runtime, "pack", None)
-        if pack is None:
-            raise AttributeError("NLSRuntimeLinearProblem: runtime must expose `.pack`.")
-        n_total = getattr(pack, "n_total", None)
-        if n_total is None:
-            raise AttributeError("NLSRuntimeLinearProblem: runtime.pack must expose `.n_total`.")
-        return int(n_total)
+        return runtime_n_total(self.runtime, adapter_name="NLSRuntimeLinearProblem")
 
     def get_point(self) -> Array:
-        pack = getattr(self.runtime, "pack", None)
-        if pack is None:
-            raise AttributeError("NLSRuntimeLinearProblem: runtime must expose `.pack`.")
-        get = getattr(pack, "get", None)
-        if not callable(get):
-            raise AttributeError("NLSRuntimeLinearProblem: runtime.pack must expose callable get().")
-        return np.asarray(get(), dtype=float).reshape(-1).copy()
+        return runtime_point(self.runtime, adapter_name="NLSRuntimeLinearProblem")
 
     def set_point(self, x: Array | Any) -> None:
         x_vec = as_vec(x, expected_size=int(self.n_total), name="x")
         set_runtime_x(self.runtime, x_vec, name="x")
 
     def required_list(self, required: Iterable[StateKey] | None = None) -> list[StateKey]:
-        fn = getattr(self.runtime, "required_list", None)
-        if callable(fn):
-            return list(fn(required))
-        if required is None:
-            return []
-        return list(required)
+        return runtime_required_list(self.runtime, required)
 
     def linearize(self, *, required: Iterable[StateKey] | None = None) -> tuple[Array, Array]:
         linearize_stacked = getattr(self.runtime, "linearize_stacked_terms", None)
@@ -93,25 +77,17 @@ class NLSRuntimeConstraintProblem:
 
     @property
     def n_total(self) -> int:
-        pack = getattr(self.runtime, "pack", None)
-        if pack is None:
-            raise AttributeError("NLSRuntimeConstraintProblem: runtime must expose `.pack`.")
-        return int(getattr(pack, "n_total"))
+        return runtime_n_total(self.runtime, adapter_name="NLSRuntimeConstraintProblem")
 
     def get_point(self) -> Array:
-        return np.asarray(self.runtime.pack.get(), dtype=float).reshape(-1).copy()
+        return runtime_point(self.runtime, adapter_name="NLSRuntimeConstraintProblem")
 
     def set_point(self, x: Array | Any) -> None:
         x_vec = as_vec(x, expected_size=int(self.n_total), name="x")
         set_runtime_x(self.runtime, x_vec, name="x")
 
     def required_list(self, required: Iterable[StateKey] | None = None) -> list[StateKey]:
-        fn = getattr(self.runtime, "required_list", None)
-        if callable(fn):
-            return list(fn(required))
-        if required is None:
-            return []
-        return list(required)
+        return runtime_required_list(self.runtime, required)
 
     def _linearized_terms(self, *, required: Iterable[StateKey] | None = None) -> list[Any]:
         linearize_constraint_terms = getattr(self.runtime, "linearize_constraint_terms", None)
