@@ -92,6 +92,15 @@ from .optimize import (
     write_plot_series_csv,
     write_text_log,
 )
+from .optimize_backends import (
+    BackendFieldCapability,
+    TrajectoryIocCompiledProblem,
+    TrajectoryProblemDiagnostics,
+    UnsupportedTermDiagnostic,
+    compile_trajectory_ioc_problem,
+    estimate_ioc_weights,
+    inspect_trajectory_problem_backend,
+)
 
 __all__ = [
     "core",
@@ -176,4 +185,11 @@ __all__ = [
     "TimingReport",
     "Profiler",
     "ensure_profiler",
+    "BackendFieldCapability",
+    "TrajectoryProblemDiagnostics",
+    "UnsupportedTermDiagnostic",
+    "TrajectoryIocCompiledProblem",
+    "inspect_trajectory_problem_backend",
+    "compile_trajectory_ioc_problem",
+    "estimate_ioc_weights",
 ]

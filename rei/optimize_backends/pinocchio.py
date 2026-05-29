@@ -18,6 +18,12 @@ from ._state_field_utils import (
     validate_runtime_field_coverage,
 )
 from .trajectory_adapter import compile_trajectory_problem_with_adapter
+from .trajectory_diagnostics import (
+    TrajectoryProblemDiagnostics,
+    filter_unsupported_terms_from_dsl,
+    inspect_trajectory_problem_backend,
+    normalize_unsupported_policy,
+)
 
 Array = np.ndarray
 
@@ -31,6 +37,7 @@ class PinocchioTrajectoryCompiledProblem:
     dt: float
     model_order: int
     dynamics_fields: tuple[str, ...] = ()
+    diagnostics: TrajectoryProblemDiagnostics | None = None
 
 
 def _infer_model_dof(model: Any) -> int | None:
@@ -101,6 +108,7 @@ def _validate_pinocchio_runtime_dynamics_coverage(
 class _PinocchioTrajectoryCompileAdapter:
     jac6_order: Jacobian6Order = "linear_angular"
     finite_diff_eps: float = 1e-8
+    torque_jacobian: str = "auto"
     fields: Sequence[str] | None = None
     dynamics_fields: Sequence[str] | None = None
     dynamics_owner_type: str = "total_joint"
@@ -160,6 +168,7 @@ class _PinocchioTrajectoryCompileAdapter:
             p_var=prepared.p_var,
             jac6_order=self.jac6_order,
             finite_diff_eps=self.finite_diff_eps,
+            torque_jacobian=self.torque_jacobian,
             fields=self.fields,
             dynamics_fields=dynamics_fields_use,
             dynamics_owner_type=self.dynamics_owner_type,
@@ -198,17 +207,38 @@ def compile_pinocchio_trajectory_problem(
     dynamics_fields: Sequence[str] | None = None,
     dynamics_owner_type: str = "total_joint",
     dynamics_custom_handlers: Mapping[str, tuple[Callable[..., Array], Callable[..., Array]]] | None = None,
+    unsupported: str = "error",
+    torque_jacobian: str = "auto",
 ) -> PinocchioTrajectoryCompiledProblem:
+    model_order = _infer_model_order(model)
+    max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
+    unsupported_policy = normalize_unsupported_policy(unsupported)
+    custom_fields = tuple(dynamics_custom_handlers.keys()) if dynamics_custom_handlers is not None else ()
+    diagnostics = inspect_trajectory_problem_backend(
+        dsl,
+        backend="pinocchio",
+        model_order=model_order,
+        max_derivative_order=max_derivative_order_use,
+        dynamics_owner_type=dynamics_owner_type,
+        extra_supported_dynamics_fields=custom_fields,
+        unsupported_action=("skipped" if unsupported_policy == "warn_skip" else "error"),
+    )
+    if unsupported_policy == "error":
+        dsl_use: Mapping[str, Any] = dsl
+    else:
+        dsl_use = filter_unsupported_terms_from_dsl(dsl, diagnostics)
+
     adapter = _PinocchioTrajectoryCompileAdapter(
         jac6_order=jac6_order,
         finite_diff_eps=finite_diff_eps,
+        torque_jacobian=torque_jacobian,
         fields=fields,
         dynamics_fields=dynamics_fields,
         dynamics_owner_type=dynamics_owner_type,
         dynamics_custom_handlers=dynamics_custom_handlers,
     )
     compiled = compile_trajectory_problem_with_adapter(
-        dsl,
+        dsl_use,
         model=model,
         data=data,
         adapter=adapter,
@@ -227,6 +257,7 @@ def compile_pinocchio_trajectory_problem(
         dt=float(compiled.prepared.dt),
         model_order=int(compiled.prepared.model_order),
         dynamics_fields=tuple(adapter.resolved_dynamics_fields),
+        diagnostics=diagnostics,
     )
 
 

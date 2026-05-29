@@ -39,6 +39,14 @@ def _ensure_pinocchio_stub() -> None:
         del model, data, q, v
         return 3.0 * np.asarray(a, dtype=float).reshape(-1)
 
+    def computeRNEADerivatives(model, data, q, v, a):
+        del model, data, q, v, a
+        return (
+            np.array([[2.0]], dtype=float),
+            np.array([[5.0]], dtype=float),
+            np.array([[3.0]], dtype=float),
+        )
+
     pin.ReferenceFrame = _ReferenceFrame
     pin.buildModelFromUrdf = buildModelFromUrdf
     pin.computeFrameJacobian = computeFrameJacobian
@@ -46,12 +54,15 @@ def _ensure_pinocchio_stub() -> None:
     pin.updateFramePlacements = updateFramePlacements
     pin.computeGeneralizedGravity = computeGeneralizedGravity
     pin.rnea = rnea
+    pin.computeRNEADerivatives = computeRNEADerivatives
 
     sys.modules["pinocchio"] = pin
 
 _ensure_pinocchio_stub()
 _pin_opt_mod = importlib.import_module("rei.optimize_backends.pinocchio")
 compile_pinocchio_trajectory_problem = _pin_opt_mod.compile_pinocchio_trajectory_problem
+from rei.optimize_backends.trajectory_diagnostics import inspect_trajectory_problem_backend
+from rei.optimize_backends.trajectory_ioc import compile_trajectory_ioc_problem, estimate_ioc_weights
 
 class _FakePinModel:
     nq = 1
@@ -200,3 +211,271 @@ class TestPinocchioTrajectoryCompileMock:
         assert not (np.allclose(r, np.zeros_like(r)))
         assert not (np.allclose(J, np.zeros_like(J)))
 
+    def test_compile_pinocchio_trajectory_problem_torque_uses_analytic_derivatives(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.5},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 3,
+                "q_dim": 1,
+                "A": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 3, "init": [0.0, 1.0, 0.0]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque_mid",
+                        "key": {
+                            "k": 1,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": "dynamics",
+                            "field": "torque",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_pinocchio_trajectory_problem(
+            dsl,
+            model=_FakePinModel(),
+            data=_FakePinData(),
+            fields=("pos",),
+            torque_jacobian="analytic",
+        )
+
+        terms = compiled.runtime.linearize_terms(weighted=False)
+        J = terms[0].jacobian
+        k = 1
+        J_ref = (
+            2.0 * compiled.trajectory_derivative_maps[0].dqdp_at(k)
+            + 5.0 * compiled.trajectory_derivative_maps[1].dqdp_at(k)
+            + 3.0 * compiled.trajectory_derivative_maps[2].dqdp_at(k)
+        )
+        assert np.allclose(J, J_ref)
+
+    def test_compile_pinocchio_trajectory_problem_warn_skip_unsupported_torque_d1(self) -> None:
+        dsl = {
+            "time": {"N": 1, "dt": 0.5},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 1,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                ],
+            },
+            "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque_d1_term",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": "dynamics",
+                            "field": "torque_d1",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_pinocchio_trajectory_problem(
+            dsl,
+            model=_FakePinModel(),
+            data=_FakePinData(),
+            fields=("pos",),
+            unsupported="warn_skip",
+            max_derivative_order=3,
+        )
+
+        assert compiled.runtime.linearize_terms(weighted=False) == []
+        assert compiled.diagnostics is not None
+        assert len(compiled.diagnostics.warnings) == 1
+        warning = compiled.diagnostics.warnings[0]
+        assert warning.field == "torque_d1"
+        assert warning.action == "skipped"
+
+    def test_inspect_trajectory_problem_backend_reports_low_derivative_order(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.5},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 3,
+                "q_dim": 1,
+                "A": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [{"name": "p", "dim": 3, "init": [0.0, 1.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_traj_var",
+                        "name": "qdddot_regularization",
+                        "var": "p",
+                        "derivative_order": 3,
+                        "derivative_wrt": "time",
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        report = inspect_trajectory_problem_backend(
+            dsl,
+            backend="pinocchio",
+            model=_FakePinModel(),
+            data=_FakePinData(),
+            max_derivative_order=2,
+            unsupported_action="skipped",
+        )
+
+        assert report.backend == "pinocchio"
+        assert len(report.unsupported_terms) == 1
+        diag = report.unsupported_terms[0]
+        assert diag.term_name == "qdddot_regularization"
+        assert diag.dtype == "trajectory"
+        assert diag.field == "qdddot"
+        assert "max_derivative_order=2" in diag.reason
+        payload = report.to_json_dict()
+        assert payload["unsupported_terms"][0]["field"] == "qdddot"
+
+    def test_compile_pinocchio_trajectory_problem_warn_skip_low_derivative_order(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.5},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 3,
+                "q_dim": 1,
+                "A": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [{"name": "p", "dim": 3, "init": [0.0, 1.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_traj_var",
+                        "name": "qddot_regularization",
+                        "var": "p",
+                        "derivative_order": 2,
+                        "derivative_wrt": "time",
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {
+                        "type": "get_traj_var",
+                        "name": "qdddot_regularization",
+                        "var": "p",
+                        "derivative_order": 3,
+                        "derivative_wrt": "time",
+                    },
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        compiled = compile_pinocchio_trajectory_problem(
+            dsl,
+            model=_FakePinModel(),
+            data=_FakePinData(),
+            fields=("pos",),
+            max_derivative_order=2,
+            unsupported="warn_skip",
+        )
+
+        terms = compiled.runtime.linearize_terms(weighted=False)
+        assert [t.name for t in terms] == ["qddot_regularization"]
+        assert compiled.diagnostics is not None
+        assert [d.field for d in compiled.diagnostics.warnings] == ["qdddot"]
+
+    def test_compile_trajectory_ioc_problem_and_estimate_schema(self) -> None:
+        dsl = {
+            "time": {"N": 2, "dt": 0.5},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 3,
+                "q_dim": 1,
+                "A": [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+            },
+            "variables": [{"name": "p", "dim": 3, "init": [0.0, 1.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_traj_var",
+                        "name": "qdot_regularization",
+                        "var": "p",
+                        "derivative_order": 1,
+                        "derivative_wrt": "time",
+                    },
+                    "cost": {"type": "l2"},
+                },
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque_d1_term",
+                        "key": {
+                            "k": 1,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": "dynamics",
+                            "field": "torque_d1",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                },
+            ],
+        }
+
+        compiled = compile_trajectory_ioc_problem(
+            dsl,
+            backend="pinocchio",
+            model=_FakePinModel(),
+            data=_FakePinData(),
+            fields=("pos",),
+            max_derivative_order=3,
+            unsupported="warn_skip",
+        )
+        result = estimate_ioc_weights(
+            compiled,
+            p=np.array([0.0, 1.0, 0.0], dtype=float),
+            stationarity_scaling="gradient_norm",
+        )
+
+        assert result["backend"] == "pinocchio"
+        assert len(result["terms"]) == 1
+        assert len(result["skipped_terms"]) == 1
+        assert "weights" in result
+        assert "stationarity_scaling" in result

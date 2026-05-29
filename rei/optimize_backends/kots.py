@@ -15,6 +15,12 @@ from ._state_field_utils import (
     validate_runtime_field_coverage,
 )
 from .trajectory_adapter import compile_trajectory_problem_with_adapter
+from .trajectory_diagnostics import (
+    TrajectoryProblemDiagnostics,
+    filter_unsupported_terms_from_dsl,
+    inspect_trajectory_problem_backend,
+    normalize_unsupported_policy,
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +32,7 @@ class KotsTrajectoryCompiledProblem:
     dt: float
     model_order: int
     dynamics_fields: tuple[str, ...] = ()
+    diagnostics: TrajectoryProblemDiagnostics | None = None
 
 
 def _infer_model_dof(model: Any) -> int | None:
@@ -210,14 +217,31 @@ def compile_kots_trajectory_problem(
     fields: Sequence[str] | None = None,
     dynamics_fields: Sequence[str] | None = None,
     dynamics_owner_type: str = "total_joint",
+    unsupported: str = "error",
 ) -> KotsTrajectoryCompiledProblem:
+    model_order = _infer_model_order(model)
+    max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
+    unsupported_policy = normalize_unsupported_policy(unsupported)
+    diagnostics = inspect_trajectory_problem_backend(
+        dsl,
+        backend="kots",
+        model_order=model_order,
+        max_derivative_order=max_derivative_order_use,
+        dynamics_owner_type=dynamics_owner_type,
+        unsupported_action=("skipped" if unsupported_policy == "warn_skip" else "error"),
+    )
+    if unsupported_policy == "error":
+        dsl_use: Mapping[str, Any] = dsl
+    else:
+        dsl_use = filter_unsupported_terms_from_dsl(dsl, diagnostics)
+
     adapter = _KotsTrajectoryCompileAdapter(
         fields=fields,
         dynamics_fields=dynamics_fields,
         dynamics_owner_type=dynamics_owner_type,
     )
     compiled = compile_trajectory_problem_with_adapter(
-        dsl,
+        dsl_use,
         model=model,
         data=data,
         adapter=adapter,
@@ -237,6 +261,7 @@ def compile_kots_trajectory_problem(
         dt=float(compiled.prepared.dt),
         model_order=int(compiled.prepared.model_order),
         dynamics_fields=tuple(adapter.resolved_dynamics_fields),
+        diagnostics=diagnostics,
     )
 
 

@@ -88,6 +88,7 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
         q_var: str = "q",
         jac6_order: Jacobian6Order = "linear_angular",
         finite_diff_eps: float = 1e-8,
+        torque_jacobian: str = "auto",
         fields: Sequence[str] | None = None,
         dynamics_fields: Sequence[str] | None = None,
         dynamics_owner_type: str = "total_joint",
@@ -103,6 +104,13 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
         self.finite_diff_eps = float(finite_diff_eps)
         if self.finite_diff_eps <= 0.0:
             raise ValueError("PinocchioStateBuilder: finite_diff_eps must be > 0.")
+        torque_jacobian_name = str(torque_jacobian).strip().lower()
+        if torque_jacobian_name not in ("auto", "analytic", "finite_difference"):
+            raise ValueError(
+                "PinocchioStateBuilder: torque_jacobian must be one of "
+                "'auto', 'analytic', or 'finite_difference'."
+            )
+        self.torque_jacobian = torque_jacobian_name
 
         family_map = {spec.field: spec for spec in PINOCCHIO_DEFAULT_FIELD_FAMILIES}
         selected_fields = [spec.field for spec in PINOCCHIO_DEFAULT_FIELD_FAMILIES] if fields is None else [str(f) for f in fields]
@@ -353,6 +361,18 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
 
     def _handle_torque_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del key
+        nv = self._pin_nv(default=int(np.asarray(q, dtype=float).reshape(-1).size))
+        v0 = np.zeros((nv,), dtype=float)
+        a0 = np.zeros((nv,), dtype=float)
+        J_motion = self._torque_motion_jacobian(
+            q_vec=q,
+            v_vec=v0,
+            a_vec=a0,
+        )
+        if J_motion is not None:
+            q_size = int(np.asarray(q, dtype=float).reshape(-1).size)
+            return J_motion[:, :q_size]
+
         q0 = np.asarray(q, dtype=float).reshape(-1)
         y0 = self._torque_value(q0)
         m = int(y0.size)
@@ -369,6 +389,50 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
             yp = self._torque_value(qp)
             J[:, i] = (yp - y0) / h
         return J
+
+    def _torque_motion_jacobian(
+        self,
+        *,
+        q_vec: Array,
+        v_vec: Array,
+        a_vec: Array,
+    ) -> Array | None:
+        mode = str(getattr(self, "torque_jacobian", "auto"))
+        if mode == "finite_difference":
+            return None
+        if not hasattr(pin, "computeRNEADerivatives"):
+            if mode == "analytic":
+                raise ValueError(
+                    "PinocchioStateBuilder: torque_jacobian='analytic' requires "
+                    "pin.computeRNEADerivatives."
+                )
+            return None
+
+        q_use = np.asarray(q_vec, dtype=float).reshape(-1)
+        v_use = np.asarray(v_vec, dtype=float).reshape(-1)
+        a_use = np.asarray(a_vec, dtype=float).reshape(-1)
+        out = pin.computeRNEADerivatives(self.model, self.data, q_use, v_use, a_use)
+        if out is None:
+            parts_raw = (
+                getattr(self.data, "dtau_dq", None),
+                getattr(self.data, "dtau_dv", None),
+                getattr(self.data, "dtau_da", None),
+            )
+        else:
+            parts_raw = tuple(out)
+        if len(parts_raw) < 3:
+            raise ValueError(
+                "PinocchioStateBuilder: computeRNEADerivatives must provide "
+                "(dtau_dq, dtau_dv, dtau_da)."
+            )
+        parts = [np.asarray(p, dtype=float) for p in parts_raw[:3]]
+        if any(p.ndim != 2 for p in parts):
+            shapes = [p.shape for p in parts]
+            raise ValueError(
+                "PinocchioStateBuilder: RNEA derivative blocks must be 2D, "
+                f"got {shapes}."
+            )
+        return np.hstack(parts)
 
     def _momentum_value(self, q: Array) -> Array:
         q_vec = np.asarray(q, dtype=float).reshape(-1)
@@ -438,6 +502,7 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
         p_var: str = "p",
         jac6_order: Jacobian6Order = "linear_angular",
         finite_diff_eps: float = 1e-8,
+        torque_jacobian: str = "auto",
         fields: Sequence[str] | None = None,
         dynamics_fields: Sequence[str] | None = None,
         dynamics_owner_type: str = "total_joint",
@@ -463,6 +528,7 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
             q_var=p_var,
             jac6_order=jac6_order,
             finite_diff_eps=finite_diff_eps,
+            torque_jacobian=torque_jacobian,
             fields=fields,
             dynamics_fields=dynamics_fields,
             dynamics_owner_type=dynamics_owner_type,
@@ -589,6 +655,14 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
     def _handle_torque_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del state_ref
         q_use, dq_use, ddq_use = self._active_motion_triplet(q=q, key=key)
+        J_motion = self._torque_motion_jacobian(
+            q_vec=q_use,
+            v_vec=dq_use,
+            a_vec=ddq_use,
+        )
+        if J_motion is not None:
+            return J_motion
+
         dof = int(q_use.size)
         motion0 = np.concatenate([q_use, dq_use, ddq_use], axis=0)
         y0 = self._torque_from_motion(motion0, dof=dof)
