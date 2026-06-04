@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .provider import (
     RobotFieldHandler,
+    RobotFieldBinding,
     RobotStateRef,
     RobotStateRefResolver,
     RobotUpdateFn,
@@ -27,6 +28,7 @@ __all__ = [
     "kots",
     "pinocchio",
     "RobotFieldHandler",
+    "RobotFieldBinding",
     "RobotStateRef",
     "RobotStateRefResolver",
     "RobotUpdateFn",

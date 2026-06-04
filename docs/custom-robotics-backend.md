@@ -87,6 +87,62 @@ runtime = compile_nls_problem(dsl, build_state=provider.build_state)
 By default, the provider also registers `dtype="coord"`, `owner_type="total_joint"`,
 `field="q"` and its Jacobian `q_J_q`.
 
+## Field Binding Table
+
+For simple backends, you can list `StateKey` fields and method names instead of
+constructing `RobotFieldHandler` objects by hand:
+
+```python
+from rei.backends.state.robotics import RobotFieldBinding, RoboticsStateProvider
+
+
+class MyBackendAdapter:
+    def update(self, q, model, data):
+        model.forward(q)
+
+    def ref(self, key, model, data):
+        return model.frame(key.owner.owner_name)
+
+    def pos(self, q, key, frame):
+        del q, key
+        return frame.translation
+
+    def pos_jac(self, q, key, frame):
+        del q, key
+        return frame.linear_jacobian
+
+
+adapter = MyBackendAdapter()
+provider = RoboticsStateProvider.from_field_bindings(
+    model=my_robot_model,
+    data={},
+    handler_owner=adapter,
+    update_model="update",
+    resolve_state_ref="ref",
+    field_bindings=[
+        RobotFieldBinding(
+            dtype="kinematics",
+            owner_type="link",
+            field="pos",
+            value="pos",
+            jac="pos_jac",
+        ),
+    ],
+)
+```
+
+Each binding means:
+
+- `dtype`, `owner_type`, and `field` select the `StateKey` route.
+- `value` is the value method name or callable.
+- `jac` is the Jacobian method name or callable.
+- `jacobian_wrt` is optional; for single-step providers it defaults to `q_var`.
+
+`TrajectoryRoboticsStateProvider.from_field_bindings(...)` accepts the same
+binding list plus `trajectory_map`. For trajectory providers, bindings with a
+Jacobian default to `jacobian_wrt="state"`, so Rei chains them to `p` when the
+DSL requests fields like `pos_J_p`.
+
 ## Handler Shapes
 
 With `validate_handler_shapes=True` (the default), callbacks are checked at the

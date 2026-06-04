@@ -22,6 +22,7 @@ Array = np.ndarray
 RobotUpdateFn = Callable[[Array, Any, Any], None]
 TrajectoryRobotUpdateFn = Callable[[Array, Array, int, Any, Any], None]
 RobotStateRefResolver = Callable[[StateKey, Any, Any], Any]
+HandlerRef = str | DispatchHandler
 STATE_JACOBIAN_VAR = "state"
 
 
@@ -80,6 +81,61 @@ class RobotFieldHandler:
     value_handler: DispatchHandler
     jac_handler: DispatchHandler | None = None
     jacobian_wrt: str | None = None
+
+
+@dataclass(frozen=True)
+class RobotFieldBinding:
+    """Declarative field binding for simple custom robotics backends.
+
+    `value` and `jac` can be callables or method names on a handler object.
+    """
+
+    dtype: str
+    owner_type: str
+    field: str
+    value: HandlerRef
+    jac: HandlerRef | None = None
+    jacobian_wrt: str | None = None
+
+
+def _resolve_handler_ref(
+    owner: Any,
+    ref: HandlerRef,
+    *,
+    role: str,
+    field: str | None = None,
+) -> DispatchHandler:
+    if callable(ref):
+        return ref
+    if not isinstance(ref, str) or ref == "":
+        raise TypeError(f"{role}: handler reference must be a callable or non-empty method name.")
+    if owner is None:
+        raise ValueError(f"{role}: handler_owner is required when using method name {ref!r}.")
+    fn = getattr(owner, ref, None)
+    if not callable(fn):
+        field_msg = "" if field is None else f" for field {field!r}"
+        raise ValueError(f"{role}: handler_owner does not expose callable method {ref!r}{field_msg}.")
+    return fn
+
+
+def _resolve_optional_callable_ref(
+    owner: Any,
+    ref: str | Callable[..., Any] | None,
+    *,
+    role: str,
+) -> Callable[..., Any] | None:
+    if ref is None:
+        return None
+    if callable(ref):
+        return ref
+    if not isinstance(ref, str) or ref == "":
+        raise TypeError(f"{role}: reference must be a callable or non-empty method name.")
+    if owner is None:
+        raise ValueError(f"{role}: handler_owner is required when using method name {ref!r}.")
+    fn = getattr(owner, ref, None)
+    if not callable(fn):
+        raise ValueError(f"{role}: handler_owner does not expose callable method {ref!r}.")
+    return fn
 
 
 class RoboticsStateProvider(BackendDispatchStateBuilder):
@@ -199,6 +255,85 @@ class RoboticsStateProvider(BackendDispatchStateBuilder):
             )
 
         return True
+
+    @classmethod
+    def from_field_bindings(
+        cls,
+        model: Any,
+        data: Any,
+        *,
+        field_bindings: Sequence[RobotFieldBinding],
+        handler_owner: Any = None,
+        q_var: str = "q",
+        update_model: str | RobotUpdateFn | None = None,
+        resolve_state_ref: str | RobotStateRefResolver | None = None,
+        register_joint_q: bool = True,
+        allow_nonzero_k: bool = False,
+        validate_handler_shapes: bool = True,
+    ) -> RoboticsStateProvider:
+        """Build a provider from a simple list of key-to-method bindings."""
+
+        provider = cls(
+            model,
+            data,
+            q_var=q_var,
+            update_model=_resolve_optional_callable_ref(
+                handler_owner,
+                update_model,
+                role="RoboticsStateProvider.from_field_bindings(update_model)",
+            ),
+            resolve_state_ref=_resolve_optional_callable_ref(
+                handler_owner,
+                resolve_state_ref,
+                role="RoboticsStateProvider.from_field_bindings(resolve_state_ref)",
+            ),
+            register_joint_q=register_joint_q,
+            allow_nonzero_k=allow_nonzero_k,
+            require_fields=False,
+            validate_handler_shapes=validate_handler_shapes,
+        )
+        provider.register_field_bindings(field_bindings, handler_owner=handler_owner)
+        if len(provider._dispatch) == 0:
+            raise ValueError(
+                "RoboticsStateProvider.from_field_bindings: no fields configured. "
+                "Provide field_bindings or enable register_joint_q."
+            )
+        return provider
+
+    def register_field_bindings(
+        self,
+        field_bindings: Sequence[RobotFieldBinding],
+        *,
+        handler_owner: Any = None,
+    ) -> None:
+        for binding in field_bindings:
+            if not isinstance(binding, RobotFieldBinding):
+                raise TypeError(
+                    "RoboticsStateProvider.register_field_bindings: entries must be RobotFieldBinding, "
+                    f"got {type(binding).__name__!r}."
+                )
+            value_handler = _resolve_handler_ref(
+                handler_owner,
+                binding.value,
+                role="RobotFieldBinding.value",
+                field=binding.field,
+            )
+            jac_handler = None
+            if binding.jac is not None:
+                jac_handler = _resolve_handler_ref(
+                    handler_owner,
+                    binding.jac,
+                    role="RobotFieldBinding.jac",
+                    field=binding.field,
+                )
+            self.register_robot_field(
+                dtype=binding.dtype,
+                owner_type=binding.owner_type,
+                field=binding.field,
+                value_handler=value_handler,
+                jac_handler=jac_handler,
+                jacobian_wrt=binding.jacobian_wrt,
+            )
 
     def register_robot_field(
         self,
@@ -452,6 +587,7 @@ class TrajectoryRoboticsStateProvider(TrajectoryStateBuilderMixin, RoboticsState
         motion_order: int | None = None,
         derivative_orders: Sequence[int] = (0, 1, 2),
         validate_handler_shapes: bool = True,
+        require_fields: bool = True,
     ) -> None:
         self.trajectory_map = trajectory_map
         self.trajectory_derivative_maps: dict[int, TrajectoryMap] = {0: trajectory_map}
@@ -512,11 +648,98 @@ class TrajectoryRoboticsStateProvider(TrajectoryStateBuilderMixin, RoboticsState
                 value_handler=self._handle_joint_q_value,
                 jac_handler=self._handle_joint_q_jac,
             )
-        if len(self._dispatch) == 0:
+        if require_fields and len(self._dispatch) == 0:
             raise ValueError(
                 "TrajectoryRoboticsStateProvider: no fields configured. Provide kinematics/dynamics "
                 "field handlers or enable register_joint_q."
             )
+
+    @classmethod
+    def from_field_bindings(
+        cls,
+        model: Any,
+        data: Any,
+        *,
+        trajectory_map: TrajectoryMap,
+        field_bindings: Sequence[RobotFieldBinding],
+        handler_owner: Any = None,
+        trajectory_derivative_maps: Mapping[int, TrajectoryMap] | None = None,
+        p_var: str = "p",
+        update_model: str | RobotUpdateFn | None = None,
+        update_motion_model: str | TrajectoryRobotUpdateFn | None = None,
+        resolve_state_ref: str | RobotStateRefResolver | None = None,
+        register_joint_q: bool = True,
+        motion_layout: str = "q",
+        motion_order: int | None = None,
+        derivative_orders: Sequence[int] = (0, 1, 2),
+        validate_handler_shapes: bool = True,
+    ) -> TrajectoryRoboticsStateProvider:
+        """Build a trajectory provider from a simple list of key-to-method bindings."""
+
+        provider = cls(
+            model,
+            data,
+            trajectory_map=trajectory_map,
+            trajectory_derivative_maps=trajectory_derivative_maps,
+            p_var=p_var,
+            update_model=_resolve_optional_callable_ref(
+                handler_owner,
+                update_model,
+                role="TrajectoryRoboticsStateProvider.from_field_bindings(update_model)",
+            ),
+            update_motion_model=_resolve_optional_callable_ref(
+                handler_owner,
+                update_motion_model,
+                role="TrajectoryRoboticsStateProvider.from_field_bindings(update_motion_model)",
+            ),
+            resolve_state_ref=_resolve_optional_callable_ref(
+                handler_owner,
+                resolve_state_ref,
+                role="TrajectoryRoboticsStateProvider.from_field_bindings(resolve_state_ref)",
+            ),
+            register_joint_q=register_joint_q,
+            motion_layout=motion_layout,
+            motion_order=motion_order,
+            derivative_orders=derivative_orders,
+            validate_handler_shapes=validate_handler_shapes,
+            require_fields=False,
+        )
+        provider.register_field_bindings(
+            cls._default_state_jacobian_wrt_for_bindings(field_bindings),
+            handler_owner=handler_owner,
+        )
+        if len(provider._dispatch) == 0:
+            raise ValueError(
+                "TrajectoryRoboticsStateProvider.from_field_bindings: no fields configured. "
+                "Provide field_bindings or enable register_joint_q."
+            )
+        return provider
+
+    @staticmethod
+    def _default_state_jacobian_wrt_for_bindings(
+        bindings: Sequence[RobotFieldBinding],
+    ) -> tuple[RobotFieldBinding, ...]:
+        out: list[RobotFieldBinding] = []
+        for binding in bindings:
+            if not isinstance(binding, RobotFieldBinding):
+                raise TypeError(
+                    "TrajectoryRoboticsStateProvider.from_field_bindings: entries must be RobotFieldBinding, "
+                    f"got {type(binding).__name__!r}."
+                )
+            if binding.jac is None or binding.jacobian_wrt is not None:
+                out.append(binding)
+                continue
+            out.append(
+                RobotFieldBinding(
+                    dtype=binding.dtype,
+                    owner_type=binding.owner_type,
+                    field=binding.field,
+                    value=binding.value,
+                    jac=binding.jac,
+                    jacobian_wrt=STATE_JACOBIAN_VAR,
+                )
+            )
+        return tuple(out)
 
     @staticmethod
     def _default_state_jacobian_wrt(
@@ -690,6 +913,7 @@ def assert_trajectory_provider_contract(
 
 __all__ = [
     "RobotFieldHandler",
+    "RobotFieldBinding",
     "RobotStateRef",
     "RobotStateRefResolver",
     "RobotUpdateFn",

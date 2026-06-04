@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from rei.backends.state.robotics.provider import (
+    RobotFieldBinding,
     RobotFieldHandler,
     RobotStateRef,
     TrajectoryRoboticsStateProvider,
@@ -32,6 +33,26 @@ def _pos_jac_handler(q: np.ndarray, key: Any, state_ref: Any) -> np.ndarray:
     J[1, 1] = 1.0
     J[2, :] = 1.0
     return J
+
+
+class _TableBackend:
+    def __init__(self) -> None:
+        self.calls: list[np.ndarray] = []
+
+    def update(self, q: np.ndarray, model: dict[str, Any], data: dict[str, Any]) -> None:
+        del model
+        self.calls.append(q.copy())
+        data["last_q"] = q.copy()
+
+    def ref(self, key: Any, model: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+        del model, data
+        return {"owner_name": key.owner.owner_name, "field": key.field, "offset": 4.0}
+
+    def pos(self, q: np.ndarray, key: Any, state_ref: Any) -> np.ndarray:
+        return _pos_value_handler(q, key, state_ref)
+
+    def pos_jac(self, q: np.ndarray, key: Any, state_ref: Any) -> np.ndarray:
+        return _pos_jac_handler(q, key, state_ref)
 
 
 class TestRoboticsProviderTemplate:
@@ -252,6 +273,66 @@ class TestRoboticsProviderTemplate:
         assert "field='pos'" in message
         assert "expected 'q' or 'state'" in message
 
+    def test_robotics_state_provider_can_be_built_from_field_bindings(self) -> None:
+        adapter = _TableBackend()
+        data: dict[str, Any] = {}
+        provider = RoboticsStateProvider.from_field_bindings(
+            model={},
+            data=data,
+            handler_owner=adapter,
+            update_model="update",
+            resolve_state_ref="ref",
+            register_joint_q=False,
+            field_bindings=[
+                RobotFieldBinding(
+                    dtype=DTYPE_KINEMATICS,
+                    owner_type="link",
+                    field="pos",
+                    value="pos",
+                    jac="pos_jac",
+                )
+            ],
+        )
+        key_v = make_key(
+            k=0,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+        )
+        key_j = make_jac_key(
+            k=0,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+            var="q",
+        )
+
+        out = provider.build_state(np.array([1.0, 2.0], dtype=float), required=[key_v, key_j])
+
+        assert np.allclose(out[key_v], np.array([5.0, 2.0, 3.0], dtype=float))
+        assert np.allclose(out[key_j], np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=float))
+        assert len(adapter.calls) == 1
+        assert np.allclose(data["last_q"], np.array([1.0, 2.0], dtype=float))
+
+    def test_robotics_state_provider_field_bindings_report_missing_method(self) -> None:
+        with pytest.raises(ValueError, match="missing_pos"):
+            RoboticsStateProvider.from_field_bindings(
+                model={},
+                data={},
+                handler_owner=_TableBackend(),
+                register_joint_q=False,
+                field_bindings=[
+                    RobotFieldBinding(
+                        dtype=DTYPE_KINEMATICS,
+                        owner_type="link",
+                        field="pos",
+                        value="missing_pos",
+                    )
+                ],
+            )
+
     def test_assert_provider_contract_accepts_expected_fields_and_shapes(self) -> None:
         provider = RoboticsStateProvider(
             model={},
@@ -425,6 +506,48 @@ class TestTrajectoryRoboticsProviderTemplate:
             expected_shapes={key_q: (2,), key_pos_j: (3, 3)},
         )
         assert np.allclose(out[key_q], np.array([2.0, 3.0], dtype=float))
+
+    def test_trajectory_provider_can_be_built_from_field_bindings(self) -> None:
+        traj = TrajectoryMap.from_blocks(
+            [
+                np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+                np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=float),
+            ]
+        )
+        adapter = _TableBackend()
+        provider = TrajectoryRoboticsStateProvider.from_field_bindings(
+            model={},
+            data={},
+            trajectory_map=traj,
+            handler_owner=adapter,
+            update_model="update",
+            resolve_state_ref="ref",
+            p_var="p",
+            register_joint_q=False,
+            field_bindings=[
+                RobotFieldBinding(
+                    dtype=DTYPE_KINEMATICS,
+                    owner_type="link",
+                    field="pos",
+                    value="pos",
+                    jac="pos_jac",
+                )
+            ],
+        )
+        key = make_jac_key(
+            k=1,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+            var="p",
+        )
+
+        out = provider.build_state(np.array([1.0, 2.0, 3.0], dtype=float), required=[key])
+
+        assert np.allclose(out[key], np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 1.0]], dtype=float))
+        assert len(adapter.calls) == 1
+        assert np.allclose(adapter.calls[0], np.array([2.0, 3.0], dtype=float))
 
     def test_trajectory_provider_can_chain_stacked_motion_jacobian(self) -> None:
         q_map = TrajectoryMap.from_blocks(
