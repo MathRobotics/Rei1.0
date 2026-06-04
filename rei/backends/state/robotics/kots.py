@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence, Iterable
 from dataclasses import dataclass
 import re
 from typing import Any
+import warnings
 
 import numpy as np
 
@@ -32,6 +33,29 @@ except ImportError as e:  # pragma: no cover
 Array = np.ndarray
 STATE_JACOBIAN_VAR = "state"
 _ROBOKOTS_TORQUE_DIFF_PATTERN = re.compile(r"^torque_diff([1-9][0-9]*)$")
+_ROBOKOTS_JACOBIAN_MUL_METHODS = ("jacobian_mul", "matvec", "jacobian_matvec")
+_KOTS_JACOBIAN_STRATEGIES = ("dense", "mul")
+
+
+def _normalize_kots_jacobian_strategy(strategy: str | None, *, prefer_matvec_jacobian: bool) -> str:
+    if prefer_matvec_jacobian:
+        warnings.warn(
+            "KotsTrajectoryStateBuilder: prefer_matvec_jacobian is deprecated; "
+            "use jacobian_strategy='mul' or 'dense' instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    if strategy is None:
+        return "mul"
+    name = str(strategy).strip().lower()
+    if name == "":
+        raise ValueError("KotsTrajectoryStateBuilder: jacobian_strategy must be non-empty.")
+    if name == "matvec":
+        name = "mul"
+    if name not in _KOTS_JACOBIAN_STRATEGIES:
+        allowed = ", ".join(repr(v) for v in _KOTS_JACOBIAN_STRATEGIES)
+        raise ValueError(f"KotsTrajectoryStateBuilder: jacobian_strategy must be one of {allowed}, got {strategy!r}.")
+    return name
 
 
 @dataclass(frozen=True)
@@ -65,6 +89,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         fields: Sequence[str] | None = None,
         dynamics_fields: Sequence[str] | None = DYNAMICS_FIELDS,
         dynamics_owner_type: str = "total_joint",
+        prefer_matvec_jacobian: bool = False,
     ) -> None:
         super().__init__(model, data, q_var=q_var)
         self.dtype = DTYPE_KINEMATICS
@@ -75,6 +100,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         self._needs_dynamics_update = False
         self._model_dof_cache: int | None = None
         self._model_order_cache: int | None = None
+        self.prefer_matvec_jacobian = bool(prefer_matvec_jacobian)
 
         family_map = {spec.field: spec for spec in KOTS_DEFAULT_FIELD_FAMILIES}
         selected_fields = [spec.field for spec in KOTS_DEFAULT_FIELD_FAMILIES] if fields is None else [str(f) for f in fields]
@@ -388,11 +414,28 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
 
         return self._value_from_single_state_ref(state_ref)
 
+    def _value_from_state_refs(self, refs: tuple[Any, ...]) -> Array:
+        if len(refs) == 0:
+            return np.zeros((0,), dtype=float)
+
+        fn = getattr(self.model, "state_info_list", None)
+        if callable(fn):
+            try:
+                return np.asarray(fn(list(refs)), dtype=float).reshape(-1)
+            except (KeyError, ValueError, TypeError, RuntimeError):
+                pass
+
+        return self._concat_total_joint_values(refs)
+
     def _jac_from_single_state_ref(self, state_ref: Any) -> Array:
         try:
             J = np.asarray(self.model.jacobian(state_ref), dtype=float)
         except KeyError as e:
             self._raise_missing_state_key(state_ref=state_ref, cause=e)
+        return self._normalize_jacobian_shape(J, state_ref=state_ref)
+
+    def _normalize_jacobian_shape(self, J_raw: Any, *, state_ref: Any) -> Array:
+        J = np.asarray(J_raw, dtype=float)
         if J.ndim != 2:
             raise ValueError(f"Kots Jacobian must be 2D, got shape {J.shape}.")
 
@@ -404,12 +447,109 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if J.shape[0] == n_motion:
             return J.T
 
-        m = int(self._value_from_single_state_ref(state_ref).size)
+        total_joint_ref = self._as_total_joint_dynamics_state_ref(state_ref)
+        if total_joint_ref is None:
+            m = int(self._value_from_single_state_ref(state_ref).size)
+        else:
+            m = int(self._value_from_state_refs(total_joint_ref.refs).size)
         if J.shape[0] == m:
             return J
         if J.shape[1] == m:
             return J.T
         raise ValueError(f"Kots Jacobian must be ({m},n) or (n,{m}), got {J.shape}.")
+
+    def _jac_from_state_refs(self, refs: tuple[Any, ...]) -> Array:
+        if len(refs) == 0:
+            return np.zeros((0, self._model_dof() * self._model_order()), dtype=float)
+
+        try:
+            J = np.asarray(self.model.jacobian(list(refs)), dtype=float)
+            return self._normalize_jacobian_shape(J, state_ref=_TotalJointDynamicsStateRef(field="", refs=refs))
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+            return self._stack_total_joint_jacobians_fallback(refs)
+
+    def _matvec_from_single_state_ref(self, state_ref: Any, vec: Array) -> Array:
+        v = np.asarray(vec, dtype=float).reshape(-1)
+        errors: list[Exception] = []
+        for name in _ROBOKOTS_JACOBIAN_MUL_METHODS:
+            fn = getattr(self.model, name, None)
+            if not callable(fn):
+                continue
+            for args in ((state_ref, v), (v, state_ref)):
+                try:
+                    out = np.asarray(fn(*args), dtype=float).reshape(-1)
+                except (KeyError, ValueError, TypeError, RuntimeError) as e:
+                    errors.append(e)
+                    continue
+                return out
+        if len(errors) > 0:
+            raise errors[-1]
+        raise AttributeError("KotsStateBuilder: model does not expose jacobian_mul(state_ref, vec).")
+
+    def _jac_from_matrix_mul_single_state_ref(self, state_ref: Any, cols: Array) -> Array:
+        C = np.asarray(cols, dtype=float)
+        if C.ndim != 2:
+            raise ValueError(f"Kots jacobian_mul columns must be 2D, got shape {C.shape}.")
+
+        errors: list[Exception] = []
+        fn = getattr(self.model, "jacobian_mul", None)
+        if not callable(fn):
+            raise AttributeError("KotsStateBuilder: model does not expose jacobian_mul(state_ref, cols).")
+
+        for args in ((state_ref, C), (C, state_ref)):
+            try:
+                out = np.asarray(fn(*args), dtype=float)
+            except (KeyError, ValueError, TypeError, RuntimeError) as e:
+                errors.append(e)
+                continue
+
+            if out.ndim == 1 and C.shape[1] == 1:
+                return out.reshape(-1, 1)
+            if out.ndim != 2:
+                errors.append(ValueError(f"Kots jacobian_mul output must be 2D, got shape {out.shape}."))
+                continue
+            if out.shape[1] == C.shape[1]:
+                return out
+            if out.shape[0] == C.shape[1]:
+                return out.T
+            errors.append(
+                ValueError(
+                    "Kots jacobian_mul output column mismatch. "
+                    f"Expected {C.shape[1]} columns, got shape {out.shape}."
+                )
+            )
+
+        if len(errors) > 0:
+            raise errors[-1]
+        raise AttributeError("KotsStateBuilder: model does not expose jacobian_mul(state_ref, cols).")
+
+    def _jac_from_matvec_single_state_ref(self, state_ref: Any, cols: Array) -> Array:
+        C = np.asarray(cols, dtype=float)
+        if C.ndim != 2:
+            raise ValueError(f"Kots matvec columns must be 2D, got shape {C.shape}.")
+        try:
+            return self._jac_from_matrix_mul_single_state_ref(state_ref, C)
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+            pass
+
+        parts: list[Array] = []
+        for j in range(int(C.shape[1])):
+            try:
+                y = self._matvec_from_single_state_ref(state_ref, C[:, j])
+            except KeyError as e:
+                self._raise_missing_state_key(state_ref=state_ref, cause=e)
+            parts.append(np.asarray(y, dtype=float).reshape(-1))
+        if len(parts) == 0:
+            m = int(self._value_from_single_state_ref(state_ref).size)
+            return np.zeros((m, 0), dtype=float)
+        m = int(parts[0].size)
+        for part in parts[1:]:
+            if int(part.size) != m:
+                raise ValueError(
+                    "KotsStateBuilder: inconsistent matvec output size while assembling Jacobian. "
+                    f"Expected {m}, got {part.size}."
+                )
+        return np.column_stack(parts)
 
     def _handle_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del q, key
@@ -477,6 +617,129 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             J_world[i : i + 3, :] = rot @ J_world[i : i + 3, :]
         return J_world
 
+    def _rotate_link_kinematics_rhs_to_local(
+        self,
+        *,
+        rhs: Array,
+        key: StateKey,
+        state_ref: Any,
+    ) -> Array:
+        if getattr(key, "dtype", None) != DTYPE_KINEMATICS:
+            return rhs
+        owner = getattr(key, "owner", None)
+        if getattr(owner, "owner_type", None) != self.owner_type:
+            return rhs
+
+        rot = self._link_world_rotation(state_ref=state_ref)
+        if rot is None:
+            return rhs
+
+        R = np.asarray(rhs, dtype=float)
+        rows = int(R.shape[0])
+        if rows % 3 != 0:
+            return R
+
+        R_local = R.copy()
+        for i in range(0, rows, 3):
+            R_local[i : i + 3, ...] = rot.T @ R_local[i : i + 3, ...]
+        return R_local
+
+    def _transpose_matvec_from_single_state_ref(self, state_ref: Any, rhs: Array) -> Array:
+        R = np.asarray(rhs, dtype=float)
+        if R.ndim not in (1, 2):
+            raise ValueError(f"Kots jacobian_transpose_mul rhs must be 1D or 2D, got shape {R.shape}.")
+
+        errors: list[Exception] = []
+        fn = getattr(self.model, "jacobian_transpose_mul", None)
+        if not callable(fn):
+            raise AttributeError("KotsStateBuilder: model does not expose jacobian_transpose_mul(state_ref, rhs).")
+
+        for args in ((state_ref, R), (R, state_ref)):
+            try:
+                out = np.asarray(fn(*args), dtype=float)
+            except (KeyError, ValueError, TypeError, RuntimeError) as e:
+                errors.append(e)
+                continue
+            if out.ndim not in (1, 2):
+                errors.append(
+                    ValueError(f"Kots jacobian_transpose_mul output must be 1D or 2D, got shape {out.shape}.")
+                )
+                continue
+            return out
+
+        if len(errors) > 0:
+            raise errors[-1]
+        raise AttributeError("KotsStateBuilder: model does not expose jacobian_transpose_mul(state_ref, rhs).")
+
+    def _transpose_matvec_from_state_ref(self, state_ref: Any, rhs: Array) -> Array:
+        total_joint_ref = self._as_total_joint_dynamics_state_ref(state_ref)
+        R = np.asarray(rhs, dtype=float)
+        if R.ndim not in (1, 2):
+            raise ValueError(f"Kots jacobian_transpose_mul rhs must be 1D or 2D, got shape {R.shape}.")
+
+        if total_joint_ref is None:
+            return self._transpose_matvec_from_single_state_ref(state_ref, R)
+
+        try:
+            return np.asarray(self._transpose_matvec_from_single_state_ref(list(total_joint_ref.refs), R), dtype=float)
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+            pass
+
+        parts: list[Array] = []
+        offset = 0
+        for ref in total_joint_ref.refs:
+            m = int(self._value_from_single_state_ref(ref).size)
+            stop = offset + m
+            if stop > int(R.shape[0]):
+                raise ValueError(
+                    "KotsStateBuilder: rhs is too short for total_joint transpose multiply. "
+                    f"Need at least {stop} rows, got {R.shape[0]}."
+                )
+            parts.append(
+                np.asarray(
+                    self._transpose_matvec_from_single_state_ref(ref, R[offset:stop, ...]),
+                    dtype=float,
+                )
+            )
+            offset = stop
+
+        if offset != int(R.shape[0]):
+            raise ValueError(
+                "KotsStateBuilder: rhs size mismatch for total_joint transpose multiply. "
+                f"Consumed {offset} rows, got {R.shape[0]}."
+            )
+        if len(parts) == 0:
+            return np.zeros((self._model_dof() * self._model_order(),), dtype=float)
+        return np.sum(np.stack(parts, axis=0), axis=0)
+
+    def jacobian_transpose_mul(
+        self,
+        q: Array,
+        key: StateKey,
+        rhs: Array,
+        *,
+        update_kinematics: bool = True,
+    ) -> Array:
+        """Compute `J(key).T @ rhs` with RoboKots' transpose multiply when available."""
+
+        if not self._accept_required_key(key):
+            raise ValueError(f"KotsStateBuilder: invalid state key for jacobian_transpose_mul: {key!r}")
+        route = self._route_for_key(key)
+        entry = None if route is None else self._dispatch.get(route, None)
+        if entry is None:
+            raise ValueError(f"KotsStateBuilder: no value handler route for key: {key!r}")
+
+        q_vec = self._extract_q(np.asarray(q, dtype=float).reshape(-1), pack=None)
+        if update_kinematics:
+            self._update_kinematics(q_vec)
+        state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
+        rhs_local = self._rotate_link_kinematics_rhs_to_local(
+            rhs=np.asarray(rhs, dtype=float),
+            key=key,
+            state_ref=state_ref,
+        )
+        return self._transpose_matvec_from_state_ref(state_ref, rhs_local)
+
     @staticmethod
     def _as_total_joint_dynamics_state_ref(state_ref: Any) -> _TotalJointDynamicsStateRef | None:
         if isinstance(state_ref, _TotalJointDynamicsStateRef):
@@ -496,6 +759,9 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         return np.concatenate(parts, axis=0)
 
     def _stack_total_joint_jacobians(self, refs: tuple[Any, ...]) -> Array:
+        return self._jac_from_state_refs(refs)
+
+    def _stack_total_joint_jacobians_fallback(self, refs: tuple[Any, ...]) -> Array:
         blocks = [self._jac_from_single_state_ref(ref) for ref in refs]
         if len(blocks) == 0:
             return np.zeros((0, self._model_dof() * self._model_order()), dtype=float)
@@ -528,8 +794,17 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
         fields: Sequence[str] | None = None,
         dynamics_fields: Sequence[str] | None = DYNAMICS_FIELDS,
         dynamics_owner_type: str = "total_joint",
+        prefer_matvec_jacobian: bool = False,
+        jacobian_strategy: str | None = None,
     ) -> None:
         self.trajectory_map = trajectory_map
+        self.p_var = str(p_var)
+        if self.p_var == "":
+            raise ValueError("KotsTrajectoryStateBuilder: p_var must be non-empty.")
+        self.jacobian_strategy = _normalize_kots_jacobian_strategy(
+            jacobian_strategy,
+            prefer_matvec_jacobian=prefer_matvec_jacobian,
+        )
         self.trajectory_derivative_maps: dict[int, TrajectoryMap] = {0: trajectory_map}
         if trajectory_derivative_maps is not None:
             for order_raw, traj in trajectory_derivative_maps.items():
@@ -542,10 +817,11 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
         super().__init__(
             model,
             data,
-            q_var=p_var,
+            q_var=self.p_var,
             fields=fields,
             dynamics_fields=dynamics_fields,
             dynamics_owner_type=dynamics_owner_type,
+            prefer_matvec_jacobian=prefer_matvec_jacobian,
         )
         self.register_value_and_jac(
             dtype=DTYPE_COORD,
@@ -659,6 +935,225 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
             f"Expected {self.q_var!r} or {STATE_JACOBIAN_VAR!r}, got {wrt!r}."
         )
 
+    def _motion_jacobian_used_order_candidate(
+        self,
+        *,
+        used_order: int,
+        dmotiondp_k: Array,
+    ) -> Array | None:
+        dof = self._model_dof()
+        order = self._model_order()
+        used_order = int(used_order)
+        if dof <= 0 or used_order < 1 or used_order > order:
+            return None
+        if dmotiondp_k.shape[0] != dof * order:
+            return None
+
+        cols = int(dof * used_order)
+        dmotion_reduced = np.zeros((cols, dmotiondp_k.shape[1]), dtype=float)
+        for i in range(dof):
+            src0 = i * order
+            src1 = src0 + used_order
+            dst0 = i * used_order
+            dst1 = dst0 + used_order
+            dmotion_reduced[dst0:dst1, :] = dmotiondp_k[src0:src1, :]
+        return dmotion_reduced
+
+    def _preferred_motion_jacobian_used_order(self, key: StateKey | None) -> int | None:
+        if key is None or getattr(key, "dtype", None) != DTYPE_DYNAMICS:
+            return None
+        try:
+            field, _var = split_jac_field(str(getattr(key, "field", "")))
+        except ValueError:
+            field = str(getattr(key, "field", ""))
+        field = canonical_field_name(field)
+        if field == "torque":
+            return min(self._model_order(), 3)
+        try:
+            return min(self._model_order(), torque_derivative_order(field) + 3)
+        except ValueError:
+            return None
+
+    def _motion_jacobian_chain_candidates(
+        self,
+        *,
+        dqdp_k: Array,
+        dmotiondp_k: Array,
+        key: StateKey | None = None,
+    ) -> tuple[Array, ...]:
+        candidates: list[Array] = []
+        preferred_order = self._preferred_motion_jacobian_used_order(key)
+        if preferred_order is not None:
+            preferred = self._motion_jacobian_used_order_candidate(
+                used_order=preferred_order,
+                dmotiondp_k=np.asarray(dmotiondp_k, dtype=float),
+            )
+            if preferred is not None:
+                candidates.append(preferred)
+
+        candidates.extend([np.asarray(dmotiondp_k, dtype=float), np.asarray(dqdp_k, dtype=float)])
+        dof = self._model_dof()
+        order = self._model_order()
+        if dof > 0 and dmotiondp_k.shape[0] == dof * order:
+            for used_order in range(order, 0, -1):
+                dmotion_reduced = self._motion_jacobian_used_order_candidate(
+                    used_order=used_order,
+                    dmotiondp_k=np.asarray(dmotiondp_k, dtype=float),
+                )
+                if dmotion_reduced is not None:
+                    candidates.append(dmotion_reduced)
+
+        unique: list[Array] = []
+        seen_shapes: set[tuple[int, int]] = set()
+        for cand in candidates:
+            shape = (int(cand.shape[0]), int(cand.shape[1]))
+            if shape in seen_shapes:
+                continue
+            unique.append(cand)
+            seen_shapes.add(shape)
+        return tuple(unique)
+
+    def _param_jac_from_matvec(
+        self,
+        *,
+        key: StateKey,
+        state_ref: Any,
+        jacobian_wrt: str | None,
+        dqdp_k: Array,
+        dmotiondp_k: Array,
+    ) -> Array:
+        wrt = None if jacobian_wrt is None else str(jacobian_wrt)
+        if wrt == self.q_var:
+            return self._handle_jac(np.zeros((dqdp_k.shape[0],), dtype=float), key, state_ref)
+        if wrt != STATE_JACOBIAN_VAR:
+            raise ValueError(
+                "KotsTrajectoryStateBuilder: unsupported jacobian_wrt metadata for parameter chain. "
+                f"Expected {self.q_var!r} or {STATE_JACOBIAN_VAR!r}, got {wrt!r}."
+            )
+
+        total_joint_ref = self._as_total_joint_dynamics_state_ref(state_ref)
+        last_error: Exception | None = None
+        for cols in self._motion_jacobian_chain_candidates(dqdp_k=dqdp_k, dmotiondp_k=dmotiondp_k, key=key):
+            try:
+                if total_joint_ref is None:
+                    Jp = self._jac_from_matvec_single_state_ref(state_ref, cols)
+                    return self._rotate_link_kinematics_jacobian_to_world(J=Jp, key=key, state_ref=state_ref)
+
+                try:
+                    return self._jac_from_matvec_single_state_ref(list(total_joint_ref.refs), cols)
+                except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                    pass
+
+                blocks = [self._jac_from_matvec_single_state_ref(ref, cols) for ref in total_joint_ref.refs]
+                if len(blocks) == 0:
+                    return np.zeros((0, cols.shape[1]), dtype=float)
+                ncols = int(blocks[0].shape[1])
+                for block in blocks[1:]:
+                    if int(block.shape[1]) != ncols:
+                        raise ValueError(
+                            "KotsTrajectoryStateBuilder: inconsistent matvec column size while stacking "
+                            f"total_joint dynamics. Expected {ncols}, got {block.shape[1]}."
+                        )
+                return np.vstack(blocks)
+            except (AttributeError, KeyError, ValueError, TypeError, RuntimeError) as e:
+                last_error = e
+                continue
+
+        if last_error is not None:
+            raise last_error
+        raise AttributeError("KotsTrajectoryStateBuilder: model does not expose a usable matvec method.")
+
+    def _should_use_param_jacobian_mul(
+        self,
+        *,
+        key: StateKey,
+        state_ref: Any,
+        dqdp_k: Array,
+        dmotiondp_k: Array,
+    ) -> bool:
+        del key, state_ref, dqdp_k, dmotiondp_k
+        return str(getattr(self, "jacobian_strategy", "mul")) != "dense"
+
+    def _param_jac_transpose_mul_from_state_ref(
+        self,
+        *,
+        key: StateKey,
+        state_ref: Any,
+        rhs: Array,
+        dqdp_k: Array,
+        dmotiondp_k: Array,
+    ) -> Array:
+        rhs_local = self._rotate_link_kinematics_rhs_to_local(
+            rhs=np.asarray(rhs, dtype=float),
+            key=key,
+            state_ref=state_ref,
+        )
+        motion_grad = np.asarray(self._transpose_matvec_from_state_ref(state_ref, rhs_local), dtype=float)
+
+        if motion_grad.ndim == 1:
+            for cols in self._motion_jacobian_chain_candidates(dqdp_k=dqdp_k, dmotiondp_k=dmotiondp_k, key=key):
+                if int(cols.shape[0]) == int(motion_grad.size):
+                    return np.asarray(cols.T @ motion_grad.reshape(-1), dtype=float).reshape(-1)
+        elif motion_grad.ndim == 2:
+            for cols in self._motion_jacobian_chain_candidates(dqdp_k=dqdp_k, dmotiondp_k=dmotiondp_k, key=key):
+                if int(cols.shape[0]) == int(motion_grad.shape[0]):
+                    return np.asarray(cols.T @ motion_grad, dtype=float)
+        else:
+            raise ValueError(
+                "KotsTrajectoryStateBuilder: jacobian_transpose_mul output must be 1D or 2D, "
+                f"got shape {motion_grad.shape}."
+            )
+
+        raise ValueError(
+            "KotsTrajectoryStateBuilder: transpose Jacobian chain mismatch. "
+            f"transpose output has shape {motion_grad.shape}, dqdp has shape {dqdp_k.shape}, "
+            f"dmotiondp has shape {dmotiondp_k.shape}."
+        )
+
+    def param_jacobian_transpose_mul(
+        self,
+        x_all: Array,
+        key: StateKey,
+        rhs: Array,
+        *,
+        pack: Any = None,
+        time: Any = None,
+        update_kinematics: bool = True,
+    ) -> Array:
+        """Compute `J_p(key).T @ rhs` for a trajectory state key without forming `J_p`."""
+
+        steps = self._expected_steps(time=time)
+        if not self._accept_required_key_for_traj(key, steps=steps):
+            raise ValueError(
+                "KotsTrajectoryStateBuilder: invalid state key for param_jacobian_transpose_mul: "
+                f"{key!r}"
+            )
+        route = self._route_for_key(key)
+        entry = None if route is None else self._dispatch.get(route, None)
+        if entry is None:
+            raise ValueError(f"KotsTrajectoryStateBuilder: no value handler route for key: {key!r}")
+
+        p = self._extract_q(np.asarray(x_all, dtype=float).reshape(-1), pack=pack)
+        if p.size != self.trajectory_map.p_dim:
+            raise ValueError(
+                "KotsTrajectoryStateBuilder: parameter size mismatch. "
+                f"Expected p_dim={self.trajectory_map.p_dim}, got {p.size}."
+            )
+
+        k = int(key.k)
+        dqdp_k = self.trajectory_map.dqdp_at(k)
+        motion_k, dmotiondp_k = self._compose_motion_and_jac(p, k=k)
+        if update_kinematics:
+            self._update_kinematics(motion_k)
+        state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
+        return self._param_jac_transpose_mul_from_state_ref(
+            key=key,
+            state_ref=state_ref,
+            rhs=rhs,
+            dqdp_k=dqdp_k,
+            dmotiondp_k=dmotiondp_k,
+        )
+
     def _expected_steps(self, *, time: Any = None) -> int:
         steps = int(self.trajectory_map.steps)
         if time is None or not hasattr(time, "N"):
@@ -745,9 +1240,29 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
 
             for key, entry in grouped[k]:
                 state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
-                value = entry.handler(q_k, key, state_ref)
+                is_param_jac = self._is_param_jac_key(key)
+                value_from_matvec = False
+                if is_param_jac and self._should_use_param_jacobian_mul(
+                    key=key,
+                    state_ref=state_ref,
+                    dqdp_k=dqdp_k,
+                    dmotiondp_k=dmotiondp_k,
+                ):
+                    try:
+                        value = self._param_jac_from_matvec(
+                            key=key,
+                            state_ref=state_ref,
+                            jacobian_wrt=entry.jacobian_wrt,
+                            dqdp_k=dqdp_k,
+                            dmotiondp_k=dmotiondp_k,
+                        )
+                        value_from_matvec = True
+                    except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                        value = entry.handler(q_k, key, state_ref)
+                else:
+                    value = entry.handler(q_k, key, state_ref)
 
-                if self._is_param_jac_key(key):
+                if is_param_jac and not value_from_matvec:
                     value = self._chain_param_jac(
                         value,
                         key=key,

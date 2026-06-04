@@ -20,9 +20,16 @@ class GetStateExpr:
     def deps(self):
         return [self.key_value, *self.key_jacs]
 
+    def value_deps(self):
+        return [self.key_value]
+
+    def eval_value(self, ctx: RuntimeContext):
+        sc = ctx.state  # StateCache-like
+        return np.asarray(sc.get(self.key_value), dtype=float).reshape(-1)
+
     def eval(self, ctx: RuntimeContext):
         sc = ctx.state  # StateCache-like
-        y = np.asarray(sc.get(self.key_value), dtype=float).reshape(-1)
+        y = self.eval_value(ctx)
 
         if len(self.vars) != len(self.key_jacs):
             raise ValueError(
@@ -36,6 +43,41 @@ class GetStateExpr:
                 raise ValueError(f"{self.name}: J shape mismatch for var '{v.name}': {J.shape} vs {(y.size, v.dim())}")
             blocks.append(J)
         return y, blocks
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        sc = ctx.state  # StateCache-like
+        y = np.asarray(sc.get(self.key_value), dtype=float).reshape(-1)
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2) or int(r.shape[0]) != int(y.size):
+            raise ValueError(f"{self.name}: rhs shape mismatch for vjp: rhs={r.shape}, value size={y.size}.")
+
+        if len(self.vars) != len(self.key_jacs):
+            raise ValueError(
+                f"{self.name}: internal mismatch len(vars)={len(self.vars)} vs len(key_jacs)={len(self.key_jacs)}."
+            )
+
+        fast_vjp = getattr(sc, "jacobian_transpose_mul", None)
+        out = []
+        for v, key_jac in zip(self.vars, self.key_jacs):
+            g = None
+            if callable(fast_vjp):
+                try:
+                    g = np.asarray(fast_vjp(self.key_value, key_jac, r), dtype=float)
+                except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                    g = None
+            if g is None:
+                J = np.asarray(sc.get(key_jac), dtype=float)
+                if J.shape != (y.size, v.dim()):
+                    raise ValueError(
+                        f"{self.name}: J shape mismatch for var '{v.name}': {J.shape} vs {(y.size, v.dim())}"
+                    )
+                g = np.asarray(J.T @ r, dtype=float)
+
+            expected = (v.dim(),) if r.ndim == 1 else (v.dim(), int(r.shape[1]))
+            if g.shape != expected:
+                g = np.asarray(g, dtype=float).reshape(expected)
+            out.append(g)
+        return out
 
 
 @dataclass
@@ -51,6 +93,9 @@ class GetVarExpr:
     k: int | None = None
 
     def deps(self):
+        return []
+
+    def value_deps(self):
         return []
 
     def eval(self, ctx: RuntimeContext):
@@ -101,6 +146,9 @@ class TrajectoryVarExpr:
     k: int | None = None
 
     def deps(self):
+        return []
+
+    def value_deps(self):
         return []
 
     def eval(self, ctx: RuntimeContext):
@@ -268,10 +316,22 @@ class ConstantExpr:
     def deps(self):
         return []
 
+    def eval_value(self, ctx: RuntimeContext):
+        del ctx
+        return np.asarray(self.value, dtype=float).reshape(-1)
+
     def eval(self, ctx: RuntimeContext):
-        y = np.asarray(self.value, dtype=float).reshape(-1)
+        y = self.eval_value(ctx)
         blocks = [np.zeros((y.size, v.dim()), dtype=float) for v in self.vars]
         return y, blocks
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        del ctx
+        r = np.asarray(rhs, dtype=float)
+        return [
+            np.zeros((v.dim(),), dtype=float) if r.ndim == 1 else np.zeros((v.dim(), int(r.shape[1])), dtype=float)
+            for v in self.vars
+        ]
 
 
 @dataclass
@@ -286,15 +346,26 @@ class RepeatConstantExpr:
     def deps(self):
         return []
 
-    def eval(self, ctx: RuntimeContext):
+    def eval_value(self, ctx: RuntimeContext):
         del ctx
         base = np.asarray(self.value, dtype=float).reshape(-1)
         repeats = int(self.repeats)
         if repeats <= 0:
             raise ValueError(f"{self.name}: repeats must be > 0, got {repeats}.")
-        y = np.tile(base, repeats)
+        return np.tile(base, repeats)
+
+    def eval(self, ctx: RuntimeContext):
+        y = self.eval_value(ctx)
         blocks = [np.zeros((y.size, v.dim()), dtype=float) for v in self.vars]
         return y, blocks
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        del ctx
+        r = np.asarray(rhs, dtype=float)
+        return [
+            np.zeros((v.dim(),), dtype=float) if r.ndim == 1 else np.zeros((v.dim(), int(r.shape[1])), dtype=float)
+            for v in self.vars
+        ]
 
 
 @dataclass
@@ -310,6 +381,24 @@ class SubExpr:
     def deps(self):
         return list(self.a.deps()) + list(self.b.deps())
 
+    def value_deps(self):
+        deps_a = getattr(self.a, "value_deps", None)
+        deps_b = getattr(self.b, "value_deps", None)
+        if not callable(deps_a) or not callable(deps_b):
+            raise AttributeError(f"{self.name}: value_deps fast path is not available.")
+        return list(deps_a()) + list(deps_b())
+
+    def eval_value(self, ctx: RuntimeContext):
+        value_a = getattr(self.a, "eval_value", None)
+        value_b = getattr(self.b, "eval_value", None)
+        if not callable(value_a) or not callable(value_b):
+            raise AttributeError(f"{self.name}: value fast path is not available.")
+        ra = np.asarray(value_a(ctx), dtype=float).reshape(-1)
+        rb = np.asarray(value_b(ctx), dtype=float).reshape(-1)
+        if ra.shape != rb.shape:
+            raise ValueError(f"{self.name}: shape mismatch {ra.shape} vs {rb.shape}")
+        return ra - rb
+
     def eval(self, ctx: RuntimeContext):
         ra, Ja = self.a.eval(ctx)
         rb, Jb = self.b.eval(ctx)
@@ -320,6 +409,18 @@ class SubExpr:
         r = ra - rb
         blocks = [A - B for A, B in zip(Ja, Jb)]
         return r, blocks
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        r = np.asarray(rhs, dtype=float)
+        vjp_a = getattr(self.a, "vjp", None)
+        vjp_b = getattr(self.b, "vjp", None)
+        if not callable(vjp_a) or not callable(vjp_b):
+            raise AttributeError(f"{self.name}: vjp fast path is not available.")
+        ga = [np.asarray(g, dtype=float) for g in vjp_a(ctx, r)]
+        gb = [np.asarray(g, dtype=float) for g in vjp_b(ctx, r)]
+        if len(ga) != len(gb):
+            raise ValueError(f"{self.name}: vjp block len mismatch {len(ga)} vs {len(gb)}")
+        return [a - b for a, b in zip(ga, gb)]
 
 
 @dataclass

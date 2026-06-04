@@ -39,8 +39,11 @@ def _ensure_robokots_state_stub() -> None:
 _ensure_robokots_state_stub()
 _kots_state_mod = importlib.import_module("rei.backends.state.robotics.kots")
 _kots_opt_mod = importlib.import_module("rei.optimize_backends.kots")
+_traj_ioc_mod = importlib.import_module("rei.optimize_backends.trajectory_ioc")
 KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
 compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem
+compile_trajectory_ioc_problem = _traj_ioc_mod.compile_trajectory_ioc_problem
+estimate_ioc_weights = _traj_ioc_mod.estimate_ioc_weights
 
 class _FakeKotsModel:
     def __init__(self) -> None:
@@ -123,6 +126,105 @@ class _FakeKotsModel:
                 dtype=float,
             )
         raise ValueError(f"Unsupported jacobian field: {field!r}")
+
+
+class _FakeKotsModelMatvec(_FakeKotsModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.jacobian_calls = 0
+        self.matvec_calls = 0
+
+    def jacobian(self, state_ref):
+        self.jacobian_calls += 1
+        raise AssertionError("jacobian() should not be used when matvec is available")
+
+    def _jacobian_matrix(self, state_ref):
+        return super().jacobian(state_ref)
+
+    def matvec(self, state_ref, vec):
+        self.matvec_calls += 1
+        J = self._jacobian_matrix(state_ref)
+        v = np.asarray(vec, dtype=float).reshape(-1)
+        if J.shape[1] != v.size:
+            raise ValueError(f"matvec size mismatch: J={J.shape}, vec={v.size}")
+        return J @ v
+
+
+class _FakeKotsModelJacobianMul(_FakeKotsModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.jacobian_calls = 0
+        self.jacobian_mul_calls = 0
+
+    def jacobian(self, state_ref):
+        self.jacobian_calls += 1
+        raise AssertionError("jacobian() should not be used when jacobian_mul is available")
+
+    def _jacobian_matrix(self, state_ref):
+        return super().jacobian(state_ref)
+
+    def jacobian_mul(self, state_ref, cols):
+        self.jacobian_mul_calls += 1
+        J = self._jacobian_matrix(state_ref)
+        C = np.asarray(cols, dtype=float)
+        if C.ndim == 1:
+            if J.shape[1] != C.size:
+                raise ValueError(f"jacobian_mul size mismatch: J={J.shape}, vec={C.size}")
+            return J @ C
+        if C.ndim != 2:
+            raise ValueError(f"jacobian_mul expects 1D or 2D cols, got {C.shape}")
+        if J.shape[1] != C.shape[0]:
+            raise ValueError(f"jacobian_mul size mismatch: J={J.shape}, cols={C.shape}")
+        return J @ C
+
+
+class _FakeKotsModelJacobianMulAvailable(_FakeKotsModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.jacobian_calls = 0
+        self.jacobian_mul_calls = 0
+
+    def jacobian(self, state_ref):
+        self.jacobian_calls += 1
+        return super().jacobian(state_ref)
+
+    def jacobian_mul(self, state_ref, cols):
+        self.jacobian_mul_calls += 1
+        J = super().jacobian(state_ref)
+        return J @ np.asarray(cols, dtype=float)
+
+
+class _FakeKotsModelJacobianTransposeMul(_FakeKotsModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.jacobian_transpose_mul_calls = 0
+
+    def jacobian_transpose_mul(self, state_ref, rhs):
+        self.jacobian_transpose_mul_calls += 1
+        J = super().jacobian(state_ref)
+        R = np.asarray(rhs, dtype=float)
+        return J.T @ R
+
+
+class _FakeKotsModelJacobianTransposeMulNoDenseJac(_FakeKotsModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self.jacobian_calls = 0
+        self.jacobian_transpose_mul_calls = 0
+
+    def jacobian(self, state_ref):
+        self.jacobian_calls += 1
+        raise AssertionError("jacobian() should not be used by stationarity VJP fast path")
+
+    def _jacobian_matrix(self, state_ref):
+        return _FakeKotsModel.jacobian(self, state_ref)
+
+    def jacobian_transpose_mul(self, state_ref, rhs):
+        self.jacobian_transpose_mul_calls += 1
+        J = self._jacobian_matrix(state_ref)
+        R = np.asarray(rhs, dtype=float)
+        return J.T @ R
+
 
 class _FakeKotsModelOrder4:
     def __init__(self) -> None:
@@ -371,6 +473,283 @@ class TestKotsTrajectoryDynamicsMock:
         r, J = compiled.runtime.linearize()
         assert np.allclose(r, np.array([0.0, 0.0], dtype=float))
         assert np.allclose(J, np.eye(2, dtype=float))
+
+    def test_compile_trajectory_ioc_problem_kots_uses_matvec_for_param_jacobian(self) -> None:
+        model = _FakeKotsModelMatvec()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.5, -0.25]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque0",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "torque",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        with pytest.warns(DeprecationWarning, match="prefer_matvec_jacobian"):
+            compiled = compile_trajectory_ioc_problem(
+                dsl,
+                backend="kots",
+                model=model,
+                data={},
+                prefer_matvec_jacobian=True,
+            )
+        result = estimate_ioc_weights(compiled)
+
+        assert result["backend"] == "kots"
+        assert model.matvec_calls > 0
+        assert model.jacobian_calls == 0
+
+    def test_compile_trajectory_ioc_problem_kots_uses_jacobian_mul_for_param_jacobian(self) -> None:
+        model = _FakeKotsModelJacobianMul()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.5, -0.25]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque0",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "torque",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        with pytest.warns(DeprecationWarning, match="prefer_matvec_jacobian"):
+            compiled = compile_trajectory_ioc_problem(
+                dsl,
+                backend="kots",
+                model=model,
+                data={},
+                prefer_matvec_jacobian=True,
+            )
+        result = estimate_ioc_weights(compiled)
+
+        assert result["backend"] == "kots"
+        assert model.jacobian_mul_calls > 0
+        assert model.jacobian_calls == 0
+
+    def test_kots_trajectory_default_jacobian_strategy_uses_jacobian_mul(self) -> None:
+        model = _FakeKotsModelJacobianMul()
+        trajectory_map = TrajectoryMap.from_blocks(
+            [
+                np.eye(2, dtype=float),
+                2.0 * np.eye(2, dtype=float),
+            ]
+        )
+        builder = KotsTrajectoryStateBuilder(
+            model,
+            {},
+            trajectory_map=trajectory_map,
+        )
+        jac_key = make_jac_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque",
+            var="p",
+        )
+
+        J = builder.build_state(np.array([0.5, -0.25], dtype=float), required=[jac_key])[jac_key]
+
+        assert np.allclose(J, np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float))
+        assert model.jacobian_mul_calls > 0
+        assert model.jacobian_calls == 0
+
+    def test_kots_trajectory_jacobian_strategy_dense_uses_dense_jacobian(self) -> None:
+        model = _FakeKotsModelJacobianMulAvailable()
+        trajectory_map = TrajectoryMap.from_blocks(
+            [
+                np.eye(2, dtype=float),
+                2.0 * np.eye(2, dtype=float),
+            ]
+        )
+        builder = KotsTrajectoryStateBuilder(
+            model,
+            {},
+            trajectory_map=trajectory_map,
+            jacobian_strategy="dense",
+        )
+        jac_key = make_jac_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque",
+            var="p",
+        )
+
+        J = builder.build_state(np.array([0.5, -0.25], dtype=float), required=[jac_key])[jac_key]
+
+        assert np.allclose(J, np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float))
+        assert model.jacobian_calls > 0
+        assert model.jacobian_mul_calls == 0
+
+    def test_kots_trajectory_jacobian_strategy_rejects_auto(self) -> None:
+        model = _FakeKotsModelJacobianMulAvailable()
+        trajectory_map = TrajectoryMap.from_blocks(
+            [
+                np.eye(2, dtype=float),
+                2.0 * np.eye(2, dtype=float),
+            ]
+        )
+
+        with pytest.raises(ValueError, match="jacobian_strategy"):
+            KotsTrajectoryStateBuilder(
+                model,
+                {},
+                trajectory_map=trajectory_map,
+                jacobian_strategy="auto",
+            )
+
+    def test_kots_trajectory_param_jacobian_transpose_mul_uses_backend_api(self) -> None:
+        model = _FakeKotsModelJacobianTransposeMul()
+        trajectory_map = TrajectoryMap.from_blocks(
+            [
+                np.array(
+                    [
+                        [1.0, 0.5],
+                        [-0.25, 2.0],
+                    ],
+                    dtype=float,
+                ),
+                np.array(
+                    [
+                        [0.0, 1.0],
+                        [1.0, 0.0],
+                    ],
+                    dtype=float,
+                ),
+            ]
+        )
+        builder = KotsTrajectoryStateBuilder(
+            model,
+            {},
+            trajectory_map=trajectory_map,
+        )
+        key = make_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque",
+        )
+        jac_key = make_jac_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque",
+            var="p",
+        )
+        p = np.array([0.25, -0.5], dtype=float)
+        rhs = np.array([4.0, -2.0], dtype=float)
+
+        out = builder.param_jacobian_transpose_mul(p, key, rhs)
+        Jp = np.asarray(builder.build_state(p, required=[jac_key])[jac_key], dtype=float)
+
+        assert np.allclose(out, Jp.T @ rhs)
+        assert model.jacobian_transpose_mul_calls > 0
+
+    def test_compile_trajectory_ioc_problem_kots_uses_transpose_mul_for_stationarity(self) -> None:
+        model = _FakeKotsModelJacobianTransposeMulNoDenseJac()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.5, -0.25]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque0",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "torque",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_trajectory_ioc_problem(
+            dsl,
+            backend="kots",
+            model=model,
+            data={},
+        )
+        result = estimate_ioc_weights(compiled)
+
+        assert result["backend"] == "kots"
+        assert model.jacobian_transpose_mul_calls > 0
+        assert model.jacobian_calls == 0
 
     def test_compile_kots_trajectory_problem_supports_external_nullspace_eq_runtime(self) -> None:
         model = _FakeKotsModel()

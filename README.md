@@ -142,6 +142,31 @@ Each helper returns a compile result whose main entry point is
 `compiled.runtime`. Some helpers also return backend-specific metadata such as
 trajectory maps or prepared DSL data.
 
+### RoboKots Jacobian Strategy
+
+The Kots trajectory backend uses RoboKots multiply APIs by default for
+trajectory-parameter dynamics Jacobians:
+
+- `jacobian_mul(list[StateType], rhs)` for `J @ rhs`
+- `jacobian_transpose_mul(list[StateType], rhs)` for `J.T @ rhs`
+
+Dense Jacobian assembly is still available by passing
+`jacobian_strategy="dense"` to `compile_kots_trajectory_problem`; otherwise the
+default strategy is `"mul"`. The older `prefer_matvec_jacobian` option is kept
+only as a deprecated compatibility alias.
+
+For `total_joint` dynamics, Rei expands the request to a list of per-joint
+`StateType("joint", joint_name, field)` entries and passes that list to
+RoboKots. Rei expects RoboKots to support list inputs for `jacobian`,
+`jacobian_mul`, and `jacobian_transpose_mul`. If a list call is unavailable,
+Rei falls back to per-joint calls where possible.
+
+To compare the dense and multiply paths with a local RoboKots checkout:
+
+```bash
+PYTHONPATH=/path/to/RoboKots:. python developer/benchmarks/robokots_jacobian_mul.py --dofs 7 32
+```
+
 ## Solvers
 
 `solve()` accepts these solver names:

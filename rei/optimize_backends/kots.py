@@ -125,6 +125,8 @@ class _KotsTrajectoryCompileAdapter:
     fields: Sequence[str] | None = None
     dynamics_fields: Sequence[str] | None = None
     dynamics_owner_type: str = "total_joint"
+    prefer_matvec_jacobian: bool = False
+    jacobian_strategy: str | None = None
     resolved_dynamics_fields: tuple[str, ...] = ()
 
     def infer_model_dof(self, model: Any) -> int | None:
@@ -186,6 +188,8 @@ class _KotsTrajectoryCompileAdapter:
             fields=self.fields,
             dynamics_fields=dynamics_fields_use,
             dynamics_owner_type=self.dynamics_owner_type,
+            prefer_matvec_jacobian=self.prefer_matvec_jacobian,
+            jacobian_strategy=self.jacobian_strategy,
         )
 
     def validate_runtime(
@@ -218,6 +222,8 @@ def compile_kots_trajectory_problem(
     dynamics_fields: Sequence[str] | None = None,
     dynamics_owner_type: str = "total_joint",
     unsupported: str = "error",
+    prefer_matvec_jacobian: bool = False,
+    jacobian_strategy: str | None = None,
 ) -> KotsTrajectoryCompiledProblem:
     model_order = _infer_model_order(model)
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
@@ -239,6 +245,8 @@ def compile_kots_trajectory_problem(
         fields=fields,
         dynamics_fields=dynamics_fields,
         dynamics_owner_type=dynamics_owner_type,
+        prefer_matvec_jacobian=prefer_matvec_jacobian,
+        jacobian_strategy=jacobian_strategy,
     )
     compiled = compile_trajectory_problem_with_adapter(
         dsl_use,

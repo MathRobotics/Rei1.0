@@ -265,6 +265,50 @@ class RuntimeStationaritySource:
         *,
         required: Iterable[StateKey] | None = None,
     ) -> list[StationarityTermContribution]:
+        fast_contributions = getattr(self.runtime, "term_gradient_contributions", None)
+        if callable(fast_contributions):
+            req = self.required_list(required)
+            idxs, names, attrs_list, residuals_raw, residuals_weighted, gradients = fast_contributions(
+                required=req,
+            )
+            problem = _optional_runtime_problem(self.runtime)
+            out: list[StationarityTermContribution] = []
+            for idx, name, attrs, r_raw, r_w, grad in zip(
+                idxs,
+                names,
+                attrs_list,
+                residuals_raw,
+                residuals_weighted,
+                gradients,
+            ):
+                reference_weight = None
+                cost_name = None
+                if problem is not None:
+                    try:
+                        _expr, cost = problem.terms[int(idx)]
+                        reference_weight = _scalar_weight_from_cost(cost)
+                        cost_name = str(getattr(cost, "name", cost.__class__.__name__))
+                    except Exception:
+                        reference_weight = None
+                        cost_name = None
+
+                r = np.asarray(r_raw, dtype=float).reshape(-1)
+                rw = np.asarray(r_w, dtype=float).reshape(-1)
+                out.append(
+                    StationarityTermContribution(
+                        term_index=int(idx),
+                        name=str(name),
+                        attrs=dict(attrs),
+                        gradient=np.asarray(grad, dtype=float).reshape(-1).copy(),
+                        cost_name=cost_name,
+                        residual_size=int(r.size),
+                        residual_norm=float(np.linalg.norm(r)),
+                        weighted_residual_norm=float(np.linalg.norm(rw)),
+                        reference_weight=reference_weight,
+                    )
+                )
+            return out
+
         linearize_terms = getattr(self.runtime, "linearize_terms", None)
         if not callable(linearize_terms):
             raise AttributeError(

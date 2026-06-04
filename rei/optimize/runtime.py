@@ -186,6 +186,131 @@ class NLSRuntime:
             Jg[:, s:e] = B
         return Jg
 
+    def _assemble_global_gradient(self, *, term_name: str, expr_vars: Any, gradients: Any) -> Array:
+        grads = [np.asarray(g, dtype=float).reshape(-1) for g in gradients]
+        n_total = int(self.pack.n_total)
+        slices = self.pack.slices
+
+        if len(grads) != len(expr_vars):
+            raise ValueError(
+                "term_gradient_contributions: len(gradients) mismatch in term "
+                f"{term_name!r}. gradients={len(grads)}, vars={len(expr_vars)}."
+            )
+
+        g_all = np.zeros((n_total,), dtype=float)
+        for v, g in zip(expr_vars, grads):
+            var_name = getattr(v, "name", None)
+            if not isinstance(var_name, str) or var_name == "":
+                raise ValueError(
+                    f"term_gradient_contributions: invalid variable name in term {term_name!r}: {var_name!r}."
+                )
+            if var_name not in slices:
+                raise ValueError(
+                    f"term_gradient_contributions: var {var_name!r} not found in VariablePack "
+                    f"(term {term_name!r})."
+                )
+            s, e = slices[var_name]
+            nv = int(e - s)
+            if g.size != nv:
+                raise ValueError(
+                    "term_gradient_contributions: gradient size mismatch in term "
+                    f"{term_name!r}, var={var_name!r}. Expected {nv}, got {g.size}."
+                )
+            g_all[s:e] += g
+        return g_all
+
+    def _term_gradient_contribution_fast(
+        self,
+        *,
+        expr: Any,
+        cost: Any,
+        term_name: str,
+    ) -> tuple[Array, Array, Array] | None:
+        value_fn = getattr(expr, "eval_value", None)
+        vjp_fn = getattr(expr, "vjp", None)
+        value_deps_fn = getattr(expr, "value_deps", None)
+        if not callable(value_fn) or not callable(vjp_fn) or not callable(value_deps_fn):
+            return None
+
+        try:
+            req = _dedupe_required(value_deps_fn())
+            self.update_state_if_needed(required=req)
+            r_raw = np.asarray(value_fn(self.ctx), dtype=float).reshape(-1)
+            grads = vjp_fn(self.ctx, r_raw)
+            g_raw = self._assemble_global_gradient(
+                term_name=term_name,
+                expr_vars=expr.vars,
+                gradients=grads,
+            )
+
+            zeros = [np.zeros((r_raw.size, v.dim()), dtype=float) for v in expr.vars]
+            apply_cost = getattr(cost, "apply", None)
+            if callable(apply_cost):
+                r_weighted, _blocks_weighted = apply_cost(r_raw, zeros)
+                r_weighted = np.asarray(r_weighted, dtype=float).reshape(-1)
+            else:
+                r_weighted = r_raw.copy()
+            return r_raw, r_weighted, g_raw
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+            return None
+
+    def term_gradient_contributions(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        term_indices: Iterable[int] | None = None,
+    ) -> tuple[list[int], list[str], list[dict[str, Any]], list[Array], list[Array], list[Array]]:
+        """Return raw residuals, weighted residuals, and per-term `J.T @ r` gradients."""
+
+        del required
+        idxs = self._normalize_term_indices(term_indices)
+
+        names: list[str] = []
+        attrs_list: list[dict[str, Any]] = []
+        residuals_raw: list[Array] = []
+        residuals_weighted: list[Array] = []
+        gradients: list[Array] = []
+
+        for idx in idxs:
+            expr, cost = self.problem.terms[idx]
+            term_name = self._term_display_name(idx)
+            attrs = self.problem.term_attrs_at(idx)
+
+            fast = self._term_gradient_contribution_fast(
+                expr=expr,
+                cost=cost,
+                term_name=term_name,
+            )
+            if fast is None:
+                req = self.required_list(None)
+                self.update_state_if_needed(required=req)
+                r_raw, blocks_raw = expr.eval(self.ctx)
+                r_raw = np.asarray(r_raw, dtype=float).reshape(-1)
+                J_raw = self._assemble_global_jacobian(
+                    term_name=term_name,
+                    expr_vars=expr.vars,
+                    residual=r_raw,
+                    blocks=blocks_raw,
+                )
+                g_raw = np.asarray(J_raw.T @ r_raw, dtype=float).reshape(-1)
+
+                apply_cost = getattr(cost, "apply", None)
+                if callable(apply_cost):
+                    r_weighted, _blocks_weighted = apply_cost(r_raw, blocks_raw)
+                    r_weighted = np.asarray(r_weighted, dtype=float).reshape(-1)
+                else:
+                    r_weighted = r_raw.copy()
+            else:
+                r_raw, r_weighted, g_raw = fast
+
+            names.append(term_name)
+            attrs_list.append(attrs)
+            residuals_raw.append(np.asarray(r_raw, dtype=float).reshape(-1))
+            residuals_weighted.append(np.asarray(r_weighted, dtype=float).reshape(-1))
+            gradients.append(np.asarray(g_raw, dtype=float).reshape(-1))
+
+        return idxs, names, attrs_list, residuals_raw, residuals_weighted, gradients
+
     def _linearize_term_arrays(
         self,
         *,

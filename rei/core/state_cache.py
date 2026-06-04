@@ -88,6 +88,8 @@ class StateCache:
     _all_valid: bool = False
 
     _memo: dict[StateKey, Any] = field(default_factory=dict)
+    _pack_last: PackLike | None = None
+    _time_last: Any = None
 
     def invalidate(self) -> None:
         self._rev_last = -1
@@ -129,6 +131,8 @@ class StateCache:
                 return
 
         x_all = np.asarray(pack.get(), dtype=float).reshape(-1)
+        self._pack_last = pack
+        self._time_last = time
         st = self.build_state(x_all, pack=pack, time=time, required=missing if required is not None else None)
 
         if not isinstance(st, dict):
@@ -164,3 +168,52 @@ class StateCache:
 
     def set_memo(self, key: StateKey, value: Any) -> None:
         self._memo[key] = value
+
+    def jacobian_transpose_mul(self, value_key: StateKey, jac_key: StateKey, rhs: Array | Any) -> Array:
+        """Compute a state Jacobian VJP through the backend when it exposes one."""
+
+        _base_field, sep, jac_var = str(jac_key.field).partition("_J_")
+        if not sep or _base_field == "" or jac_var == "":
+            raise AttributeError("StateCache: jac_key is not a Jacobian StateKey.")
+
+        builder = getattr(self.build_state, "__self__", None)
+        if builder is None:
+            raise AttributeError("StateCache: build_state is not bound to a backend builder.")
+
+        pack = self._pack_last
+        if pack is None:
+            raise AttributeError("StateCache: no active VariablePack for backend VJP.")
+        x_all = np.asarray(pack.get(), dtype=float).reshape(-1)
+
+        p_var = getattr(builder, "p_var", None)
+        param_vjp = getattr(builder, "param_jacobian_transpose_mul", None)
+        if callable(param_vjp) and isinstance(p_var, str) and jac_var == p_var:
+            return np.asarray(
+                param_vjp(
+                    x_all,
+                    value_key,
+                    rhs,
+                    pack=pack,
+                    time=self._time_last,
+                    update_kinematics=False,
+                ),
+                dtype=float,
+            )
+
+        q_var = getattr(builder, "q_var", None)
+        state_vjp = getattr(builder, "jacobian_transpose_mul", None)
+        if callable(state_vjp) and isinstance(q_var, str) and jac_var == q_var:
+            return np.asarray(
+                state_vjp(
+                    x_all,
+                    value_key,
+                    rhs,
+                    update_kinematics=False,
+                ),
+                dtype=float,
+            )
+
+        raise AttributeError(
+            "StateCache: backend does not expose a matching jacobian_transpose_mul "
+            f"for var {jac_var!r}."
+        )
