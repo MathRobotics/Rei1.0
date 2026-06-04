@@ -14,6 +14,7 @@ from .provider import (
     TrajectoryRoboticsStateProvider,
     assert_provider_contract,
     assert_trajectory_provider_contract,
+    robot_field_bindings_from_names,
 )
 from .trajectory import TrajectoryStateBuilderMixin
 
@@ -39,4 +40,5 @@ __all__ = [
     "TrajectoryStateBuilderMixin",
     "assert_provider_contract",
     "assert_trajectory_provider_contract",
+    "robot_field_bindings_from_names",
 ]

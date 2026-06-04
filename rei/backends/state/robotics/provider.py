@@ -24,6 +24,7 @@ TrajectoryRobotUpdateFn = Callable[[Array, Array, int, Any, Any], None]
 RobotStateRefResolver = Callable[[StateKey, Any, Any], Any]
 HandlerRef = str | DispatchHandler
 STATE_JACOBIAN_VAR = "state"
+DEFAULT_NAME_BINDING_OWNER_TYPES = ("total_joint", "link", "joint")
 
 
 def _state_key_label(key: StateKey | None) -> str:
@@ -136,6 +137,121 @@ def _resolve_optional_callable_ref(
     if not callable(fn):
         raise ValueError(f"{role}: handler_owner does not expose callable method {ref!r}.")
     return fn
+
+
+def _merge_name_binding_methods(
+    field_methods: Mapping[str, HandlerRef] | None,
+    field_method_kwargs: Mapping[str, HandlerRef],
+) -> dict[str, HandlerRef]:
+    out: dict[str, HandlerRef] = {}
+    if field_methods is not None:
+        for name, ref in field_methods.items():
+            out[str(name)] = ref
+    for name, ref in field_method_kwargs.items():
+        name_str = str(name)
+        if name_str in out:
+            raise ValueError(f"duplicate name binding for {name_str!r}.")
+        out[name_str] = ref
+    return out
+
+
+def _parse_name_binding_key(
+    name: str,
+    *,
+    owner_types: Sequence[str],
+) -> tuple[str, str, str, str | None]:
+    name_str = str(name)
+    if name_str == "":
+        raise ValueError("name binding keys must be non-empty.")
+
+    if "_J_" in name_str:
+        base, jacobian_wrt = name_str.rsplit("_J_", 1)
+        if jacobian_wrt == "":
+            raise ValueError(f"name binding {name_str!r} has an empty Jacobian variable.")
+    else:
+        base = name_str
+        jacobian_wrt = None
+
+    for dtype in (DTYPE_KINEMATICS, DTYPE_DYNAMICS, DTYPE_COORD):
+        prefix = f"{dtype}_"
+        if not base.startswith(prefix):
+            continue
+        rest = base[len(prefix) :]
+        for owner_type in sorted((str(v) for v in owner_types), key=len, reverse=True):
+            owner_prefix = f"{owner_type}_"
+            if not rest.startswith(owner_prefix):
+                continue
+            field = rest[len(owner_prefix) :]
+            if field == "":
+                raise ValueError(f"name binding {name_str!r} has an empty field.")
+            return dtype, owner_type, canonical_field_name(field), jacobian_wrt
+
+    allowed_owners = ", ".join(repr(str(v)) for v in owner_types)
+    raise ValueError(
+        f"invalid robotics name binding {name_str!r}. Expected "
+        f"`<dtype>_<owner_type>_<field>` or `<dtype>_<owner_type>_<field>_J_<var>`; "
+        f"dtype must be one of {DTYPE_KINEMATICS!r}, {DTYPE_DYNAMICS!r}, {DTYPE_COORD!r}; "
+        f"known owner types: {allowed_owners}."
+    )
+
+
+def robot_field_bindings_from_names(
+    field_methods: Mapping[str, HandlerRef] | None = None,
+    *,
+    owner_types: Sequence[str] = DEFAULT_NAME_BINDING_OWNER_TYPES,
+    default_jacobian_wrt: str | None = None,
+    **field_method_kwargs: HandlerRef,
+) -> tuple[RobotFieldBinding, ...]:
+    """Convert compact name bindings into `RobotFieldBinding` objects.
+
+    Example keys:
+      - `kinematics_link_pos`
+      - `kinematics_link_pos_J_q`
+      - `dynamics_total_joint_torque_J_state`
+    """
+
+    methods = _merge_name_binding_methods(field_methods, field_method_kwargs)
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str, str]] = []
+    for name, ref in methods.items():
+        dtype, owner_type, field, jacobian_wrt = _parse_name_binding_key(
+            name,
+            owner_types=owner_types,
+        )
+        route = (dtype, owner_type, field)
+        if route not in grouped:
+            grouped[route] = {"value": None, "jac": None, "jacobian_wrt": default_jacobian_wrt}
+            order.append(route)
+        entry = grouped[route]
+        if jacobian_wrt is None:
+            if entry["value"] is not None:
+                raise ValueError(f"duplicate value binding for {name!r}.")
+            entry["value"] = ref
+            continue
+        if entry["jac"] is not None:
+            raise ValueError(f"duplicate Jacobian binding for {name!r}.")
+        entry["jac"] = ref
+        entry["jacobian_wrt"] = jacobian_wrt
+
+    bindings: list[RobotFieldBinding] = []
+    for dtype, owner_type, field in order:
+        entry = grouped[(dtype, owner_type, field)]
+        if entry["value"] is None:
+            raise ValueError(
+                "name bindings require a value binding for every Jacobian binding. "
+                f"Missing value for {dtype}_{owner_type}_{field}."
+            )
+        bindings.append(
+            RobotFieldBinding(
+                dtype=dtype,
+                owner_type=owner_type,
+                field=field,
+                value=entry["value"],
+                jac=entry["jac"],
+                jacobian_wrt=entry["jacobian_wrt"],
+            )
+        )
+    return tuple(bindings)
 
 
 class RoboticsStateProvider(BackendDispatchStateBuilder):
@@ -297,8 +413,44 @@ class RoboticsStateProvider(BackendDispatchStateBuilder):
             raise ValueError(
                 "RoboticsStateProvider.from_field_bindings: no fields configured. "
                 "Provide field_bindings or enable register_joint_q."
-            )
+        )
         return provider
+
+    @classmethod
+    def from_name_bindings(
+        cls,
+        model: Any,
+        data: Any,
+        *,
+        handler_owner: Any = None,
+        field_methods: Mapping[str, HandlerRef] | None = None,
+        owner_types: Sequence[str] = DEFAULT_NAME_BINDING_OWNER_TYPES,
+        q_var: str = "q",
+        update_model: str | RobotUpdateFn | None = None,
+        resolve_state_ref: str | RobotStateRefResolver | None = None,
+        register_joint_q: bool = True,
+        allow_nonzero_k: bool = False,
+        validate_handler_shapes: bool = True,
+        **field_method_kwargs: HandlerRef,
+    ) -> RoboticsStateProvider:
+        """Build a provider from compact names such as `kinematics_link_pos`."""
+
+        return cls.from_field_bindings(
+            model,
+            data,
+            field_bindings=robot_field_bindings_from_names(
+                field_methods,
+                owner_types=owner_types,
+                **field_method_kwargs,
+            ),
+            handler_owner=handler_owner,
+            q_var=q_var,
+            update_model=update_model,
+            resolve_state_ref=resolve_state_ref,
+            register_joint_q=register_joint_q,
+            allow_nonzero_k=allow_nonzero_k,
+            validate_handler_shapes=validate_handler_shapes,
+        )
 
     def register_field_bindings(
         self,
@@ -715,6 +867,53 @@ class TrajectoryRoboticsStateProvider(TrajectoryStateBuilderMixin, RoboticsState
             )
         return provider
 
+    @classmethod
+    def from_name_bindings(
+        cls,
+        model: Any,
+        data: Any,
+        *,
+        trajectory_map: TrajectoryMap,
+        handler_owner: Any = None,
+        field_methods: Mapping[str, HandlerRef] | None = None,
+        owner_types: Sequence[str] = DEFAULT_NAME_BINDING_OWNER_TYPES,
+        trajectory_derivative_maps: Mapping[int, TrajectoryMap] | None = None,
+        p_var: str = "p",
+        update_model: str | RobotUpdateFn | None = None,
+        update_motion_model: str | TrajectoryRobotUpdateFn | None = None,
+        resolve_state_ref: str | RobotStateRefResolver | None = None,
+        register_joint_q: bool = True,
+        motion_layout: str = "q",
+        motion_order: int | None = None,
+        derivative_orders: Sequence[int] = (0, 1, 2),
+        validate_handler_shapes: bool = True,
+        **field_method_kwargs: HandlerRef,
+    ) -> TrajectoryRoboticsStateProvider:
+        """Build a trajectory provider from compact names such as `kinematics_link_pos`."""
+
+        return cls.from_field_bindings(
+            model,
+            data,
+            trajectory_map=trajectory_map,
+            field_bindings=robot_field_bindings_from_names(
+                field_methods,
+                owner_types=owner_types,
+                default_jacobian_wrt=STATE_JACOBIAN_VAR,
+                **field_method_kwargs,
+            ),
+            handler_owner=handler_owner,
+            trajectory_derivative_maps=trajectory_derivative_maps,
+            p_var=p_var,
+            update_model=update_model,
+            update_motion_model=update_motion_model,
+            resolve_state_ref=resolve_state_ref,
+            register_joint_q=register_joint_q,
+            motion_layout=motion_layout,
+            motion_order=motion_order,
+            derivative_orders=derivative_orders,
+            validate_handler_shapes=validate_handler_shapes,
+        )
+
     @staticmethod
     def _default_state_jacobian_wrt_for_bindings(
         bindings: Sequence[RobotFieldBinding],
@@ -923,4 +1122,5 @@ __all__ = [
     "TrajectoryRoboticsStateProvider",
     "assert_provider_contract",
     "assert_trajectory_provider_contract",
+    "robot_field_bindings_from_names",
 ]

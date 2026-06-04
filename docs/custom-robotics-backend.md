@@ -143,6 +143,36 @@ binding list plus `trajectory_map`. For trajectory providers, bindings with a
 Jacobian default to `jacobian_wrt="state"`, so Rei chains them to `p` when the
 DSL requests fields like `pos_J_p`.
 
+For the shortest registration style, use name bindings. The keyword name is:
+
+```text
+<dtype>_<owner_type>_<field>
+<dtype>_<owner_type>_<field>_J_<var>
+```
+
+Example:
+
+```python
+provider = RoboticsStateProvider.from_name_bindings(
+    model=my_robot_model,
+    data={},
+    handler_owner=adapter,
+    update_model="update",
+    resolve_state_ref="ref",
+    kinematics_link_pos="pos",
+    kinematics_link_pos_J_q="pos_jac",
+    kinematics_link_rot="rot",
+    kinematics_link_rot_J_q="rot_jac",
+    dynamics_total_joint_torque="torque",
+    dynamics_total_joint_torque_J_q="torque_jac",
+)
+```
+
+This is equivalent to writing `RobotFieldBinding(...)` entries, but is easier
+when you only need a compact state-to-method table. Known owner types in this
+compact form are `link`, `joint`, and `total_joint`; pass `owner_types=(...)`
+to support additional owner type names.
+
 ## Handler Shapes
 
 With `validate_handler_shapes=True` (the default), callbacks are checked at the

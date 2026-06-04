@@ -13,6 +13,7 @@ from rei.backends.state.robotics.provider import (
     RoboticsStateProvider,
     assert_provider_contract,
     assert_trajectory_provider_contract,
+    robot_field_bindings_from_names,
 )
 from rei.core.state_schema import DTYPE_COORD, DTYPE_KINEMATICS, make_jac_key, make_key
 from rei.core.trajectory import TrajectoryMap
@@ -333,6 +334,59 @@ class TestRoboticsProviderTemplate:
                 ],
             )
 
+    def test_robotics_state_provider_can_be_built_from_name_bindings(self) -> None:
+        adapter = _TableBackend()
+        provider = RoboticsStateProvider.from_name_bindings(
+            model={},
+            data={},
+            handler_owner=adapter,
+            update_model="update",
+            resolve_state_ref="ref",
+            register_joint_q=False,
+            kinematics_link_pos="pos",
+            kinematics_link_pos_J_q="pos_jac",
+        )
+        key_v = make_key(
+            k=0,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+        )
+        key_j = make_jac_key(
+            k=0,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+            var="q",
+        )
+
+        out = provider.build_state(np.array([1.0, 2.0], dtype=float), required=[key_v, key_j])
+
+        assert np.allclose(out[key_v], np.array([5.0, 2.0, 3.0], dtype=float))
+        assert np.allclose(out[key_j], np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=float))
+
+    def test_robot_field_bindings_from_names_supports_total_joint_owner_type(self) -> None:
+        bindings = robot_field_bindings_from_names(
+            {
+                "dynamics_total_joint_torque": "torque",
+                "dynamics_total_joint_torque_J_state": "torque_jac",
+            }
+        )
+        assert len(bindings) == 1
+        binding = bindings[0]
+        assert binding.dtype == "dynamics"
+        assert binding.owner_type == "total_joint"
+        assert binding.field == "torque"
+        assert binding.value == "torque"
+        assert binding.jac == "torque_jac"
+        assert binding.jacobian_wrt == "state"
+
+    def test_robot_field_bindings_from_names_requires_value_binding(self) -> None:
+        with pytest.raises(ValueError, match="Missing value"):
+            robot_field_bindings_from_names({"kinematics_link_pos_J_q": "pos_jac"})
+
     def test_assert_provider_contract_accepts_expected_fields_and_shapes(self) -> None:
         provider = RoboticsStateProvider(
             model={},
@@ -548,6 +602,39 @@ class TestTrajectoryRoboticsProviderTemplate:
         assert np.allclose(out[key], np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 1.0]], dtype=float))
         assert len(adapter.calls) == 1
         assert np.allclose(adapter.calls[0], np.array([2.0, 3.0], dtype=float))
+
+    def test_trajectory_provider_can_be_built_from_name_bindings(self) -> None:
+        traj = TrajectoryMap.from_blocks(
+            [
+                np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=float),
+                np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], dtype=float),
+            ]
+        )
+        adapter = _TableBackend()
+        provider = TrajectoryRoboticsStateProvider.from_name_bindings(
+            model={},
+            data={},
+            trajectory_map=traj,
+            handler_owner=adapter,
+            update_model="update",
+            resolve_state_ref="ref",
+            p_var="p",
+            register_joint_q=False,
+            kinematics_link_pos="pos",
+            kinematics_link_pos_J_state="pos_jac",
+        )
+        key = make_jac_key(
+            k=1,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+            var="p",
+        )
+
+        out = provider.build_state(np.array([1.0, 2.0, 3.0], dtype=float), required=[key])
+
+        assert np.allclose(out[key], np.array([[0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 1.0]], dtype=float))
 
     def test_trajectory_provider_can_chain_stacked_motion_jacobian(self) -> None:
         q_map = TrajectoryMap.from_blocks(
