@@ -27,12 +27,13 @@ Run commands through the managed environment:
 
 ```bash
 uv run python examples/minimize_quadratic.py
-uv run python -m pytest tests
+uv run --group dev python -m pytest tests
 ```
 
 Optional solver and backend groups:
 
 ```bash
+uv sync --group plotting
 uv sync --group pinocchio
 uv sync --group kots
 uv sync --group solver-liteopt
@@ -106,6 +107,38 @@ Implementation expectations:
 - Return a `dict[StateKey, Any]`.
 - Honor `required` when it is provided.
 - Return numeric arrays with shapes expected by the DSL expressions.
+
+For custom robotics libraries, `RoboticsStateProvider` offers a callback-based
+adapter so you do not need to write a full backend class:
+
+```python
+from rei.backends.state.robotics import RobotFieldHandler, RoboticsStateProvider
+
+provider = RoboticsStateProvider(
+    model=my_robot_model,
+    data={},
+    q_var="q",
+    kinematics_field_handlers={
+        "pos": RobotFieldHandler(
+            value_handler=ee_pos_value,
+            jac_handler=ee_pos_jac,
+        )
+    },
+    update_model=lambda q, model, data: model.forward(q),
+    resolve_state_ref=lambda key, model, data: {"frame": model.frame(key.owner.owner_name)},
+)
+
+runtime = compile_nls_problem(dsl, build_state=provider.build_state)
+```
+
+Provider callbacks are normalized to numeric arrays. With the default
+`validate_handler_shapes=True`, value callbacks must return non-empty vectors
+and Jacobian callbacks must return 2D arrays with rows matching the value size.
+
+For trajectory-parameterized problems, use `TrajectoryRoboticsStateProvider`.
+It evaluates `q(k)` from trajectory parameters and chains backend Jacobians into
+parameter-space Jacobians. See [Custom Robotics Backends](docs/custom-robotics-backend.md)
+for the full callback contract, shape rules, and trajectory examples.
 
 ## Capability Adapters
 
@@ -225,7 +258,7 @@ See `examples/README.md` for the full sample list and spec/DSL/model file guide.
 Run the test suite:
 
 ```bash
-uv run python -m pytest tests
+uv run --group dev python -m pytest tests
 ```
 
 Compile-check the package:
