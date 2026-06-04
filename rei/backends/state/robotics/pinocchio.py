@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,29 +12,32 @@ from ....core.state_schema import (
     DTYPE_DYNAMICS,
     DTYPE_KINEMATICS,
     canonical_field_name,
-    split_jac_field,
 )
 from ....core.trajectory import TrajectoryMap
 from .spatial import Jacobian6Order, linear_part_from_jacobian6
+from .trajectory import (
+    chain_param_jacobian,
+    compose_stacked_motion_and_jac,
+    TrajectoryStateBuilderMixin,
+    validate_trajectory_derivative_maps,
+)
+from .optional import import_optional_backend, require_module_attrs
 from ..dispatch.template import BackendDispatchStateBuilder
 
-try:
-    import pinocchio as pin
-except ImportError as e:  # pragma: no cover
-    raise ImportError(
-        "`rei.backends.state.robotics.pinocchio` requires the robotics Pinocchio bindings. "
-        "Install Pinocchio (e.g. via conda-forge) and retry."
-    ) from e
+pin = import_optional_backend(
+    "pinocchio",
+    backend_name="rei.backends.state.robotics.pinocchio",
+    install_hint="uv sync --group pinocchio",
+)
 
 _REQUIRED_ATTRS = ("buildModelFromUrdf", "computeFrameJacobian", "forwardKinematics", "updateFramePlacements")
-_missing = [a for a in _REQUIRED_ATTRS if not hasattr(pin, a)]
-if _missing:  # pragma: no cover
-    raise ImportError(
-        "The imported `pinocchio` module is missing required robotics APIs: "
-        f"{', '.join(_missing)}.\n"
-        "You may have installed a different PyPI package named `pinocchio` (often version 0.1).\n"
-        "Uninstall it and install the robotics Pinocchio bindings (typically via conda-forge)."
-    )
+require_module_attrs(
+    pin,
+    _REQUIRED_ATTRS,
+    backend_name="rei.backends.state.robotics.pinocchio",
+    install_hint="uv sync --group pinocchio",
+    extra_hint="You may have installed a different PyPI package named `pinocchio`.",
+)
 
 Array = np.ndarray
 STATE_JACOBIAN_VAR = "state"
@@ -484,7 +487,7 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
         return self._handle_torque_jac(q, key, state_ref)
 
 
-class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
+class PinocchioTrajectoryStateBuilder(TrajectoryStateBuilderMixin, PinocchioStateBuilder):
     """Pinocchio trajectory builder with trajectory parameterization.
 
     Decision variable is `p` (configurable by `p_var`), and generalized coordinates are:
@@ -544,21 +547,10 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
         )
 
     def _validate_derivative_maps(self) -> None:
-        base = self.trajectory_derivative_maps.get(0, None)
-        if base is None:
-            raise ValueError("PinocchioTrajectoryStateBuilder: derivative map for order 0 is required.")
-        for order, traj in self.trajectory_derivative_maps.items():
-            if traj.p_dim != base.p_dim:
-                raise ValueError(
-                    "PinocchioTrajectoryStateBuilder: derivative map p_dim mismatch. "
-                    f"order={order}, expected {base.p_dim}, got {traj.p_dim}."
-                )
-            if traj.steps != base.steps or traj.q_dim != base.q_dim:
-                raise ValueError(
-                    "PinocchioTrajectoryStateBuilder: derivative map shape mismatch. "
-                    f"order={order}, expected steps={base.steps}, q_dim={base.q_dim}, "
-                    f"got steps={traj.steps}, q_dim={traj.q_dim}."
-                )
+        validate_trajectory_derivative_maps(
+            self.trajectory_derivative_maps,
+            error_prefix="PinocchioTrajectoryStateBuilder",
+        )
 
     def _handle_joint_q_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del key, state_ref
@@ -570,35 +562,14 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
         return np.eye(n, dtype=float)
 
     def _compose_motion_and_jac(self, p: Array, *, k: int) -> tuple[Array, Array]:
-        p_vec = np.asarray(p, dtype=float).reshape(-1)
-        dof = int(self.trajectory_map.q_dim)
-        p_dim = int(self.trajectory_map.p_dim)
-        motion = np.zeros((3 * dof,), dtype=float)
-        dmotion_dp = np.zeros((3 * dof, p_dim), dtype=float)
-
-        for deriv_order in (0, 1, 2):
-            traj = self.trajectory_derivative_maps.get(deriv_order, None)
-            if traj is None:
-                continue
-            q_r = np.asarray(traj.q_at(p_vec, k), dtype=float).reshape(-1)
-            J_r = np.asarray(traj.dqdp_at(k), dtype=float)
-            if q_r.size != dof:
-                raise ValueError(
-                    "PinocchioTrajectoryStateBuilder: derivative map q size mismatch. "
-                    f"order={deriv_order}, expected {dof}, got {q_r.size}."
-                )
-            if J_r.shape != (dof, p_dim):
-                raise ValueError(
-                    "PinocchioTrajectoryStateBuilder: derivative map jacobian shape mismatch. "
-                    f"order={deriv_order}, expected {(dof, p_dim)}, got {J_r.shape}."
-                )
-
-            s = int(deriv_order * dof)
-            e = int(s + dof)
-            motion[s:e] = q_r
-            dmotion_dp[s:e, :] = J_r
-
-        return motion, dmotion_dp
+        return compose_stacked_motion_and_jac(
+            p,
+            trajectory_map=self.trajectory_map,
+            trajectory_derivative_maps=self.trajectory_derivative_maps,
+            derivative_orders=(0, 1, 2),
+            k=k,
+            error_prefix="PinocchioTrajectoryStateBuilder",
+        )
 
     def _active_motion_triplet(self, *, q: Array, key: StateKey) -> tuple[Array, Array, Array]:
         q_vec = np.asarray(q, dtype=float).reshape(-1)
@@ -681,6 +652,15 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
             J[:, i] = (yp - y0) / h
         return J
 
+    def _update_trajectory_step(self, *, k: int, q_k: Array, motion_k: Array) -> None:
+        self._active_step_k = int(k)
+        self._active_motion = np.asarray(motion_k, dtype=float).reshape(-1)
+        self._update_kinematics(q_k)
+
+    def _finalize_trajectory_build(self) -> None:
+        self._active_step_k = None
+        self._active_motion = None
+
     def _chain_param_jac(
         self,
         J_raw: Array,
@@ -701,126 +681,21 @@ class PinocchioTrajectoryStateBuilder(PinocchioStateBuilder):
             return Jm
 
         if wrt == STATE_JACOBIAN_VAR:
-            if Jm.shape[1] == dqdp_k.shape[0]:
-                return Jm @ dqdp_k
-            if Jm.shape[1] == dmotiondp_k.shape[0]:
-                return Jm @ dmotiondp_k
-            raise ValueError(
-                "PinocchioTrajectoryStateBuilder: Jacobian chain mismatch. "
-                f"J_raw has shape {Jm.shape}, dqdp has shape {dqdp_k.shape}, dmotiondp has shape {dmotiondp_k.shape}."
+            return chain_param_jacobian(
+                Jm,
+                q_var=self.q_var,
+                state_jacobian_var=STATE_JACOBIAN_VAR,
+                key=key,
+                jacobian_wrt=jacobian_wrt,
+                dqdp=dqdp_k,
+                dmotiondp=dmotiondp_k,
+                error_prefix="PinocchioTrajectoryStateBuilder",
             )
 
         raise ValueError(
             "PinocchioTrajectoryStateBuilder: unsupported jacobian_wrt metadata for parameter chain. "
             f"Expected {self.q_var!r} or {STATE_JACOBIAN_VAR!r}, got {wrt!r}."
         )
-
-    def _expected_steps(self, *, time: Any = None) -> int:
-        steps = int(self.trajectory_map.steps)
-        if time is None or not hasattr(time, "N"):
-            return steps
-        try:
-            time_steps = int(time.N) + 1
-        except Exception:
-            return steps
-        if time_steps != steps:
-            raise ValueError(
-                "PinocchioTrajectoryStateBuilder: time grid mismatch. "
-                f"trajectory_map.steps={steps}, time steps={time_steps} (N+1)."
-            )
-        return steps
-
-    def _accept_required_key_for_traj(self, key: StateKey, *, steps: int) -> bool:
-        if not isinstance(key, StateKey):
-            return False
-        k = int(getattr(key, "k", -1))
-        if k < 0 or k >= steps:
-            return False
-        dtype = getattr(key, "dtype", None)
-        if not isinstance(dtype, str) or dtype == "":
-            return False
-        owner = getattr(key, "owner", None)
-        owner_type = getattr(owner, "owner_type", None)
-        owner_name = getattr(owner, "owner_name", None)
-        if not isinstance(owner_type, str) or owner_type == "":
-            return False
-        if not isinstance(owner_name, str) or owner_name == "":
-            return False
-        field = getattr(key, "field", None)
-        if not isinstance(field, str) or field == "":
-            return False
-        return True
-
-    def _is_param_jac_key(self, key: StateKey) -> bool:
-        field = getattr(key, "field", None)
-        if not isinstance(field, str) or field == "":
-            return False
-        try:
-            _base, var = split_jac_field(field)
-        except ValueError:
-            return False
-        return var == self.q_var
-
-    def build_state(
-        self,
-        x_all: Array,
-        *,
-        pack: Any = None,
-        time: Any = None,
-        required: Iterable[StateKey] | None = None,
-    ) -> dict[StateKey, Any]:
-        if required is None:
-            return {}
-
-        steps = self._expected_steps(time=time)
-        p = self._extract_q(x_all, pack=pack)
-        if p.size != self.trajectory_map.p_dim:
-            raise ValueError(
-                "PinocchioTrajectoryStateBuilder: parameter size mismatch. "
-                f"Expected p_dim={self.trajectory_map.p_dim}, got {p.size}."
-            )
-
-        grouped: dict[int, list[tuple[StateKey, Any]]] = {}
-        for key in required:
-            if not self._accept_required_key_for_traj(key, steps=steps):
-                continue
-            route = self._route_for_key(key)
-            if route is None:
-                continue
-            entry = self._dispatch.get(route, None)
-            if entry is None:
-                continue
-            grouped.setdefault(int(key.k), []).append((key, entry))
-
-        out: dict[StateKey, Any] = {}
-        for k in sorted(grouped.keys()):
-            q_k = np.asarray(self.trajectory_map.q_at(p, k), dtype=float).reshape(-1)
-            dqdp_k = np.asarray(self.trajectory_map.dqdp_at(k), dtype=float)
-            motion_k, dmotiondp_k = self._compose_motion_and_jac(p, k=k)
-            self._active_step_k = int(k)
-            self._active_motion = np.asarray(motion_k, dtype=float).reshape(-1)
-            self._update_kinematics(q_k)
-
-            for key, entry in grouped[k]:
-                state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
-                value = entry.handler(q_k, key, state_ref)
-                if self._is_param_jac_key(key):
-                    value = self._chain_param_jac(
-                        value,
-                        key=key,
-                        jacobian_wrt=entry.jacobian_wrt,
-                        dqdp_k=dqdp_k,
-                        dmotiondp_k=dmotiondp_k,
-                    )
-                out[key] = value
-
-        self._active_step_k = None
-        self._active_motion = None
-
-        return out
-
-
-
 
 def _as_dyn_vec(x: Any) -> Array:
     if hasattr(x, "vector"):

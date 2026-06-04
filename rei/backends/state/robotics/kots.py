@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence, Iterable
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import re
 from typing import Any
 import warnings
 
@@ -21,19 +20,25 @@ from ....core.state_schema import (
 )
 from ....core.trajectory import TrajectoryMap
 from ..dispatch.template import BackendDispatchStateBuilder
-
-try:
-    from robokots.core.state import StateType
-except ImportError as e:  # pragma: no cover
-    raise ImportError(
-        "`rei.backends.state.robotics.kots` requires the robotics RoboKots bindings. "
-        "Install RoboKots (e.g. via github) and retry."
-    ) from e
+from .motion import (
+    dof_sorted_robot_joints,
+    expand_coordinate_motion_by_robot_layout,
+    infer_robot_model_dof,
+    infer_robot_model_order,
+    interleaved_motion_jacobian_used_order,
+)
+from .trajectory import (
+    chain_param_jacobian,
+    compose_interleaved_motion_and_jac,
+    TrajectoryStateBuilderMixin,
+    unique_jacobian_chain_candidates,
+    validate_trajectory_derivative_maps,
+)
+from . import kots_api as kapi
+from .kots_api import StateType
 
 Array = np.ndarray
 STATE_JACOBIAN_VAR = "state"
-_ROBOKOTS_TORQUE_DIFF_PATTERN = re.compile(r"^torque_diff([1-9][0-9]*)$")
-_ROBOKOTS_JACOBIAN_MUL_METHODS = ("jacobian_mul", "matvec", "jacobian_matvec")
 _KOTS_JACOBIAN_STRATEGIES = ("dense", "mul")
 
 
@@ -101,6 +106,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         self._model_dof_cache: int | None = None
         self._model_order_cache: int | None = None
         self.prefer_matvec_jacobian = bool(prefer_matvec_jacobian)
+        self._jacobian_ops = kapi.RoboKotsJacobianOperator(self.model)
 
         family_map = {spec.field: spec for spec in KOTS_DEFAULT_FIELD_FAMILIES}
         selected_fields = [spec.field for spec in KOTS_DEFAULT_FIELD_FAMILIES] if fields is None else [str(f) for f in fields]
@@ -188,60 +194,25 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
     def _model_dof(self) -> int:
         if self._model_dof_cache is not None:
             return int(self._model_dof_cache)
-        dof_fn = getattr(self.model, "dof", None)
-        if callable(dof_fn):
-            dof = int(dof_fn())
-            self._model_dof_cache = dof
-            return dof
-        robot = getattr(self.model, "robot_", None)
-        if robot is not None and hasattr(robot, "dof"):
-            dof = int(getattr(robot, "dof"))
-            self._model_dof_cache = dof
-            return dof
-        raise ValueError("KotsStateBuilder: unable to resolve model dof.")
+        dof = infer_robot_model_dof(self.model)
+        self._model_dof_cache = int(dof)
+        return int(dof)
 
     def _model_order(self) -> int:
         if self._model_order_cache is not None:
             return int(self._model_order_cache)
-        order_fn = getattr(self.model, "order", None)
-        if callable(order_fn):
-            order = int(order_fn())
-        else:
-            order = int(getattr(self.model, "order_", 1))
-        if order < 1:
-            raise ValueError(f"KotsStateBuilder: model order must be >= 1, got {order}.")
+        order = infer_robot_model_order(self.model)
         self._model_order_cache = int(order)
-        return order
+        return int(order)
 
     def _expand_coordinate_motion(self, q: Array, *, dof: int, order: int) -> Array:
-        motion = np.zeros(dof * order, dtype=float)
-        robot = getattr(self.model, "robot_", None)
-        if robot is None:
-            for i in range(min(q.size, dof)):
-                motion[i * order] = float(q[i])
-            return motion
-
-        owners = [*getattr(robot, "links", []), *getattr(robot, "joints", [])]
-        owners = [owner for owner in owners if int(getattr(owner, "dof", 0)) > 0]
-        owners.sort(key=lambda owner: int(getattr(owner, "dof_index", 0)))
-
-        cursor = 0
-        for owner in owners:
-            owner_dof = int(getattr(owner, "dof", 0))
-            dof_index = int(getattr(owner, "dof_index", 0))
-            start = dof_index * order
-            stop = start + owner_dof
-            if stop > motion.size:
-                raise ValueError("KotsStateBuilder: invalid dof_index/dof in robot structure.")
-            motion[start:stop] = q[cursor : cursor + owner_dof]
-            cursor += owner_dof
-
-        if cursor != q.size:
-            raise ValueError(
-                "KotsStateBuilder: failed to map q into motion coordinates. "
-                f"Mapped {cursor} elements from q size {q.size}."
-            )
-        return motion
+        return expand_coordinate_motion_by_robot_layout(
+            self.model,
+            q,
+            dof=dof,
+            order=order,
+            error_prefix="KotsStateBuilder",
+        )
 
     def _resolve_state_ref(self, key: StateKey) -> Any:
         owner = getattr(key, "owner", None)
@@ -305,10 +276,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
 
     @staticmethod
     def _fallback_backend_field_name(state_field: str) -> str:
-        deriv_order = torque_derivative_order(state_field)
-        if isinstance(deriv_order, int) and deriv_order > 0:
-            return f"torque_diff{deriv_order}"
-        return state_field
+        return kapi.fallback_backend_field_name(state_field)
 
     def _make_state_type(
         self,
@@ -318,37 +286,20 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         state_field: str,
         frame_name: str | None,
     ) -> Any:
-        try:
-            return StateType(owner_type, owner_name, state_field, frame_name)
-        except KeyError:
-            fallback_field = self._fallback_backend_field_name(state_field)
-            if fallback_field == state_field:
-                raise
-            return StateType(owner_type, owner_name, fallback_field, frame_name)
+        return kapi.make_state_type(
+            owner_type=owner_type,
+            owner_name=owner_name,
+            state_field=state_field,
+            frame_name=frame_name,
+            state_type=StateType,
+        )
 
     @staticmethod
     def _torque_derivative_order_from_state_data_type(data_type: str) -> int | None:
-        try:
-            deriv_order = torque_derivative_order(data_type)
-        except ValueError:
-            deriv_order = None
-        if isinstance(deriv_order, int):
-            return deriv_order
-        m = _ROBOKOTS_TORQUE_DIFF_PATTERN.fullmatch(data_type)
-        if m is None:
-            return None
-        return int(m.group(1))
+        return kapi.torque_derivative_order_from_state_data_type(data_type)
 
     def _dof_sorted_joints(self) -> list[Any] | None:
-        robot = getattr(self.model, "robot_", None)
-        if robot is None:
-            return None
-        joints_raw = getattr(robot, "joints", None)
-        if joints_raw is None:
-            return None
-        joints = [joint for joint in joints_raw if int(getattr(joint, "dof", 0)) > 0]
-        joints.sort(key=lambda joint: int(getattr(joint, "dof_index", 0)))
-        return joints
+        return dof_sorted_robot_joints(self.model)
 
     def _total_joint_dynamics_frame_name(self, *, state_field: str, key: StateKey) -> str | None:
         frame_name = getattr(key, "frame", None) or "world"
@@ -360,33 +311,19 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
 
     @staticmethod
     def _state_ref_data_type(state_ref: Any) -> str | None:
-        for attr in ("data_type", "field", "field_", "dtype"):
-            value = getattr(state_ref, attr, None)
-            if isinstance(value, str) and value != "":
-                return value
-        return None
+        return kapi.state_ref_data_type(state_ref)
 
     @staticmethod
     def _state_ref_owner_type(state_ref: Any) -> str | None:
-        value = getattr(state_ref, "owner_type", None)
-        if isinstance(value, str) and value != "":
-            return value
-        return None
+        return kapi.state_ref_owner_type(state_ref)
 
     @staticmethod
     def _state_ref_owner_name(state_ref: Any) -> str | None:
-        value = getattr(state_ref, "owner_name", None)
-        if isinstance(value, str) and value != "":
-            return value
-        return None
+        return kapi.state_ref_owner_name(state_ref)
 
     @staticmethod
     def _state_ref_frame_name(state_ref: Any) -> str | None:
-        for attr in ("frame", "frame_name"):
-            value = getattr(state_ref, attr, None)
-            if isinstance(value, str) and value != "":
-                return value
-        return None
+        return kapi.state_ref_frame_name(state_ref)
 
     def _raise_missing_state_key(self, *, state_ref: Any, cause: KeyError) -> None:
         data_type = self._state_ref_data_type(state_ref)
@@ -403,7 +340,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
 
     def _value_from_single_state_ref(self, state_ref: Any) -> Array:
         try:
-            return np.asarray(self.model.state_info(state_ref), dtype=float).reshape(-1)
+            return kapi.state_info(self.model, state_ref)
         except KeyError as e:
             self._raise_missing_state_key(state_ref=state_ref, cause=e)
 
@@ -418,18 +355,15 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if len(refs) == 0:
             return np.zeros((0,), dtype=float)
 
-        fn = getattr(self.model, "state_info_list", None)
-        if callable(fn):
-            try:
-                return np.asarray(fn(list(refs)), dtype=float).reshape(-1)
-            except (KeyError, ValueError, TypeError, RuntimeError):
-                pass
+        values = kapi.state_info_list(self.model, refs)
+        if values is not None:
+            return values
 
         return self._concat_total_joint_values(refs)
 
     def _jac_from_single_state_ref(self, state_ref: Any) -> Array:
         try:
-            J = np.asarray(self.model.jacobian(state_ref), dtype=float)
+            J = self._jacobian_ops.dense(state_ref)
         except KeyError as e:
             self._raise_missing_state_key(state_ref=state_ref, cause=e)
         return self._normalize_jacobian_shape(J, state_ref=state_ref)
@@ -462,94 +396,26 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if len(refs) == 0:
             return np.zeros((0, self._model_dof() * self._model_order()), dtype=float)
 
-        try:
-            J = np.asarray(self.model.jacobian(list(refs)), dtype=float)
+        J = self._jacobian_ops.dense_list(refs)
+        if J is not None:
             return self._normalize_jacobian_shape(J, state_ref=_TotalJointDynamicsStateRef(field="", refs=refs))
-        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
-            return self._stack_total_joint_jacobians_fallback(refs)
+        return self._stack_total_joint_jacobians_fallback(refs)
 
     def _matvec_from_single_state_ref(self, state_ref: Any, vec: Array) -> Array:
-        v = np.asarray(vec, dtype=float).reshape(-1)
-        errors: list[Exception] = []
-        for name in _ROBOKOTS_JACOBIAN_MUL_METHODS:
-            fn = getattr(self.model, name, None)
-            if not callable(fn):
-                continue
-            for args in ((state_ref, v), (v, state_ref)):
-                try:
-                    out = np.asarray(fn(*args), dtype=float).reshape(-1)
-                except (KeyError, ValueError, TypeError, RuntimeError) as e:
-                    errors.append(e)
-                    continue
-                return out
-        if len(errors) > 0:
-            raise errors[-1]
-        raise AttributeError("KotsStateBuilder: model does not expose jacobian_mul(state_ref, vec).")
+        return self._jacobian_ops.jvp(state_ref, vec)
 
     def _jac_from_matrix_mul_single_state_ref(self, state_ref: Any, cols: Array) -> Array:
-        C = np.asarray(cols, dtype=float)
-        if C.ndim != 2:
-            raise ValueError(f"Kots jacobian_mul columns must be 2D, got shape {C.shape}.")
-
-        errors: list[Exception] = []
-        fn = getattr(self.model, "jacobian_mul", None)
-        if not callable(fn):
-            raise AttributeError("KotsStateBuilder: model does not expose jacobian_mul(state_ref, cols).")
-
-        for args in ((state_ref, C), (C, state_ref)):
-            try:
-                out = np.asarray(fn(*args), dtype=float)
-            except (KeyError, ValueError, TypeError, RuntimeError) as e:
-                errors.append(e)
-                continue
-
-            if out.ndim == 1 and C.shape[1] == 1:
-                return out.reshape(-1, 1)
-            if out.ndim != 2:
-                errors.append(ValueError(f"Kots jacobian_mul output must be 2D, got shape {out.shape}."))
-                continue
-            if out.shape[1] == C.shape[1]:
-                return out
-            if out.shape[0] == C.shape[1]:
-                return out.T
-            errors.append(
-                ValueError(
-                    "Kots jacobian_mul output column mismatch. "
-                    f"Expected {C.shape[1]} columns, got shape {out.shape}."
-                )
-            )
-
-        if len(errors) > 0:
-            raise errors[-1]
-        raise AttributeError("KotsStateBuilder: model does not expose jacobian_mul(state_ref, cols).")
+        return self._jacobian_ops.jvp(state_ref, cols)
 
     def _jac_from_matvec_single_state_ref(self, state_ref: Any, cols: Array) -> Array:
         C = np.asarray(cols, dtype=float)
         if C.ndim != 2:
             raise ValueError(f"Kots matvec columns must be 2D, got shape {C.shape}.")
         try:
-            return self._jac_from_matrix_mul_single_state_ref(state_ref, C)
-        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
-            pass
-
-        parts: list[Array] = []
-        for j in range(int(C.shape[1])):
-            try:
-                y = self._matvec_from_single_state_ref(state_ref, C[:, j])
-            except KeyError as e:
-                self._raise_missing_state_key(state_ref=state_ref, cause=e)
-            parts.append(np.asarray(y, dtype=float).reshape(-1))
-        if len(parts) == 0:
             m = int(self._value_from_single_state_ref(state_ref).size)
-            return np.zeros((m, 0), dtype=float)
-        m = int(parts[0].size)
-        for part in parts[1:]:
-            if int(part.size) != m:
-                raise ValueError(
-                    "KotsStateBuilder: inconsistent matvec output size while assembling Jacobian. "
-                    f"Expected {m}, got {part.size}."
-                )
-        return np.column_stack(parts)
+            return self._jacobian_ops.jvp(state_ref, C, value_size=m)
+        except KeyError as e:
+            self._raise_missing_state_key(state_ref=state_ref, cause=e)
 
     def _handle_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del q, key
@@ -645,31 +511,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         return R_local
 
     def _transpose_matvec_from_single_state_ref(self, state_ref: Any, rhs: Array) -> Array:
-        R = np.asarray(rhs, dtype=float)
-        if R.ndim not in (1, 2):
-            raise ValueError(f"Kots jacobian_transpose_mul rhs must be 1D or 2D, got shape {R.shape}.")
-
-        errors: list[Exception] = []
-        fn = getattr(self.model, "jacobian_transpose_mul", None)
-        if not callable(fn):
-            raise AttributeError("KotsStateBuilder: model does not expose jacobian_transpose_mul(state_ref, rhs).")
-
-        for args in ((state_ref, R), (R, state_ref)):
-            try:
-                out = np.asarray(fn(*args), dtype=float)
-            except (KeyError, ValueError, TypeError, RuntimeError) as e:
-                errors.append(e)
-                continue
-            if out.ndim not in (1, 2):
-                errors.append(
-                    ValueError(f"Kots jacobian_transpose_mul output must be 1D or 2D, got shape {out.shape}.")
-                )
-                continue
-            return out
-
-        if len(errors) > 0:
-            raise errors[-1]
-        raise AttributeError("KotsStateBuilder: model does not expose jacobian_transpose_mul(state_ref, rhs).")
+        return self._jacobian_ops.vjp(state_ref, rhs)
 
     def _transpose_matvec_from_state_ref(self, state_ref: Any, rhs: Array) -> Array:
         total_joint_ref = self._as_total_joint_dynamics_state_ref(state_ref)
@@ -775,7 +617,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         return np.vstack(blocks)
 
 
-class KotsTrajectoryStateBuilder(KotsStateBuilder):
+class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
     """RoboKots trajectory builder with trajectory parameterization.
 
     Decision variable is `p` (configurable by `p_var`), and generalized coordinates are:
@@ -833,21 +675,14 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
         )
 
     def _validate_derivative_maps(self) -> None:
-        base = self.trajectory_derivative_maps.get(0, None)
-        if base is None:
-            raise ValueError("KotsTrajectoryStateBuilder: derivative map for order 0 is required.")
-        for order, traj in self.trajectory_derivative_maps.items():
-            if traj.p_dim != base.p_dim:
-                raise ValueError(
-                    "KotsTrajectoryStateBuilder: derivative map p_dim mismatch. "
-                    f"order={order}, expected {base.p_dim}, got {traj.p_dim}."
-                )
-            if traj.steps != base.steps or traj.q_dim != base.q_dim:
-                raise ValueError(
-                    "KotsTrajectoryStateBuilder: derivative map shape mismatch. "
-                    f"order={order}, expected steps={base.steps}, q_dim={base.q_dim}, "
-                    f"got steps={traj.steps}, q_dim={traj.q_dim}."
-                )
+        validate_trajectory_derivative_maps(
+            self.trajectory_derivative_maps,
+            error_prefix="KotsTrajectoryStateBuilder",
+        )
+
+    def _update_trajectory_step(self, *, k: int, q_k: Array, motion_k: Array) -> None:
+        del k, q_k
+        self._update_kinematics(motion_k)
 
     def _handle_joint_q_value(self, q: Array, key: StateKey, state_ref: Any) -> Array:
         del key, state_ref
@@ -859,31 +694,14 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
         return np.eye(n, dtype=float)
 
     def _compose_motion_and_jac(self, p: Array, *, k: int) -> tuple[Array, Array]:
-        p_vec = np.asarray(p, dtype=float).reshape(-1)
-        dof = int(self.trajectory_map.q_dim)
-        order = self._model_order()
-        motion = np.zeros((dof * order,), dtype=float)
-        dmotion_dp = np.zeros((dof * order, int(self.trajectory_map.p_dim)), dtype=float)
-
-        for deriv_order, traj in self.trajectory_derivative_maps.items():
-            if deriv_order >= order:
-                continue
-            q_r = np.asarray(traj.q_at(p_vec, k), dtype=float).reshape(-1)
-            J_r = np.asarray(traj.dqdp_at(k), dtype=float)
-            if q_r.size != dof:
-                raise ValueError(
-                    "KotsTrajectoryStateBuilder: derivative map q size mismatch. "
-                    f"order={deriv_order}, expected {dof}, got {q_r.size}."
-                )
-            if J_r.shape != (dof, self.trajectory_map.p_dim):
-                raise ValueError(
-                    "KotsTrajectoryStateBuilder: derivative map jacobian shape mismatch. "
-                    f"order={deriv_order}, expected {(dof, self.trajectory_map.p_dim)}, got {J_r.shape}."
-                )
-            motion[deriv_order::order] = q_r
-            dmotion_dp[deriv_order::order, :] = J_r
-
-        return motion, dmotion_dp
+        return compose_interleaved_motion_and_jac(
+            p,
+            trajectory_map=self.trajectory_map,
+            trajectory_derivative_maps=self.trajectory_derivative_maps,
+            order=self._model_order(),
+            k=k,
+            error_prefix="KotsTrajectoryStateBuilder",
+        )
 
     def _chain_param_jac(
         self,
@@ -905,29 +723,30 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
             return Jm
 
         if wrt == STATE_JACOBIAN_VAR:
-            if Jm.shape[1] == dqdp_k.shape[0]:
-                return Jm @ dqdp_k
-            if Jm.shape[1] == dmotiondp_k.shape[0]:
-                return Jm @ dmotiondp_k
-            # Some RoboKots dynamics Jacobians only depend on lower motion orders
-            # even when model.order is higher (e.g. torque at order=4 still uses q,dq,ddq).
+            cols = int(Jm.shape[1])
+            extra: tuple[Array, ...] = ()
             dof = self._model_dof()
             order = self._model_order()
-            cols = int(Jm.shape[1])
             if dof > 0 and cols % dof == 0 and dmotiondp_k.shape[0] == dof * order:
                 used_order = int(cols // dof)
-                if 1 <= used_order <= order:
-                    dmotion_reduced = np.zeros((cols, dmotiondp_k.shape[1]), dtype=float)
-                    for i in range(dof):
-                        src0 = i * order
-                        src1 = src0 + used_order
-                        dst0 = i * used_order
-                        dst1 = dst0 + used_order
-                        dmotion_reduced[dst0:dst1, :] = dmotiondp_k[src0:src1, :]
-                    return Jm @ dmotion_reduced
-            raise ValueError(
-                "KotsTrajectoryStateBuilder: Jacobian chain mismatch. "
-                f"J_raw has shape {Jm.shape}, dqdp has shape {dqdp_k.shape}, dmotiondp has shape {dmotiondp_k.shape}."
+                reduced = interleaved_motion_jacobian_used_order(
+                    dof=dof,
+                    order=order,
+                    used_order=used_order,
+                    dmotiondp=dmotiondp_k,
+                )
+                if reduced is not None:
+                    extra = (reduced,)
+            return chain_param_jacobian(
+                Jm,
+                q_var=self.q_var,
+                state_jacobian_var=STATE_JACOBIAN_VAR,
+                key=key,
+                jacobian_wrt=jacobian_wrt,
+                dqdp=dqdp_k,
+                dmotiondp=dmotiondp_k,
+                error_prefix="KotsTrajectoryStateBuilder",
+                extra_candidates=extra,
             )
 
         raise ValueError(
@@ -950,14 +769,12 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
             return None
 
         cols = int(dof * used_order)
-        dmotion_reduced = np.zeros((cols, dmotiondp_k.shape[1]), dtype=float)
-        for i in range(dof):
-            src0 = i * order
-            src1 = src0 + used_order
-            dst0 = i * used_order
-            dst1 = dst0 + used_order
-            dmotion_reduced[dst0:dst1, :] = dmotiondp_k[src0:src1, :]
-        return dmotion_reduced
+        return interleaved_motion_jacobian_used_order(
+            dof=dof,
+            order=order,
+            used_order=used_order,
+            dmotiondp=dmotiondp_k,
+        )
 
     def _preferred_motion_jacobian_used_order(self, key: StateKey | None) -> int | None:
         if key is None or getattr(key, "dtype", None) != DTYPE_DYNAMICS:
@@ -1003,15 +820,7 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
                 if dmotion_reduced is not None:
                     candidates.append(dmotion_reduced)
 
-        unique: list[Array] = []
-        seen_shapes: set[tuple[int, int]] = set()
-        for cand in candidates:
-            shape = (int(cand.shape[0]), int(cand.shape[1]))
-            if shape in seen_shapes:
-                continue
-            unique.append(cand)
-            seen_shapes.add(shape)
-        return tuple(unique)
+        return unique_jacobian_chain_candidates(candidates)
 
     def _param_jac_from_matvec(
         self,
@@ -1154,126 +963,41 @@ class KotsTrajectoryStateBuilder(KotsStateBuilder):
             dmotiondp_k=dmotiondp_k,
         )
 
-    def _expected_steps(self, *, time: Any = None) -> int:
-        steps = int(self.trajectory_map.steps)
-        if time is None or not hasattr(time, "N"):
-            return steps
-        try:
-            time_steps = int(time.N) + 1
-        except Exception:
-            return steps
-        if time_steps != steps:
-            raise ValueError(
-                "KotsTrajectoryStateBuilder: time grid mismatch. "
-                f"trajectory_map.steps={steps}, time steps={time_steps} (N+1)."
-            )
-        return steps
-
-    def _accept_required_key_for_traj(self, key: StateKey, *, steps: int) -> bool:
-        if not isinstance(key, StateKey):
-            return False
-        k = int(getattr(key, "k", -1))
-        if k < 0 or k >= steps:
-            return False
-        dtype = getattr(key, "dtype", None)
-        if not isinstance(dtype, str) or dtype == "":
-            return False
-        owner = getattr(key, "owner", None)
-        owner_type = getattr(owner, "owner_type", None)
-        owner_name = getattr(owner, "owner_name", None)
-        if not isinstance(owner_type, str) or owner_type == "":
-            return False
-        if not isinstance(owner_name, str) or owner_name == "":
-            return False
-        field = getattr(key, "field", None)
-        if not isinstance(field, str) or field == "":
-            return False
-        return True
-
-    def _is_param_jac_key(self, key: StateKey) -> bool:
-        field = getattr(key, "field", None)
-        if not isinstance(field, str) or field == "":
-            return False
-        try:
-            _base, var = split_jac_field(field)
-        except ValueError:
-            return False
-        return var == self.q_var
-
-    def build_state(
+    def _evaluate_trajectory_entry(
         self,
-        x_all: Array,
         *,
-        pack: Any = None,
-        time: Any = None,
-        required: Iterable[StateKey] | None = None,
-    ) -> dict[StateKey, Any]:
-        if required is None:
-            return {}
-
-        steps = self._expected_steps(time=time)
-        p = self._extract_q(x_all, pack=pack)
-        if p.size != self.trajectory_map.p_dim:
-            raise ValueError(
-                "KotsTrajectoryStateBuilder: parameter size mismatch. "
-                f"Expected p_dim={self.trajectory_map.p_dim}, got {p.size}."
-            )
-
-        grouped: dict[int, list[tuple[StateKey, Any]]] = {}
-        for key in required:
-            if not self._accept_required_key_for_traj(key, steps=steps):
-                continue
-            route = self._route_for_key(key)
-            if route is None:
-                continue
-            entry = self._dispatch.get(route, None)
-            if entry is None:
-                continue
-            grouped.setdefault(int(key.k), []).append((key, entry))
-
-        out: dict[StateKey, Any] = {}
-        for k in sorted(grouped.keys()):
-            q_k = self.trajectory_map.q_at(p, k)
-            dqdp_k = self.trajectory_map.dqdp_at(k)
-            motion_k, dmotiondp_k = self._compose_motion_and_jac(p, k=k)
-            self._update_kinematics(motion_k)
-
-            for key, entry in grouped[k]:
-                state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
-                is_param_jac = self._is_param_jac_key(key)
-                value_from_matvec = False
-                if is_param_jac and self._should_use_param_jacobian_mul(
+        key: StateKey,
+        entry: Any,
+        state_ref: Any,
+        q_k: Array,
+        dqdp_k: Array,
+        dmotiondp_k: Array,
+    ) -> Any:
+        is_param_jac = self._is_param_jac_key(key)
+        if is_param_jac and self._should_use_param_jacobian_mul(
+            key=key,
+            state_ref=state_ref,
+            dqdp_k=dqdp_k,
+            dmotiondp_k=dmotiondp_k,
+        ):
+            try:
+                return self._param_jac_from_matvec(
                     key=key,
                     state_ref=state_ref,
+                    jacobian_wrt=entry.jacobian_wrt,
                     dqdp_k=dqdp_k,
                     dmotiondp_k=dmotiondp_k,
-                ):
-                    try:
-                        value = self._param_jac_from_matvec(
-                            key=key,
-                            state_ref=state_ref,
-                            jacobian_wrt=entry.jacobian_wrt,
-                            dqdp_k=dqdp_k,
-                            dmotiondp_k=dmotiondp_k,
-                        )
-                        value_from_matvec = True
-                    except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
-                        value = entry.handler(q_k, key, state_ref)
-                else:
-                    value = entry.handler(q_k, key, state_ref)
-
-                if is_param_jac and not value_from_matvec:
-                    value = self._chain_param_jac(
-                        value,
-                        key=key,
-                        jacobian_wrt=entry.jacobian_wrt,
-                        dqdp_k=dqdp_k,
-                        dmotiondp_k=dmotiondp_k,
-                    )
-
-                out[key] = value
-
-        return out
+                )
+            except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                pass
+        return super()._evaluate_trajectory_entry(
+            key=key,
+            entry=entry,
+            state_ref=state_ref,
+            q_k=q_k,
+            dqdp_k=dqdp_k,
+            dmotiondp_k=dmotiondp_k,
+        )
 
 
 __all__ = [
