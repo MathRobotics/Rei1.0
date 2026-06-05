@@ -1,12 +1,12 @@
 [time]
-N = 20
-dt = 0.1
+N = 200
+dt = 0.01
 
 [trajectory]
 type = "bspline"
 var = "p"
-degree = 4
-num_ctrl_points = 8
+degree = 5
+num_ctrl_points = 50
 
 [opt_vals.trajectory_params.init]
 fill = 0.0
@@ -14,25 +14,26 @@ fill = 0.0
 [[terms]]
 name = "q_init"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
-state = "coord.total_joint.robot.q"
-var = "trajectory_params"
+quantity = "joint_angles"
 at = 0
-target = [1.57, 0.0]
-attrs = { plot = { type = "state_traj", name = "joint_q" } }
+target = { fill = 1.57 }
+plot = "joint_q"
 
 [[terms]]
 name = "q_terminal"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
-state = "coord.total_joint.robot.q"
-var = "trajectory_params"
+quantity = "joint_angles"
 at = "last"
-target = [-1.57, 0.0]
+target = { fill = -1.57 }
 
 [[terms]]
 name = "qdot_init"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
 quantity = "joint_velocities"
 at = 0
@@ -41,18 +42,32 @@ target = { fill = 0.0 }
 [[terms]]
 name = "qdot_terminal"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
 quantity = "joint_velocities"
 at = "last"
 target = { fill = 0.0 }
 
 [[terms]]
+name = "joint_q_bounds"
+kind = "ineq"
+weight = 1e5
+quantity = "joint_angles"
+bounds = { lower = { fill = -3.14159 }, upper = { fill = 3.14159 } }
+
+[[terms]]
 name = "qdot_traj_regularization"
-weight = 1e-3
+weight = 1e-4
 quantity = "joint_velocities"
+
+[[terms]]
+name = "qddot_traj_regularization"
+weight = 1e-4
+quantity = "joint_accelerations"
 
 [[terms]]
 name = "torque_traj_regularization"
 weight = 1e-10
-attrs = { plot = { type = "state_traj", name = "joint_torque", owner_type = "total_joint", owner_name = "robot", dtype = "dynamics", field = "torque" } }
-residual = { op = "stack", range = { k0 = 0, k1 = "last" }, inner = { state = "dynamics.total_joint.robot.torque", var = "trajectory_params" } }
+plot = { name = "joint_torque", stride = 50 }
+quantity = "joint_torques"
+stride = 50

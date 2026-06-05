@@ -14,52 +14,46 @@ fill = 0.0
 [[terms]]
 name = "q_init"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
-state = "coord.total_joint.robot.q"
-var = "trajectory_params"
+quantity = "joint_angles"
 at = 0
 target = { fill = 1.57 }
-attrs = { nullspace_eq = true, plot = { type = "state_traj", name = "joint_q" } }
+plot = "joint_q"
 
 [[terms]]
 name = "q_terminal"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
-state = "coord.total_joint.robot.q"
-var = "trajectory_params"
+quantity = "joint_angles"
 at = "last"
 target = { fill = -1.57 }
-attrs = { nullspace_eq = true }
 
 [[terms]]
 name = "qdot_init"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
 quantity = "joint_velocities"
 at = 0
 target = { fill = 0.0 }
-attrs = { nullspace_eq = true }
 
 [[terms]]
 name = "qdot_terminal"
 kind = "eq"
+enforce = "nullspace"
 weight = 100.0
 quantity = "joint_velocities"
 at = "last"
 target = { fill = 0.0 }
-attrs = { nullspace_eq = true }
 
 [[terms]]
-name = "joint_q_upper_violation"
+name = "joint_q_bounds"
 kind = "ineq"
 weight = 1e5
-residual = { op = "hinge", base = { op = "sub", name = "joint_q_minus_qmax", a = { quantity = "joint_angles" }, b = { const_repeat = { fill = 3.14159 }, name = "joint_q_max", var = "trajectory_params" } } }
-
-[[terms]]
-name = "joint_q_lower_violation"
-kind = "ineq"
-weight = 1e5
-residual = { op = "hinge", base = { op = "sub", name = "joint_qmin_minus_q", a = { const_repeat = { fill = -3.14159 }, name = "joint_q_min", var = "trajectory_params" }, b = { quantity = "joint_angles" } } }
+quantity = "joint_angles"
+bounds = { lower = { fill = -3.14159 }, upper = { fill = 3.14159 } }
 
 [[terms]]
 name = "qdot_traj_regularization"
@@ -70,3 +64,10 @@ quantity = "joint_velocities"
 name = "qddot_traj_regularization"
 weight = 1e-4
 quantity = "joint_accelerations"
+
+[[terms]]
+name = "torque_traj_regularization"
+weight = 1e-10
+plot = { name = "joint_torque", stride = 50 }
+quantity = "joint_torques"
+stride = 50
