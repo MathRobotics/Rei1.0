@@ -156,13 +156,47 @@ kind = "eq"
 `attrs` は自由に使えます。よくある用途:
 
 - `group = "objective"` のような後段フィルタ用タグ
-- `nullspace_eq = true` のような reduction 用タグ
-- `plot = ...` のような可視化設定
+
+プロットしたい term には term 直下に `plot` を書けます。state term なら
+state key は式から推論されます。
+
+```toml
+[[terms]]
+name = "q_init"
+kind = "eq"
+quantity = "joint_angles"
+at = 0
+target = { fill = 1.57 }
+plot = "joint_q"
+```
+
+backend が計算する関節トルクも quantity として書けます。
+
+```toml
+[[terms]]
+name = "torque_traj_regularization"
+weight = 1e-10
+quantity = "joint_torques"
+stride = 50
+plot = { name = "joint_torque", stride = 50 }
+```
+
+等式制約を nullspace reduction で厳密に消す対象にしたい場合は、
+term 直下に `enforce = "nullspace"` を書きます。
+
+```toml
+[[terms]]
+name = "qdot_init"
+kind = "eq"
+enforce = "nullspace"
+quantity = "joint_velocities"
+at = 0
+target = { fill = 0.0 }
+```
 
 補足:
 
-- `expr` / `cost` / `attrs` / `constraint` 以外の term 直下キーは `attrs` に取り込まれます
-- ただし読みやすさのため、メタデータは最初から `attrs` に寄せるのを推奨します
+- `enforce` は内部では `attrs.enforce` に取り込まれます
 - `constraint` は term の式そのものを変えるものではなく、constraint capability や KKT / reduction 系が参照する metadata です
 - `solve()` の残差最小化では、constraint term も通常の term と同じく residual + cost として組み立てられます
 
@@ -300,6 +334,7 @@ type = "stack"
 [terms.expr.range]
 k0 = 0
 k1 = "last"
+stride = 10
 
 [terms.expr.inner]
 type = "get_state"
@@ -314,7 +349,27 @@ field = "torque"
 var = "p"
 ```
 
-### 6. `hinge`
+`stride` は任意です。未指定なら 1 で、全ステップを評価します。
+
+### 6. `vstack`
+
+複数の式をそのまま縦に連結します。時間範囲を展開する `stack` と違い、
+`parts` に書いた式だけを評価します。
+
+```toml
+[terms.expr]
+type = "vstack"
+
+[[terms.expr.parts]]
+type = "get_var"
+var = "q"
+
+[[terms.expr.parts]]
+type = "get_var"
+var = "dq"
+```
+
+### 7. `hinge`
 
 `max(base, 0)` を返します。上限/下限制約違反の表現に向いています。
 
@@ -326,7 +381,7 @@ type = "hinge"
 type = "sub"
 ```
 
-### 7. `get_traj_var`
+### 8. `get_traj_var`
 
 `[trajectory]` から作られる軌道 `q(k)` やその導関数を読みます。軌道最適化の中心です。
 
@@ -353,7 +408,7 @@ k = "last"
 `var` を省略した場合は、まず `[trajectory].var` が使われます。  
 `[trajectory].var` も無い場合は、変数が 1 個だけのときに限ってその変数名が使われます。
 
-### 8. `const_repeat`
+### 9. `const_repeat`
 
 1 ステップ分のベクトルを全時刻に繰り返します。
 
@@ -373,7 +428,7 @@ value = { fill = 1.0 }
 `value = { fill = ... }` を使う場合は、`segment_dim` / `dim` を与えるか、
 `[trajectory]` から 1 ステップ次元を推定できる必要があります。
 
-### 9. `time_diff`
+### 10. `time_diff`
 
 時間方向の差分を取ります。`[y(1)-y(0), y(2)-y(1), ...]` を返します。
 
@@ -825,62 +880,29 @@ w = 100.0
 
 ### 3. 不等式制約として入れる
 
-一方向の制約は、まず violation が 0 になれば feasible になる残差を作ります。
-上限・下限なら `hinge` が使いやすいです。
-
-上限制約 `q <= q_max`:
+上限・下限は `bounds` で書けます。これは内部では violation が 0 なら
+feasible になる `hinge` residual に展開されます。
 
 ```toml
 [[terms]]
-constraint = "ineq"
-
-[terms.expr]
-type = "hinge"
-
-[terms.expr.base]
-type = "sub"
-
-[terms.expr.base.a]
-type = "get_traj_var"
-var = "p"
-
-[terms.expr.base.b]
-type = "const_repeat"
-var = "p"
-value = { fill = 3.14159 }
-
-[terms.cost]
-type = "scalar_weight"
-w = 1e5
+name = "joint_q_bounds"
+kind = "ineq"
+quantity = "joint_angles"
+bounds = { lower = { fill = -3.14159 }, upper = { fill = 3.14159 } }
+weight = 1e5
 ```
 
-下限制約 `q >= q_min`:
+内部的には次の形と同じ意味です。
 
-```toml
-[[terms]]
-constraint = "ineq"
-
-[terms.expr]
-type = "hinge"
-
-[terms.expr.base]
-type = "sub"
-
-[terms.expr.base.a]
-type = "const_repeat"
-var = "p"
-value = { fill = -3.14159 }
-
-[terms.expr.base.b]
-type = "get_traj_var"
-var = "p"
-
-[terms.cost]
-type = "scalar_weight"
-w = 1e5
+```text
+vstack(
+  hinge(q - upper),
+  hinge(lower - q),
+)
 ```
 
-二側拘束 `q_min <= q <= q_max` は、この 2 項を並べれば表現できます。
+片側だけなら `bounds = { upper = ... }` または `bounds = { lower = ... }`
+だけでも使えます。
 
 ## 実務上の使い分け
 

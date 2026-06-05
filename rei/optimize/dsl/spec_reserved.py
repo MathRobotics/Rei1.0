@@ -54,6 +54,10 @@ class QuantityAlias:
     var: str | None = None
     derivative_order: int | None = None
     derivative_wrt: str | None = None
+    owner_type: str | None = None
+    owner_name: str | None = None
+    dtype: str | None = None
+    field: str | None = None
     description: str = ""
 
 
@@ -81,6 +85,16 @@ DEFAULT_QUANTITY_ALIASES: dict[str, QuantityAlias] = {
         derivative_wrt="time",
         description="Joint acceleration trajectory.",
     ),
+    "joint_torques": QuantityAlias(
+        name="joint_torques",
+        source="state_traj",
+        var="trajectory_params",
+        owner_type="total_joint",
+        owner_name="robot",
+        dtype="dynamics",
+        field="torque",
+        description="Joint torque trajectory computed by the robotics backend.",
+    ),
 }
 
 
@@ -107,9 +121,18 @@ def resolve_quantity(
     alias = aliases.get(name)
     if alias is None:
         raise ValueError(f"unknown quantity {name!r}.")
-    if alias.source != "trajectory":
-        raise ValueError(f"quantity {name!r} uses unsupported source {alias.source!r}.")
+    if alias.source == "trajectory":
+        return _resolve_trajectory_quantity(name, alias, merged_overrides)
+    if alias.source == "state_traj":
+        return _resolve_state_traj_quantity(name, alias, merged_overrides)
+    raise ValueError(f"quantity {name!r} uses unsupported source {alias.source!r}.")
 
+
+def _resolve_trajectory_quantity(
+    name: str,
+    alias: QuantityAlias,
+    merged_overrides: dict[str, Any],
+) -> dict[str, Any]:
     traj: dict[str, Any] = {}
     expr_name = merged_overrides.pop("name", None)
     if expr_name is not None:
@@ -130,6 +153,56 @@ def resolve_quantity(
         keys = ", ".join(sorted(str(k) for k in merged_overrides))
         raise ValueError(f"quantity {name!r} has unsupported override key(s): {keys}.")
     return {"traj": traj}
+
+
+def _resolve_state_traj_quantity(
+    name: str,
+    alias: QuantityAlias,
+    merged_overrides: dict[str, Any],
+) -> dict[str, Any]:
+    expr_name = merged_overrides.pop("name", name)
+    var = merged_overrides.pop("var", alias.var)
+    key: dict[str, Any] = {
+        "owner_type": merged_overrides.pop("owner_type", alias.owner_type),
+        "owner_name": merged_overrides.pop("owner_name", alias.owner_name),
+        "dtype": merged_overrides.pop("dtype", alias.dtype),
+        "field": merged_overrides.pop("field", alias.field),
+    }
+    for optional in ("frame", "rel_frame"):
+        value = merged_overrides.pop(optional, None)
+        if value is not None:
+            key[optional] = deepcopy(value)
+
+    missing = [k for k, v in key.items() if v is None]
+    if missing:
+        keys = ", ".join(missing)
+        raise ValueError(f"quantity {name!r} is missing state key field(s): {keys}.")
+
+    range_dsl: dict[str, Any] = {
+        "k0": deepcopy(merged_overrides.pop("k0", 0)),
+        "k1": deepcopy(merged_overrides.pop("k1", "last")),
+    }
+    if "stride" in merged_overrides:
+        range_dsl["stride"] = deepcopy(merged_overrides.pop("stride"))
+    if "at" in merged_overrides or "k" in merged_overrides:
+        k = deepcopy(merged_overrides.pop("at", merged_overrides.pop("k", None)))
+        range_dsl = {"k0": k, "k1": k}
+
+    if merged_overrides:
+        keys = ", ".join(sorted(str(k) for k in merged_overrides))
+        raise ValueError(f"quantity {name!r} has unsupported override key(s): {keys}.")
+
+    inner: dict[str, Any] = {
+        "state": key,
+    }
+    if var is not None:
+        inner["var"] = str(var)
+    return {
+        "op": "stack",
+        "name": str(expr_name),
+        "range": range_dsl,
+        "inner": inner,
+    }
 
 
 def resolve_opt_vals(

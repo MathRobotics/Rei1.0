@@ -110,6 +110,15 @@ def _normalize_term_indices(
 def _coerce_plot_specs(raw: Any, *, where: str, strict: bool) -> list[dict[str, Any]]:
     if raw is None:
         return []
+    if isinstance(raw, bool):
+        return [{}] if raw else []
+    if isinstance(raw, str):
+        name = raw.strip()
+        if name == "":
+            if strict:
+                raise ValueError(f"{where} must be non-empty when specified as a string.")
+            return []
+        return [{"name": name}]
     if isinstance(raw, Mapping):
         return [dict(raw)]
     if isinstance(raw, list):
@@ -218,7 +227,10 @@ def _resolve_ks(
     k1 = _parse_time_index(k1_raw, steps=steps, where=f"{where}.k1")
     if k1 < k0:
         raise ValueError(f"{where}: expected k0 <= k1, got k0={k0}, k1={k1}.")
-    return tuple(range(k0, k1 + 1))
+    stride = int(spec.get("stride", 1))
+    if stride <= 0:
+        raise ValueError(f"{where}.stride must be > 0, got {stride}.")
+    return tuple(range(k0, k1 + 1, stride))
 
 
 def _resolve_state_route(

@@ -152,11 +152,72 @@ def _convert_term(raw: Any, index: int, *, var_aliases: Mapping[str, str]) -> di
         out["constraint"] = {"kind": _canonical_constraint_kind(kind)}
 
     attrs = term.get("attrs", None)
+    attrs_out: dict[str, Any] = {}
     if attrs is not None:
         if not isinstance(attrs, Mapping):
             raise ValueError(f"spec.terms[{index}].attrs must be an object.")
-        out["attrs"] = deepcopy(dict(attrs))
+        attrs_out.update(deepcopy(dict(attrs)))
+    for key in _TERM_SHORTHAND_ATTR_KEYS:
+        if key in term:
+            value = term[key]
+            if key == "plot":
+                value = _convert_plot_metadata(value, term=term)
+            attrs_out[key] = deepcopy(value)
+    if attrs_out:
+        out["attrs"] = attrs_out
     return out
+
+
+def _convert_plot_metadata(raw: Any, *, term: Mapping[str, Any]) -> Any:
+    if "quantity" not in term:
+        return deepcopy(raw)
+
+    derivative_order = _quantity_derivative_order(term["quantity"])
+    if derivative_order is None:
+        return deepcopy(raw)
+
+    def convert_one(item: Any) -> Any:
+        if isinstance(item, bool):
+            if not item:
+                return False
+            return {
+                "type": "traj_derivative",
+                "derivative_order": int(derivative_order),
+            }
+        if isinstance(item, str):
+            name = item.strip()
+            if name == "":
+                return item
+            return {
+                "type": "traj_derivative",
+                "name": name,
+                "derivative_order": int(derivative_order),
+            }
+        if isinstance(item, Mapping):
+            out = deepcopy(dict(item))
+            out.setdefault("type", "traj_derivative")
+            if "derivative_order" not in out and "order" not in out:
+                out["derivative_order"] = int(derivative_order)
+            return out
+        return deepcopy(item)
+
+    if isinstance(raw, list):
+        return [convert_one(item) for item in raw]
+    return convert_one(raw)
+
+
+def _quantity_derivative_order(raw: Any) -> int | None:
+    try:
+        expanded = resolve_quantity(raw)
+    except Exception:
+        return None
+    traj = expanded.get("traj", None)
+    if not isinstance(traj, Mapping):
+        return None
+    order = traj.get("derivative", traj.get("derivative_order", None))
+    if order is None:
+        return None
+    return int(order)
 
 
 def _convert_residual(
@@ -181,6 +242,9 @@ def _convert_residual(
     if "op" in node or "type" in node:
         return _convert_op_node(node, name=name, where=where, var_aliases=var_aliases)
 
+    if "bounds" in node:
+        return _convert_bounds_node(node, name=name, where=where, var_aliases=var_aliases)
+
     target = node.get("target", node.get("equals", None))
     if target is not None:
         lhs = dict(node)
@@ -198,6 +262,100 @@ def _convert_residual(
         }
 
     return _convert_leaf(node, name=name, where=where, var_aliases=var_aliases)
+
+
+def _convert_bounds_node(
+    node: Mapping[str, Any],
+    *,
+    name: str,
+    where: str,
+    var_aliases: Mapping[str, str],
+) -> dict[str, Any]:
+    bounds_raw = node.get("bounds", None)
+    if not isinstance(bounds_raw, Mapping):
+        raise ValueError(f"{where}.bounds must be an object.")
+    bounds = mapping_as_dict(bounds_raw, where=f"{where}.bounds")
+
+    allowed = {"lower", "upper"}
+    unknown = sorted(str(k) for k in bounds if str(k) not in allowed)
+    if unknown:
+        raise ValueError(
+            f"{where}.bounds has unsupported key(s): {', '.join(unknown)}. "
+            "Use lower and/or upper."
+        )
+
+    subject_node = {
+        key: deepcopy(value)
+        for key, value in node.items()
+        if key not in ("bounds", "target", "equals")
+    }
+    if not subject_node:
+        raise ValueError(f"{where}.bounds requires a bounded quantity, state, trajectory, or variable.")
+
+    var = _node_var(subject_node, var_aliases=var_aliases)
+
+    parts: list[dict[str, Any]] = []
+    if "upper" in bounds:
+        subject = _convert_leaf(
+            subject_node,
+            name=_child_name(name, "upper_value"),
+            where=f"{where}.bounds.upper.value",
+            var_aliases=var_aliases,
+        )
+        upper = _const_expr(
+            bounds["upper"],
+            name=_child_name(name, "upper"),
+            var=var,
+            repeat=True,
+        )
+        parts.append(
+            {
+                "type": "hinge",
+                "name": _child_name(name, "upper_violation"),
+                "base": {
+                    "type": "sub",
+                    "name": _child_name(name, "upper_margin"),
+                    "a": subject,
+                    "b": upper,
+                },
+            }
+        )
+
+    if "lower" in bounds:
+        lower = _const_expr(
+            bounds["lower"],
+            name=_child_name(name, "lower"),
+            var=var,
+            repeat=True,
+        )
+        subject = _convert_leaf(
+            subject_node,
+            name=_child_name(name, "lower_value"),
+            where=f"{where}.bounds.lower.value",
+            var_aliases=var_aliases,
+        )
+        parts.append(
+            {
+                "type": "hinge",
+                "name": _child_name(name, "lower_violation"),
+                "base": {
+                    "type": "sub",
+                    "name": _child_name(name, "lower_margin"),
+                    "a": lower,
+                    "b": subject,
+                },
+            }
+        )
+
+    if not parts:
+        raise ValueError(f"{where}.bounds must define lower and/or upper.")
+    if len(parts) == 1:
+        return parts[0]
+    return {
+        "type": "vstack",
+        "name": name,
+        "parts": parts,
+    }
 
 
 def _convert_op_node(
@@ -277,8 +435,9 @@ def _convert_leaf(
             for key, value in node.items()
             if key not in ("quantity", "target", "equals")
         }
+        quantity_overrides.setdefault("name", name)
         expanded = resolve_quantity(node["quantity"], overrides=quantity_overrides)
-        return _convert_leaf(expanded, name=name, where=where, var_aliases=var_aliases)
+        return _convert_residual(expanded, name=name, where=where, var_aliases=var_aliases)
 
     if "var" in node and set(node.keys()).issubset({"type", "op", "name", "var"}):
         return {
@@ -355,6 +514,12 @@ _TERM_SHORTHAND_METADATA_KEYS = {
     "kind",
     "constraint",
     "attrs",
+    "enforce",
+    "plot",
+}
+_TERM_SHORTHAND_ATTR_KEYS = {
+    "enforce",
+    "plot",
 }
 _TERM_SHORTHAND_LEAF_KEYS = {
     "var",
@@ -365,6 +530,7 @@ _TERM_SHORTHAND_LEAF_KEYS = {
     "value",
     "const_repeat",
     "quantity",
+    "bounds",
     "target",
     "equals",
     "repeat",
@@ -373,6 +539,9 @@ _TERM_SHORTHAND_LEAF_KEYS = {
     "derivative",
     "derivative_order",
     "derivative_wrt",
+    "k0",
+    "k1",
+    "stride",
     "owner_type",
     "owner",
     "owner_name",

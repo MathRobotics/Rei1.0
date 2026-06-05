@@ -39,6 +39,7 @@ def register_stdlib(expr_register: ExprRegister) -> None:
     expr_register.register_expr("get_traj_var", build_get_traj_var)
     expr_register.register_expr("sub", build_sub)
     expr_register.register_expr("stack", build_stack)
+    expr_register.register_expr("vstack", build_vstack)
     expr_register.register_expr("hinge", build_hinge)
     expr_register.register_expr("time_diff", build_time_diff)
     expr_register.register_expr("component", build_component)
@@ -567,15 +568,28 @@ def build_stack(ctx, dsl):
     k1 = int(_resolve_time_index(r["k1"], ctx=ctx, where="stack.range.k1"))
     if k1 < k0:
         raise ValueError(f"stack.range: expected k0 <= k1, got k0={k0}, k1={k1}.")
+    stride = int(r.get("stride", 1))
+    if stride <= 0:
+        raise ValueError(f"stack.range.stride must be > 0, got {stride}.")
     inner = dsl["inner"]
     parts = []
-    for k in range(k0, k1 + 1):
+    for k in range(k0, k1 + 1, stride):
         inner_k = dict(inner)
         inner_k["k"] = k
         inner_k.setdefault("key", dict(inner.get("key", {})))
         inner_k["key"]["k"] = k
         parts.append(ctx.build_expr(inner_k))
     return StackExpr(name=dsl.get("name", "stack"), parts=parts)
+
+
+def build_vstack(ctx, dsl):
+    parts_raw = dsl.get("parts", None)
+    if not isinstance(parts_raw, list):
+        raise ValueError("vstack.parts must be a list.")
+    return StackExpr(
+        name=dsl.get("name", "vstack"),
+        parts=[ctx.build_expr(part) for part in parts_raw],
+    )
 
 
 def build_hinge(ctx, dsl):

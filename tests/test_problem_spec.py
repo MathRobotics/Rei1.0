@@ -87,6 +87,83 @@ def test_problem_spec_accepts_term_state_target_shorthand() -> None:
     }
 
 
+def test_problem_spec_preserves_enforce_metadata() -> None:
+    spec = {
+        "variables": {"q": {"dim": 2, "init": [0.0, 0.0]}},
+        "terms": [
+            {
+                "name": "q_init",
+                "kind": "eq",
+                "enforce": "nullspace",
+                "var": "q",
+                "target": [0.0, 0.0],
+            }
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0]["constraint"] == {"kind": "eq"}
+    assert dsl["terms"][0]["attrs"] == {"enforce": "nullspace"}
+
+
+def test_problem_spec_preserves_plot_metadata() -> None:
+    spec = {
+        "variables": {"q": {"dim": 1, "init": [0.0]}},
+        "terms": [
+            {
+                "name": "q_plot",
+                "state": "coord.total_joint.robot.q",
+                "var": "q",
+                "target": [0.0],
+                "plot": "joint_q",
+            }
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0]["attrs"] == {"plot": "joint_q"}
+
+
+def test_problem_spec_converts_quantity_plot_to_traj_derivative_metadata() -> None:
+    spec = {
+        "time": {"N": 3, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [
+            {
+                "name": "q_init",
+                "quantity": "joint_angles",
+                "at": 0,
+                "target": {"fill": 0.0},
+                "plot": "joint_q",
+            },
+            {
+                "name": "qdot_reg",
+                "quantity": "joint_velocities",
+                "plot": True,
+            },
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0]["attrs"] == {
+        "plot": {
+            "type": "traj_derivative",
+            "name": "joint_q",
+            "derivative_order": 0,
+        }
+    }
+    assert dsl["terms"][1]["attrs"] == {
+        "plot": {
+            "type": "traj_derivative",
+            "derivative_order": 1,
+        }
+    }
+
+
 def test_problem_spec_resolves_reserved_opt_vals() -> None:
     spec = {
         "opt_vals": {
@@ -198,6 +275,107 @@ def test_problem_spec_resolves_reserved_trajectory_quantities() -> None:
         "name": "q_upper_base_a",
         "var": "p",
         "derivative_order": 0,
+    }
+
+
+def test_problem_spec_converts_trajectory_quantity_bounds() -> None:
+    spec = {
+        "time": {"N": 3, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [
+            {
+                "name": "joint_q_bounds",
+                "kind": "ineq",
+                "quantity": "joint_angles",
+                "bounds": {
+                    "lower": {"fill": -3.14},
+                    "upper": {"fill": 3.14},
+                },
+                "weight": 1e5,
+            },
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+    expr = dsl["terms"][0]["expr"]
+
+    assert dsl["terms"][0]["constraint"] == {"kind": "ineq"}
+    assert expr["type"] == "vstack"
+    assert expr["name"] == "joint_q_bounds"
+    assert [part["name"] for part in expr["parts"]] == [
+        "joint_q_bounds_upper_violation",
+        "joint_q_bounds_lower_violation",
+    ]
+    assert expr["parts"][0]["base"] == {
+        "type": "sub",
+        "name": "joint_q_bounds_upper_margin",
+        "a": {
+            "type": "get_traj_var",
+            "name": "joint_q_bounds_upper_value",
+            "var": "p",
+            "derivative_order": 0,
+        },
+        "b": {
+            "type": "const_repeat",
+            "name": "joint_q_bounds_upper",
+            "value": {"fill": 3.14},
+            "var": "p",
+        },
+    }
+    assert expr["parts"][1]["base"] == {
+        "type": "sub",
+        "name": "joint_q_bounds_lower_margin",
+        "a": {
+            "type": "const_repeat",
+            "name": "joint_q_bounds_lower",
+            "value": {"fill": -3.14},
+            "var": "p",
+        },
+        "b": {
+            "type": "get_traj_var",
+            "name": "joint_q_bounds_lower_value",
+            "var": "p",
+            "derivative_order": 0,
+        },
+    }
+
+
+def test_problem_spec_converts_joint_torque_quantity() -> None:
+    spec = {
+        "time": {"N": 10, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [
+            {
+                "name": "torque_traj_regularization",
+                "quantity": "joint_torques",
+                "stride": 5,
+                "plot": {"name": "joint_torque", "stride": 5},
+                "weight": 1e-10,
+            },
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0]["attrs"] == {"plot": {"name": "joint_torque", "stride": 5}}
+    assert dsl["terms"][0]["expr"] == {
+        "type": "stack",
+        "name": "torque_traj_regularization",
+        "range": {"k0": 0, "k1": "last", "stride": 5},
+        "inner": {
+            "type": "get_state",
+            "name": "torque_traj_regularization_k",
+            "key": {
+                "k": 0,
+                "owner_type": "total_joint",
+                "owner_name": "robot",
+                "dtype": "dynamics",
+                "field": "torque",
+            },
+            "jac": {"var": "p"},
+        },
     }
 
 

@@ -109,8 +109,8 @@ at = 0
 target = { fill = 0.0 }
 ```
 
-The initial reserved trajectory quantities are `joint_angles`,
-`joint_velocities`, and `joint_accelerations`.
+The initial reserved quantities are `joint_angles`, `joint_velocities`,
+`joint_accelerations`, and backend-computed `joint_torques`.
 
 ## Canonical Namespace
 

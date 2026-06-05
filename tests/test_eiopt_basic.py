@@ -1800,6 +1800,36 @@ class TestReiBasic:
         assert {k.k for k in torque_d1_keys} == {0, 1, 2}
         assert {k.k for k in torque_d1_jac_keys} == {0, 1, 2}
 
+    def test_stack_get_state_supports_stride_range(self) -> None:
+        dsl = {
+            "time": {"N": 5, "dt": 0.1},
+            "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "stack",
+                        "range": {"k0": 0, "k1": "last", "stride": 2},
+                        "inner": {
+                            "type": "get_state",
+                            "key": {
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_DYNAMICS,
+                                "field": "torque",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        torque_keys = [k for k in runtime.required if k.field == "torque"]
+        torque_jac_keys = [k for k in runtime.required if k.field == "torque_J_p"]
+        assert {k.k for k in torque_keys} == {0, 2, 4}
+        assert {k.k for k in torque_jac_keys} == {0, 2, 4}
+
     def test_get_state_builder_supports_last_index(self) -> None:
         dsl = {
             "time": {"N": 2, "dt": 0.1},
