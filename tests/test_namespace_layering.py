@@ -157,6 +157,22 @@ class TestNamespaceLayering:
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module("rei.simplex_weight_solver")
 
+    def test_robotics_moved_modules_use_new_paths(self) -> None:
+        trajectory = importlib.import_module("rei.backends.state.trajectory")
+        jacobian_ops = importlib.import_module("rei.backends.state.jacobian_ops")
+        optional = importlib.import_module("rei.backends.optional")
+
+        assert hasattr(trajectory, "TrajectoryStateBuilderMixin")
+        assert hasattr(jacobian_ops, "JacobianOperator")
+        assert hasattr(optional, "import_optional_backend")
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("rei.backends.state.robotics.trajectory")
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("rei.backends.state.robotics.jacobian_ops")
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("rei.backends.state.robotics.optional")
+
     def test_removed_optimize_legacy_aliases(self) -> None:
         optimize_builder = importlib.import_module("rei.optimize.builder")
         assert not (hasattr(optimize_builder, "build_problem"))

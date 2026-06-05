@@ -6,8 +6,8 @@ from typing import Any
 import numpy as np
 
 from ....core.state_schema import torque_derivative_order
-from .jacobian_ops import as_2d_numeric_matrix, normalize_jvp_output
-from .optional import import_optional_backend, require_module_attrs
+from ..jacobian_ops import as_2d_numeric_matrix, normalize_jvp_output
+from ...optional import import_optional_backend, require_module_attrs
 
 Array = np.ndarray
 ROBOKOTS_TORQUE_DIFF_PATTERN = re.compile(r"^torque_diff([1-9][0-9]*)$")

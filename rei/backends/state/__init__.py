@@ -5,6 +5,8 @@ time. Import concrete modules directly, e.g.:
 
 - ``rei.backends.state.dispatch.template``
 - ``rei.backends.state.dispatch.composite``
+- ``rei.backends.state.trajectory``
+- ``rei.backends.state.jacobian_ops``
 - ``rei.backends.state.robotics.kots``
 - ``rei.backends.state.robotics.pinocchio``
 - ``rei.backends.state.vision.provider``
@@ -15,6 +17,8 @@ from __future__ import annotations
 
 __all__ = [
     "dispatch",
+    "trajectory",
+    "jacobian_ops",
     "robotics",
     "vision",
 ]
