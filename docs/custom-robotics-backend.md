@@ -12,7 +12,7 @@ Rei consumes backend state through:
 build_state(x_all, *, pack=None, time=None, required=None) -> dict[StateKey, Any]
 ```
 
-`RoboticsStateProvider` builds this function from callbacks:
+`RoboticsStateProvider` builds this function from backend method names:
 
 - `update_model(q, model, data)`: sync your backend model to the current `q`.
 - `resolve_state_ref(key, model, data)`: return a backend-native reference for a `StateKey`.
@@ -43,42 +43,39 @@ vector for that step.
 ```python
 import numpy as np
 
-from rei.backends.state.robotics import RobotFieldHandler, RoboticsStateProvider
+from rei.backends.state.robotics import RoboticsStateProvider
 from rei.optimize.builder import compile_nls_problem
 
 
-def update_robot(q, model, data):
-    del data
-    model.forward(q)
+class MyBackendAdapter:
+    def update(self, q, model, data):
+        del data
+        model.forward(q)
+
+    def ref(self, key, model, data):
+        del data
+        return model.frame(key.owner.owner_name)
+
+    def pos(self, q, key, frame):
+        del q, key
+        return np.asarray(frame.translation, dtype=float).reshape(3)
+
+    def pos_jac(self, q, key, frame):
+        del q, key
+        return np.asarray(frame.linear_jacobian, dtype=float)
 
 
-def resolve_state_ref(key, model, data):
-    del data
-    return {"frame": model.frame(key.owner.owner_name)}
-
-
-def ee_pos_value(q, key, state_ref):
-    del q, key
-    return np.asarray(state_ref["frame"].translation, dtype=float).reshape(3)
-
-
-def ee_pos_jac(q, key, state_ref):
-    del q, key
-    return np.asarray(state_ref["frame"].linear_jacobian, dtype=float)
-
-
-provider = RoboticsStateProvider(
+adapter = MyBackendAdapter()
+provider = RoboticsStateProvider.from_binding_table(
     model=my_robot_model,
     data={},
-    q_var="q",
-    kinematics_field_handlers={
-        "pos": RobotFieldHandler(
-            value_handler=ee_pos_value,
-            jac_handler=ee_pos_jac,
-        )
+    handler_owner=adapter,
+    update_model="update",
+    resolve_state_ref="ref",
+    bindings={
+        "kinematics.link.pos": "pos",
+        "kinematics.link.pos.J_q": "pos_jac",
     },
-    update_model=update_robot,
-    resolve_state_ref=resolve_state_ref,
 )
 
 runtime = compile_nls_problem(dsl, build_state=provider.build_state)
@@ -87,91 +84,63 @@ runtime = compile_nls_problem(dsl, build_state=provider.build_state)
 By default, the provider also registers `dtype="coord"`, `owner_type="total_joint"`,
 `field="q"` and its Jacobian `q_J_q`.
 
-## Field Binding Table
+## Binding Table
 
-For simple backends, you can list `StateKey` fields and method names instead of
-constructing `RobotFieldHandler` objects by hand:
-
-```python
-from rei.backends.state.robotics import RobotFieldBinding, RoboticsStateProvider
-
-
-class MyBackendAdapter:
-    def update(self, q, model, data):
-        model.forward(q)
-
-    def ref(self, key, model, data):
-        return model.frame(key.owner.owner_name)
-
-    def pos(self, q, key, frame):
-        del q, key
-        return frame.translation
-
-    def pos_jac(self, q, key, frame):
-        del q, key
-        return frame.linear_jacobian
-
-
-adapter = MyBackendAdapter()
-provider = RoboticsStateProvider.from_field_bindings(
-    model=my_robot_model,
-    data={},
-    handler_owner=adapter,
-    update_model="update",
-    resolve_state_ref="ref",
-    field_bindings=[
-        RobotFieldBinding(
-            dtype="kinematics",
-            owner_type="link",
-            field="pos",
-            value="pos",
-            jac="pos_jac",
-        ),
-    ],
-)
-```
-
-Each binding means:
-
-- `dtype`, `owner_type`, and `field` select the `StateKey` route.
-- `value` is the value method name or callable.
-- `jac` is the Jacobian method name or callable.
-- `jacobian_wrt` is optional; for single-step providers it defaults to `q_var`.
-
-`TrajectoryRoboticsStateProvider.from_field_bindings(...)` accepts the same
-binding list plus `trajectory_map`. For trajectory providers, bindings with a
-Jacobian default to `jacobian_wrt="state"`, so Rei chains them to `p` when the
-DSL requests fields like `pos_J_p`.
-
-For the shortest registration style, use name bindings. The keyword name is:
+The recommended registration style is a state-key to method-name table. The
+key format is:
 
 ```text
-<dtype>_<owner_type>_<field>
-<dtype>_<owner_type>_<field>_J_<var>
+<dtype>.<owner_type>.<field>
+<dtype>.<owner_type>.<field>.J_<var>
 ```
 
 Example:
 
 ```python
-provider = RoboticsStateProvider.from_name_bindings(
+provider = RoboticsStateProvider.from_binding_table(
     model=my_robot_model,
     data={},
     handler_owner=adapter,
     update_model="update",
     resolve_state_ref="ref",
-    kinematics_link_pos="pos",
-    kinematics_link_pos_J_q="pos_jac",
-    kinematics_link_rot="rot",
-    kinematics_link_rot_J_q="rot_jac",
-    dynamics_total_joint_torque="torque",
-    dynamics_total_joint_torque_J_q="torque_jac",
+    bindings={
+        "kinematics.link.pos": "pos",
+        "kinematics.link.pos.J_q": "pos_jac",
+        "kinematics.link.rot": "rot",
+        "kinematics.link.rot.J_q": "rot_jac",
+        "dynamics.total_joint.torque": "torque",
+        "dynamics.total_joint.torque.J_q": "torque_jac",
+    },
 )
 ```
 
-This is equivalent to writing `RobotFieldBinding(...)` entries, but is easier
-when you only need a compact state-to-method table. Known owner types in this
-compact form are `link`, `joint`, and `total_joint`; pass `owner_types=(...)`
-to support additional owner type names.
+This means:
+
+- `"kinematics.link.pos": "pos"` registers `adapter.pos(...)` for `pos`.
+- `"kinematics.link.pos.J_q": "pos_jac"` registers `adapter.pos_jac(...)` for `pos_J_q`.
+- `"dynamics.total_joint.torque": "torque"` registers `adapter.torque(...)` for `torque`.
+
+The same API accepts a small text table:
+
+```python
+provider = RoboticsStateProvider.from_binding_table(
+    model=my_robot_model,
+    data={},
+    handler_owner=adapter,
+    update_model="update",
+    resolve_state_ref="ref",
+    bindings="""
+    kinematics.link.pos = pos
+    kinematics.link.pos.J_q = pos_jac
+    """,
+)
+```
+
+Known owner types in this compact form are `link`, `joint`, and `total_joint`;
+pass `owner_types=(...)` to support additional owner type names.
+
+`RobotFieldBinding(...)` and `RobotFieldHandler(...)` are lower-level APIs for
+cases where the compact name table is not expressive enough.
 
 ## Handler Shapes
 
@@ -187,10 +156,10 @@ provider boundary.
 Use `jacobian_wrt=q_var` for single-step providers when the handler returns
 `d value / d q` directly. This is the default for `RoboticsStateProvider`.
 
-Use `RobotFieldHandler(jacobian_wrt="state")` when a Jacobian is with respect
-to backend state or motion and should be chained by a trajectory provider.
-For `TrajectoryRoboticsStateProvider`, this is the default for field handlers
-that provide a Jacobian and do not specify `jacobian_wrt`.
+Use `.J_state` in binding tables when a Jacobian is with respect to
+backend state or motion and should be chained by a trajectory provider.
+For `TrajectoryRoboticsStateProvider.from_binding_table(...)`, this is the
+recommended form for backend-space Jacobians.
 
 Use `jacobian_wrt=p_var` only when a trajectory handler already returns
 parameter-space Jacobians, such as `d value / d p`. In that case Rei will not
@@ -227,22 +196,21 @@ Use `TrajectoryRoboticsStateProvider` when the decision variable is a trajectory
 parameter vector `p` and states are requested at time index `k`.
 
 ```python
-from rei.backends.state.robotics import RobotFieldHandler, TrajectoryRoboticsStateProvider
+from rei.backends.state.robotics import TrajectoryRoboticsStateProvider
 
-provider = TrajectoryRoboticsStateProvider(
+provider = TrajectoryRoboticsStateProvider.from_binding_table(
     model=my_robot_model,
     data={},
     trajectory_map=trajectory_map,
     trajectory_derivative_maps=trajectory_derivative_maps,
+    handler_owner=adapter,
     p_var="p",
-    kinematics_field_handlers={
-        "pos": RobotFieldHandler(
-            value_handler=ee_pos_value,
-            jac_handler=ee_pos_jac,
-        )
+    update_model="update",
+    resolve_state_ref="ref",
+    bindings={
+        "kinematics.link.pos": "pos",
+        "kinematics.link.pos.J_state": "pos_jac",
     },
-    update_model=update_robot,
-    resolve_state_ref=resolve_state_ref,
 )
 ```
 
@@ -256,8 +224,8 @@ For trajectory providers:
 - `trajectory_derivative_maps={1: velocity_map, 2: acceleration_map}` is needed
   when dynamics handlers depend on velocity, acceleration, or higher derivatives.
 - every derivative map must have the same parameter dimension as `trajectory_map`.
-- dynamics handlers that return `d value / d motion` should use
-  `jacobian_wrt="state"`; this is the default in `TrajectoryRoboticsStateProvider`.
+- dynamics handlers that return `d value / d motion` should use binding keys
+  ending in `.J_state`.
 
 ## Motion Layouts
 
@@ -279,17 +247,16 @@ def update_motion_robot(q, motion, k, model, data):
     model.import_motion(motion)
 
 
-provider = TrajectoryRoboticsStateProvider(
+provider = TrajectoryRoboticsStateProvider.from_binding_table(
     model=my_robot_model,
     data={},
     trajectory_map=trajectory_map,
     trajectory_derivative_maps={1: velocity_map, 2: acceleration_map},
+    handler_owner=adapter,
     p_var="p",
-    dynamics_field_handlers={
-        "torque": RobotFieldHandler(
-            value_handler=torque_value,
-            jac_handler=torque_motion_jacobian,
-        )
+    bindings={
+        "dynamics.total_joint.torque": "torque",
+        "dynamics.total_joint.torque.J_state": "torque_motion_jacobian",
     },
     update_motion_model=update_motion_robot,
     motion_layout="stacked",
@@ -373,9 +340,8 @@ transpose the backend Jacobian before returning it. Rei expects rows to match
 the value vector.
 
 `TrajectoryRoboticsStateProvider` chains a Jacobian twice:
-set `RobotFieldHandler(jacobian_wrt=p_var)` only when the handler already
-returns `d value / d p`. Leave it unset, or use `jacobian_wrt="state"`, when the
-handler returns `d value / d q` or `d value / d motion`.
+use `.J_p` only when the handler already returns `d value / d p`. Use `.J_state`
+when the handler returns `d value / d q` or `d value / d motion`.
 
 Dynamics output has the right rows but wrong parameter columns:
 check that `trajectory_derivative_maps` use the same parameter vector as
@@ -402,7 +368,7 @@ Write a dedicated backend when:
 - you need special shape or frame conversions.
 
 Dedicated backends can still reuse `TrajectoryStateBuilderMixin`,
-`motion.py`, and `trajectory.py`.
+`robotics/motion.py`, `rei.backends.state.trajectory`, and `rei.backends.state.jacobian_ops`.
 
 ## Dedicated Backend Internals
 
@@ -415,10 +381,10 @@ through the builder. RoboKots uses this pattern with
 - `jvp(state_ref, cols)` returns `J @ cols`.
 - `vjp(state_ref, rhs)` returns `J.T @ rhs`.
 
-The shared protocols live in `rei.backends.state.robotics.jacobian_ops`:
+The shared protocols live in `rei.backends.state.jacobian_ops`:
 
 ```python
-from rei.backends.state.robotics.jacobian_ops import (
+from rei.backends.state.jacobian_ops import (
     DenseJacobianProvider,
     JvpProvider,
     VjpProvider,
@@ -429,7 +395,7 @@ For optional backend dependencies, use the same error style as the built-in
 backends:
 
 ```python
-from rei.backends.state.robotics.optional import import_optional_backend
+from rei.backends.optional import import_optional_backend
 
 backend = import_optional_backend(
     "my_robotics_backend",

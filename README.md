@@ -112,20 +112,37 @@ For custom robotics libraries, `RoboticsStateProvider` offers a callback-based
 adapter so you do not need to write a full backend class:
 
 ```python
-from rei.backends.state.robotics import RobotFieldHandler, RoboticsStateProvider
+from rei.backends.state.robotics import RoboticsStateProvider
 
-provider = RoboticsStateProvider(
+
+class MyBackendAdapter:
+    def update(self, q, model, data):
+        model.forward(q)
+
+    def ref(self, key, model, data):
+        return model.frame(key.owner.owner_name)
+
+    def pos(self, q, key, frame):
+        del q, key
+        return frame.translation
+
+    def pos_jac(self, q, key, frame):
+        del q, key
+        return frame.linear_jacobian
+
+
+adapter = MyBackendAdapter()
+
+provider = RoboticsStateProvider.from_binding_table(
     model=my_robot_model,
     data={},
-    q_var="q",
-    kinematics_field_handlers={
-        "pos": RobotFieldHandler(
-            value_handler=ee_pos_value,
-            jac_handler=ee_pos_jac,
-        )
+    handler_owner=adapter,
+    update_model="update",
+    resolve_state_ref="ref",
+    bindings={
+        "kinematics.link.pos": "pos",
+        "kinematics.link.pos.J_q": "pos_jac",
     },
-    update_model=lambda q, model, data: model.forward(q),
-    resolve_state_ref=lambda key, model, data: {"frame": model.frame(key.owner.owner_name)},
 )
 
 runtime = compile_nls_problem(dsl, build_state=provider.build_state)
