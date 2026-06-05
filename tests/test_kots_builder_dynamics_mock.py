@@ -391,10 +391,10 @@ class TestKotsTrajectoryDynamicsMock:
         np.testing.assert_allclose(J_world, expected, rtol=0.0, atol=1e-12)
 
     def test_kots_state_field_name_keeps_canonical_torque_derivative_orders(self) -> None:
-        assert _kots_state_mod.KotsStateBuilder._state_field_name("torque_d1") == "torque_d1"
-        assert _kots_state_mod.KotsStateBuilder._state_field_name("torque_d2") == "torque_d2"
+        assert _kots_state_mod.KotsAdapter.state_field_name("torque_d1") == "torque_d1"
+        assert _kots_state_mod.KotsAdapter.state_field_name("torque_d2") == "torque_d2"
         with pytest.raises(ValueError, match="unsupported field alias"):
-            _ = _kots_state_mod.KotsStateBuilder._state_field_name("tau_diff2")
+            _ = _kots_state_mod.KotsAdapter.state_field_name("tau_diff2")
 
     def test_kots_state_ref_backend_fallback_uses_torque_diff_for_derivative(self) -> None:
         original_state_type = _kots_state_mod.StateType

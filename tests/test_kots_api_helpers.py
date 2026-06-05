@@ -31,7 +31,7 @@ def _ensure_robokots_state_stub() -> None:
 
 _ensure_robokots_state_stub()
 kots_api = importlib.import_module("rei.backends.state.robotics.kots_api")
-optional = importlib.import_module("rei.backends.state.robotics.optional")
+optional = importlib.import_module("rei.backends.optional")
 
 
 class _StrictStateType:
