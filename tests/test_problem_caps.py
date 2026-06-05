@@ -4,11 +4,40 @@ import numpy as np
 import pytest
 
 from rei.optimize.builder import compile_nls_problem
+from rei.optimize.solver_problem import as_solver_problem
 from rei.optimize.solvers import solve, solve_gauss_newton
 from rei.problem import NLSRuntimeConstraintProblem, as_linearized_problem
 
 
 class TestProblemCapabilities:
+    def test_as_solver_problem_exposes_external_solver_callables(self) -> None:
+        dsl = {
+            "variables": [{"name": "x", "dim": 1, "init": [0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "name": "x_to_2",
+                        "a": {"type": "get_var", "var": "x"},
+                        "b": {"type": "const", "var": "x", "value": [2.0]},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+        problem = as_solver_problem(runtime)
+
+        assert problem.n_total == 1
+        assert np.allclose(problem.x0, np.array([0.0], dtype=float))
+        assert np.allclose(problem.residual(np.array([0.5], dtype=float)), np.array([-1.5], dtype=float))
+        assert np.allclose(problem.jacobian(np.array([0.5], dtype=float)), np.array([[1.0]], dtype=float))
+        assert problem.objective(np.array([0.5], dtype=float)) == pytest.approx(2.25)
+        assert np.allclose(problem.gradient(np.array([0.5], dtype=float)), np.array([-3.0], dtype=float))
+        f, g = problem.objective_and_gradient(np.array([2.0], dtype=float))
+        assert f == pytest.approx(0.0)
+        assert np.allclose(g, np.array([0.0], dtype=float))
+
     def test_as_linearized_problem_matches_runtime_linearize(self) -> None:
         dsl = {
             "variables": [{"name": "x", "dim": 1, "init": [2.0]}],

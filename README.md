@@ -264,6 +264,20 @@ print(out.timing)
 For `scipy_minimize`, `cyipopt`, and `liteopt`, unknown top-level option keys are
 forwarded to the backend. Options that belong to another solver are rejected.
 
+To connect your own solver, adapt the runtime without using `solve()`:
+
+```python
+from rei import as_solver_problem
+
+problem = as_solver_problem(runtime)
+
+x0 = problem.x0
+r = problem.residual(x0)
+J = problem.jacobian(x0)
+f = problem.objective(x0)
+g = problem.gradient(x0)
+```
+
 ## Examples
 
 Run examples from the repository root:

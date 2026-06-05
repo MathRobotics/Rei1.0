@@ -100,6 +100,7 @@ class TestNamespaceLayering:
         assert callable(as_linear_equation_problem)
         assert callable(as_constraint_problem)
         assert callable(as_project_problem)
+        assert callable(rei.as_solver_problem)
         assert callable(compile_trajectory_problem_with_adapter)
         assert callable(rei.inspect_trajectory_problem_backend)
         assert callable(rei.compile_trajectory_ioc_problem)

@@ -54,6 +54,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "compile_nls_problem": ("rei.optimize.builder", "compile_nls_problem"),
     "compile_nls_problem_spec": ("rei.optimize.builder", "compile_nls_problem_spec"),
     "compile_nls_problem_spec_toml": ("rei.optimize.builder", "compile_nls_problem_spec_toml"),
+    "SolverProblem": ("rei.optimize.solver_problem", "SolverProblem"),
+    "as_solver_problem": ("rei.optimize.solver_problem", "as_solver_problem"),
     "load_problem_toml": ("rei.optimize.builder", "load_problem_toml"),
     "load_problem_spec_toml": ("rei.optimize.dsl", "load_problem_spec_toml"),
     "problem_spec_to_dsl": ("rei.optimize.dsl", "problem_spec_to_dsl"),
