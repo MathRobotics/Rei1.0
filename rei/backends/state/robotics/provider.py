@@ -10,21 +10,29 @@ from ....core.state_cache import StateKey
 from ....core.state_schema import DTYPE_COORD, DTYPE_DYNAMICS, DTYPE_KINEMATICS, canonical_field_name
 from ....core.trajectory import TrajectoryMap
 from ..dispatch.template import BackendDispatchStateBuilder, DispatchHandler
-from .trajectory import (
+from ..trajectory import (
     chain_param_jacobian,
     compose_interleaved_motion_and_jac,
     compose_stacked_motion_and_jac,
     TrajectoryStateBuilderMixin,
     validate_trajectory_derivative_maps,
 )
+from .binding_table import (
+    BindingTable,
+    DEFAULT_NAME_BINDING_OWNER_TYPES,
+    RobotFieldBinding,
+    register_robot_binding_table,
+    register_robot_field_bindings,
+    resolve_handler_ref,
+    robot_field_bindings_from_table,
+)
+from .contract import assert_provider_contract, assert_trajectory_provider_contract
 
 Array = np.ndarray
 RobotUpdateFn = Callable[[Array, Any, Any], None]
 TrajectoryRobotUpdateFn = Callable[[Array, Array, int, Any, Any], None]
 RobotStateRefResolver = Callable[[StateKey, Any, Any], Any]
-HandlerRef = str | DispatchHandler
 STATE_JACOBIAN_VAR = "state"
-DEFAULT_NAME_BINDING_OWNER_TYPES = ("total_joint", "link", "joint")
 
 
 def _state_key_label(key: StateKey | None) -> str:
@@ -84,41 +92,6 @@ class RobotFieldHandler:
     jacobian_wrt: str | None = None
 
 
-@dataclass(frozen=True)
-class RobotFieldBinding:
-    """Declarative field binding for simple custom robotics backends.
-
-    `value` and `jac` can be callables or method names on a handler object.
-    """
-
-    dtype: str
-    owner_type: str
-    field: str
-    value: HandlerRef
-    jac: HandlerRef | None = None
-    jacobian_wrt: str | None = None
-
-
-def _resolve_handler_ref(
-    owner: Any,
-    ref: HandlerRef,
-    *,
-    role: str,
-    field: str | None = None,
-) -> DispatchHandler:
-    if callable(ref):
-        return ref
-    if not isinstance(ref, str) or ref == "":
-        raise TypeError(f"{role}: handler reference must be a callable or non-empty method name.")
-    if owner is None:
-        raise ValueError(f"{role}: handler_owner is required when using method name {ref!r}.")
-    fn = getattr(owner, ref, None)
-    if not callable(fn):
-        field_msg = "" if field is None else f" for field {field!r}"
-        raise ValueError(f"{role}: handler_owner does not expose callable method {ref!r}{field_msg}.")
-    return fn
-
-
 def _resolve_optional_callable_ref(
     owner: Any,
     ref: str | Callable[..., Any] | None,
@@ -137,121 +110,6 @@ def _resolve_optional_callable_ref(
     if not callable(fn):
         raise ValueError(f"{role}: handler_owner does not expose callable method {ref!r}.")
     return fn
-
-
-def _merge_name_binding_methods(
-    field_methods: Mapping[str, HandlerRef] | None,
-    field_method_kwargs: Mapping[str, HandlerRef],
-) -> dict[str, HandlerRef]:
-    out: dict[str, HandlerRef] = {}
-    if field_methods is not None:
-        for name, ref in field_methods.items():
-            out[str(name)] = ref
-    for name, ref in field_method_kwargs.items():
-        name_str = str(name)
-        if name_str in out:
-            raise ValueError(f"duplicate name binding for {name_str!r}.")
-        out[name_str] = ref
-    return out
-
-
-def _parse_name_binding_key(
-    name: str,
-    *,
-    owner_types: Sequence[str],
-) -> tuple[str, str, str, str | None]:
-    name_str = str(name)
-    if name_str == "":
-        raise ValueError("name binding keys must be non-empty.")
-
-    if "_J_" in name_str:
-        base, jacobian_wrt = name_str.rsplit("_J_", 1)
-        if jacobian_wrt == "":
-            raise ValueError(f"name binding {name_str!r} has an empty Jacobian variable.")
-    else:
-        base = name_str
-        jacobian_wrt = None
-
-    for dtype in (DTYPE_KINEMATICS, DTYPE_DYNAMICS, DTYPE_COORD):
-        prefix = f"{dtype}_"
-        if not base.startswith(prefix):
-            continue
-        rest = base[len(prefix) :]
-        for owner_type in sorted((str(v) for v in owner_types), key=len, reverse=True):
-            owner_prefix = f"{owner_type}_"
-            if not rest.startswith(owner_prefix):
-                continue
-            field = rest[len(owner_prefix) :]
-            if field == "":
-                raise ValueError(f"name binding {name_str!r} has an empty field.")
-            return dtype, owner_type, canonical_field_name(field), jacobian_wrt
-
-    allowed_owners = ", ".join(repr(str(v)) for v in owner_types)
-    raise ValueError(
-        f"invalid robotics name binding {name_str!r}. Expected "
-        f"`<dtype>_<owner_type>_<field>` or `<dtype>_<owner_type>_<field>_J_<var>`; "
-        f"dtype must be one of {DTYPE_KINEMATICS!r}, {DTYPE_DYNAMICS!r}, {DTYPE_COORD!r}; "
-        f"known owner types: {allowed_owners}."
-    )
-
-
-def robot_field_bindings_from_names(
-    field_methods: Mapping[str, HandlerRef] | None = None,
-    *,
-    owner_types: Sequence[str] = DEFAULT_NAME_BINDING_OWNER_TYPES,
-    default_jacobian_wrt: str | None = None,
-    **field_method_kwargs: HandlerRef,
-) -> tuple[RobotFieldBinding, ...]:
-    """Convert compact name bindings into `RobotFieldBinding` objects.
-
-    Example keys:
-      - `kinematics_link_pos`
-      - `kinematics_link_pos_J_q`
-      - `dynamics_total_joint_torque_J_state`
-    """
-
-    methods = _merge_name_binding_methods(field_methods, field_method_kwargs)
-    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
-    order: list[tuple[str, str, str]] = []
-    for name, ref in methods.items():
-        dtype, owner_type, field, jacobian_wrt = _parse_name_binding_key(
-            name,
-            owner_types=owner_types,
-        )
-        route = (dtype, owner_type, field)
-        if route not in grouped:
-            grouped[route] = {"value": None, "jac": None, "jacobian_wrt": default_jacobian_wrt}
-            order.append(route)
-        entry = grouped[route]
-        if jacobian_wrt is None:
-            if entry["value"] is not None:
-                raise ValueError(f"duplicate value binding for {name!r}.")
-            entry["value"] = ref
-            continue
-        if entry["jac"] is not None:
-            raise ValueError(f"duplicate Jacobian binding for {name!r}.")
-        entry["jac"] = ref
-        entry["jacobian_wrt"] = jacobian_wrt
-
-    bindings: list[RobotFieldBinding] = []
-    for dtype, owner_type, field in order:
-        entry = grouped[(dtype, owner_type, field)]
-        if entry["value"] is None:
-            raise ValueError(
-                "name bindings require a value binding for every Jacobian binding. "
-                f"Missing value for {dtype}_{owner_type}_{field}."
-            )
-        bindings.append(
-            RobotFieldBinding(
-                dtype=dtype,
-                owner_type=owner_type,
-                field=field,
-                value=entry["value"],
-                jac=entry["jac"],
-                jacobian_wrt=entry["jacobian_wrt"],
-            )
-        )
-    return tuple(bindings)
 
 
 class RoboticsStateProvider(BackendDispatchStateBuilder):
@@ -417,13 +275,13 @@ class RoboticsStateProvider(BackendDispatchStateBuilder):
         return provider
 
     @classmethod
-    def from_name_bindings(
+    def from_binding_table(
         cls,
         model: Any,
         data: Any,
         *,
+        bindings: BindingTable,
         handler_owner: Any = None,
-        field_methods: Mapping[str, HandlerRef] | None = None,
         owner_types: Sequence[str] = DEFAULT_NAME_BINDING_OWNER_TYPES,
         q_var: str = "q",
         update_model: str | RobotUpdateFn | None = None,
@@ -431,17 +289,15 @@ class RoboticsStateProvider(BackendDispatchStateBuilder):
         register_joint_q: bool = True,
         allow_nonzero_k: bool = False,
         validate_handler_shapes: bool = True,
-        **field_method_kwargs: HandlerRef,
     ) -> RoboticsStateProvider:
-        """Build a provider from compact names such as `kinematics_link_pos`."""
+        """Build a provider from a dotted state-key to method-name table."""
 
         return cls.from_field_bindings(
             model,
             data,
-            field_bindings=robot_field_bindings_from_names(
-                field_methods,
+            field_bindings=robot_field_bindings_from_table(
+                bindings,
                 owner_types=owner_types,
-                **field_method_kwargs,
             ),
             handler_owner=handler_owner,
             q_var=q_var,
@@ -464,7 +320,7 @@ class RoboticsStateProvider(BackendDispatchStateBuilder):
                     "RoboticsStateProvider.register_field_bindings: entries must be RobotFieldBinding, "
                     f"got {type(binding).__name__!r}."
                 )
-            value_handler = _resolve_handler_ref(
+            value_handler = resolve_handler_ref(
                 handler_owner,
                 binding.value,
                 role="RobotFieldBinding.value",
@@ -472,7 +328,7 @@ class RoboticsStateProvider(BackendDispatchStateBuilder):
             )
             jac_handler = None
             if binding.jac is not None:
-                jac_handler = _resolve_handler_ref(
+                jac_handler = resolve_handler_ref(
                     handler_owner,
                     binding.jac,
                     role="RobotFieldBinding.jac",
@@ -868,14 +724,14 @@ class TrajectoryRoboticsStateProvider(TrajectoryStateBuilderMixin, RoboticsState
         return provider
 
     @classmethod
-    def from_name_bindings(
+    def from_binding_table(
         cls,
         model: Any,
         data: Any,
         *,
         trajectory_map: TrajectoryMap,
+        bindings: BindingTable,
         handler_owner: Any = None,
-        field_methods: Mapping[str, HandlerRef] | None = None,
         owner_types: Sequence[str] = DEFAULT_NAME_BINDING_OWNER_TYPES,
         trajectory_derivative_maps: Mapping[int, TrajectoryMap] | None = None,
         p_var: str = "p",
@@ -887,19 +743,17 @@ class TrajectoryRoboticsStateProvider(TrajectoryStateBuilderMixin, RoboticsState
         motion_order: int | None = None,
         derivative_orders: Sequence[int] = (0, 1, 2),
         validate_handler_shapes: bool = True,
-        **field_method_kwargs: HandlerRef,
     ) -> TrajectoryRoboticsStateProvider:
-        """Build a trajectory provider from compact names such as `kinematics_link_pos`."""
+        """Build a trajectory provider from a dotted state-key to method-name table."""
 
         return cls.from_field_bindings(
             model,
             data,
             trajectory_map=trajectory_map,
-            field_bindings=robot_field_bindings_from_names(
-                field_methods,
+            field_bindings=robot_field_bindings_from_table(
+                bindings,
                 owner_types=owner_types,
                 default_jacobian_wrt=STATE_JACOBIAN_VAR,
-                **field_method_kwargs,
             ),
             handler_owner=handler_owner,
             trajectory_derivative_maps=trajectory_derivative_maps,
@@ -1022,94 +876,6 @@ class TrajectoryRoboticsStateProvider(TrajectoryStateBuilderMixin, RoboticsState
         )
 
 
-def _assert_numeric_array(
-    value: Any,
-    *,
-    key: StateKey,
-    expected_shape: tuple[int, ...] | None,
-    helper_name: str,
-) -> Array:
-    try:
-        arr = np.asarray(value, dtype=float)
-    except (TypeError, ValueError) as exc:
-        raise AssertionError(
-            f"{helper_name}: provider returned non-numeric data for key=({_state_key_label(key)})."
-        ) from exc
-
-    if expected_shape is not None and tuple(arr.shape) != tuple(expected_shape):
-        raise AssertionError(
-            f"{helper_name}: shape mismatch for key=({_state_key_label(key)}). "
-            f"Expected shape={tuple(expected_shape)}, actual shape={tuple(arr.shape)}."
-        )
-    return arr
-
-
-def assert_provider_contract(
-    provider: Any,
-    sample_q: Any,
-    expected_fields: Sequence[StateKey],
-    *,
-    expected_shapes: Mapping[StateKey, tuple[int, ...]] | None = None,
-) -> dict[StateKey, Array]:
-    """Assert that a single-step robotics provider satisfies Rei's state contract.
-
-    This helper is intentionally pytest-independent so custom backend authors can
-    copy it into their own test suites or call it from any test framework.
-    """
-
-    keys = list(expected_fields)
-    if len(keys) == 0:
-        raise AssertionError("assert_provider_contract: expected_fields must be non-empty.")
-    if not hasattr(provider, "accepts") or not hasattr(provider, "build_state"):
-        raise AssertionError("assert_provider_contract: provider must expose accepts() and build_state().")
-
-    unsupported = [key for key in keys if not bool(provider.accepts(key))]
-    if unsupported:
-        labels = ", ".join(_state_key_label(key) for key in unsupported)
-        raise AssertionError(f"assert_provider_contract: provider does not accept expected keys: {labels}.")
-
-    out = provider.build_state(np.asarray(sample_q, dtype=float).reshape(-1), required=keys)
-    missing = [key for key in keys if key not in out]
-    if missing:
-        labels = ", ".join(_state_key_label(key) for key in missing)
-        raise AssertionError(f"assert_provider_contract: build_state() did not return expected keys: {labels}.")
-
-    shapes = {} if expected_shapes is None else dict(expected_shapes)
-    checked: dict[StateKey, Array] = {}
-    for key in keys:
-        checked[key] = _assert_numeric_array(
-            out[key],
-            key=key,
-            expected_shape=shapes.get(key),
-            helper_name="assert_provider_contract",
-        )
-    return checked
-
-
-def assert_trajectory_provider_contract(
-    provider: Any,
-    sample_p: Any,
-    expected_keys: Sequence[StateKey],
-    *,
-    expected_shapes: Mapping[StateKey, tuple[int, ...]] | None = None,
-) -> dict[StateKey, Array]:
-    """Assert that a trajectory robotics provider satisfies Rei's state contract."""
-
-    keys = list(expected_keys)
-    if len(keys) == 0:
-        raise AssertionError("assert_trajectory_provider_contract: expected_keys must be non-empty.")
-    try:
-        p_vec = np.asarray(sample_p, dtype=float).reshape(-1)
-    except (TypeError, ValueError) as exc:
-        raise AssertionError("assert_trajectory_provider_contract: sample_p must be numeric.") from exc
-    return assert_provider_contract(
-        provider,
-        p_vec,
-        keys,
-        expected_shapes=expected_shapes,
-    )
-
-
 __all__ = [
     "RobotFieldHandler",
     "RobotFieldBinding",
@@ -1122,5 +888,7 @@ __all__ = [
     "TrajectoryRoboticsStateProvider",
     "assert_provider_contract",
     "assert_trajectory_provider_contract",
-    "robot_field_bindings_from_names",
+    "register_robot_binding_table",
+    "register_robot_field_bindings",
+    "robot_field_bindings_from_table",
 ]
