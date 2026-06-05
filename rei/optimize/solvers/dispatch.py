@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
@@ -537,6 +538,40 @@ def _parse_liteopt_gn_result(
     )
 
 
+def _liteopt_uses_options_api(fn: Callable[..., Any]) -> bool:
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return True
+    return "options" in signature.parameters
+
+
+def _call_liteopt_gd(
+    liteopt: Any,
+    fun: Callable[[Array], float],
+    grad: Callable[[Array], Array],
+    x0: Array,
+    options: Mapping[str, Any],
+) -> Any:
+    gd = liteopt.gd
+    if _liteopt_uses_options_api(gd):
+        return gd(fun, grad, x0, options=dict(options))
+    return gd(fun, grad, x0, **dict(options))
+
+
+def _call_liteopt_gn(
+    liteopt: Any,
+    residual: Callable[[Array], Array],
+    jacobian: Callable[[Array], Array],
+    x0: Array,
+    options: Mapping[str, Any],
+) -> Any:
+    gn = liteopt.gn
+    if _liteopt_uses_options_api(gn):
+        return gn(residual, x0, jacobian=jacobian, options=dict(options))
+    return gn(residual, jacobian, x0, **dict(options))
+
+
 def solve_liteopt_gd(
     problem: Any,
     *,
@@ -693,7 +728,13 @@ def solve_liteopt_gd(
         failure_message = ""
         with prof.span("solve.backend"):
             try:
-                result = liteopt.gn(residual, jacobian, x0_init.copy(), **options_local)
+                result = _call_liteopt_gn(
+                    liteopt,
+                    residual,
+                    jacobian,
+                    x0_init.copy(),
+                    options_local,
+                )
             except Exception as e:
                 if not _is_nonfinite_error(e):
                     raise
@@ -856,7 +897,13 @@ def solve_liteopt_gd(
             options_attempt["step_size"] = float(step_size_used)
             prev_x = x0_init.copy()
             try:
-                result = liteopt.gd(fun, grad, x0_init.copy(), **options_attempt)
+                result = _call_liteopt_gd(
+                    liteopt,
+                    fun,
+                    grad,
+                    x0_init.copy(),
+                    options_attempt,
+                )
                 break
             except Exception as e:
                 if not _is_nonfinite_error(e):

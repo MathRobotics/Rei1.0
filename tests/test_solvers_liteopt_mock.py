@@ -133,6 +133,29 @@ class TestSolversLiteoptMock:
         assert out.converged
         assert calls == {"step_size": 0.2, "max_iters": 15, "tol_grad": 1e-5}
 
+    def test_solve_liteopt_gd_supports_options_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: dict[str, object] = {}
+        liteopt_mod = types.ModuleType("liteopt")
+
+        def gd(fun, grad, x0, *, options=None, debug=None):
+            del grad, debug
+            calls["options"] = dict(options or {})
+            x = np.asarray(x0, dtype=float).reshape(-1).copy()
+            return x.copy(), float(fun(x)), True, 0
+
+        liteopt_mod.gd = gd
+        monkeypatch.setitem(sys.modules, "liteopt", liteopt_mod)
+
+        runtime, _x_var = _build_scalar_runtime(target=0.0)
+        out = solve(
+            runtime,
+            solver="liteopt",
+            options={"step_size": 0.2, "max_iters": 15, "tol_grad": 1e-5},
+        )
+
+        assert out.converged
+        assert calls["options"] == {"step_size": 0.2, "max_iters": 15, "tol_grad": 1e-5}
+
     def test_solve_liteopt_gd_accepts_line_search_option(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: dict[str, object] = {}
         liteopt_mod = types.ModuleType("liteopt")
@@ -261,6 +284,47 @@ class TestSolversLiteoptMock:
         assert calls["ls_min_step"] == pytest.approx(1e-8, rel=0.0, abs=0.0)
         assert calls["ls_max_steps"] == 12
         assert calls["verbose"] is True
+
+    def test_solve_liteopt_gn_supports_options_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: dict[str, object] = {}
+        liteopt_mod = types.ModuleType("liteopt")
+
+        def gn(residual, x0=None, *, jacobian=None, options=None, debug=None):
+            del debug
+            calls["options"] = dict(options or {})
+            x = np.asarray(x0, dtype=float).reshape(-1).copy()
+            _ = np.asarray(residual(x), dtype=float).reshape(-1)
+            assert jacobian is not None
+            _ = np.asarray(jacobian(x), dtype=float)
+            return [3.0], 0.0, 5, 0.0, 0.0, True
+
+        liteopt_mod.gn = gn
+        monkeypatch.setitem(sys.modules, "liteopt", liteopt_mod)
+
+        runtime, _x_var = _build_scalar_runtime(target=3.0)
+        out = solve(
+            runtime,
+            solver="liteopt",
+            options={
+                "method": "gn",
+                "max_iters": 50,
+                "tol_r": 1e-9,
+                "tol_dx": 1e-10,
+                "lambda_": 1e-8,
+            },
+        )
+
+        assert out.converged
+        options = calls["options"]
+        assert isinstance(options, dict)
+        assert options["max_iters"] == 50
+        assert options["tol_r"] == pytest.approx(1e-9, rel=0.0, abs=0.0)
+        assert options["tol_dx"] == pytest.approx(1e-10, rel=0.0, abs=0.0)
+        assert options["lambda_"] == pytest.approx(1e-8, rel=0.0, abs=0.0)
+        assert options["damping_update"] == "fixed"
+        assert options["linear_system"] == "normal_jtj"
+        assert options["line_search_method"] == "strict_decrease"
+        assert options["line_search"] is True
 
     def test_solve_liteopt_gn_emits_on_iter_progress(self, monkeypatch: pytest.MonkeyPatch) -> None:
         liteopt_mod = types.ModuleType("liteopt")
