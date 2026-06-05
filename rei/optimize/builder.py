@@ -165,19 +165,20 @@ def compile_nls_problem_spec(
     )
 
 
-def compile_nls_problem_spec_json(
+def compile_nls_problem_spec_toml(
     path: str | Path,
     *,
     build_state: Callable[..., dict],
     expr_register: ExprRegister | None = None,
 ) -> NLSRuntime:
-    from .dsl.spec import load_problem_spec_json
+    from .dsl.spec import load_problem_spec_toml
 
     return compile_nls_problem(
-        load_problem_spec_json(path),
+        load_problem_spec_toml(path),
         build_state=build_state,
         expr_register=expr_register,
     )
+
 
 __all__ = [
     "NLSProblem",
@@ -191,6 +192,6 @@ __all__ = [
     "collect_required_state_keys",
     "compile_nls_problem",
     "compile_nls_problem_spec",
-    "compile_nls_problem_spec_json",
+    "compile_nls_problem_spec_toml",
     "load_problem_toml",
 ]

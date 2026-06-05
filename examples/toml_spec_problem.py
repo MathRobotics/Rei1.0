@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rei import compile_nls_problem_spec_json, format_solve_report, solve
+from rei import compile_nls_problem_spec_toml, format_solve_report, solve
 
 
 def main() -> None:
-    spec_path = Path(__file__).resolve().parent / "spec" / "basic.json"
+    spec_path = Path(__file__).resolve().parent / "spec" / "basic.toml"
 
-    runtime = compile_nls_problem_spec_json(
+    runtime = compile_nls_problem_spec_toml(
         spec_path,
         build_state=lambda *_args, **_kwargs: {},
     )
@@ -18,7 +18,7 @@ def main() -> None:
     x_star = out.solution
     stats = out.stats
 
-    print("=== json_spec_problem ===")
+    print("=== toml_spec_problem ===")
     print(f"spec={spec_path}")
     print(
         f"status={stats.status} converged={stats.converged} iters={stats.iterations} "

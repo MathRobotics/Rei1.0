@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from rei import format_solve_report, load_problem_spec_json, solve
+from rei import format_solve_report, load_problem_spec_toml, solve
 from rei.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
 
 try:
@@ -17,7 +17,7 @@ except ImportError as e:  # pragma: no cover
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.urdf"
-_SPEC_PATH = _EXAMPLES_DIR / "spec" / "pinocchio_traj_dynamics.json"
+_SPEC_PATH = _EXAMPLES_DIR / "spec" / "pinocchio_traj_dynamics.toml"
 
 
 def main() -> None:
@@ -32,9 +32,9 @@ def main() -> None:
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _SPEC_PATH.is_file():
-        raise SystemExit(f"JSON spec file not found: {_SPEC_PATH}")
+        raise SystemExit(f"TOML spec file not found: {_SPEC_PATH}")
 
-    problem = load_problem_spec_json(_SPEC_PATH)
+    problem = load_problem_spec_toml(_SPEC_PATH)
     model = pin.buildModelFromUrdf(str(_MODEL_PATH))
     data = model.createData()
 

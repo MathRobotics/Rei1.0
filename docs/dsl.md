@@ -1009,5 +1009,5 @@ w = 100.0
 - 制約として扱いたい項目には `constraint = "eq"` または `"ineq"` を付ける
 - 多変数問題では `var` / `jac.var` を省略しない
 
-通常は `examples/spec/*.json` を入口にしてください。DSL は spec 変換後の
+通常は `examples/spec/*.toml` を入口にしてください。DSL は spec 変換後の
 内部表現や高度な式を直接扱うときのために残しています。

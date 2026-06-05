@@ -3,7 +3,7 @@
 `rei` is a Python toolkit for building, linearizing, and solving numerical
 optimization problems through capability-oriented APIs.
 
-Hand-written problems are described with compact JSON spec files, which are
+Hand-written problems are described with compact TOML spec files, which are
 converted to Rei's lower-level DSL before compilation. Backend code connects
 through a single `build_state()` function, so the optimization layer can stay
 independent from robotics, vision, or other state providers.
@@ -45,10 +45,10 @@ For editable pip installs outside the recommended `uv` workflow, use
 ## Quick Start
 
 ```python
-from rei import compile_nls_problem_spec_json, solve
+from rei import compile_nls_problem_spec_toml, solve
 
-runtime = compile_nls_problem_spec_json(
-    "examples/spec/basic.json",
+runtime = compile_nls_problem_spec_toml(
+    "examples/spec/basic.toml",
     build_state=lambda *_args, **_kwargs: {},
 )
 out = solve(runtime, solver="gauss_newton")
@@ -63,11 +63,12 @@ The same structure can also be built from a Python dict:
 from rei import compile_nls_problem_spec, solve
 
 spec = {
-    "variables": {"q": {"dim": 2, "init": [0.0, 0.0]}},
+    "opt_vals": {"joint_angles": {"dim": 2, "init": [0.0, 0.0]}},
     "terms": [
         {
             "name": "q_minus_target",
-            "residual": {"var": "q", "target": [0.5, -1.2]},
+            "var": "joint_angles",
+            "target": [0.5, -1.2],
         }
     ],
 }
@@ -75,7 +76,25 @@ runtime = compile_nls_problem_spec(spec, build_state=lambda *_args, **_kwargs: {
 out = solve(runtime)
 ```
 
-JSON spec は人間向けの入口です。低レベル DSL は compile/debug/advanced 用の内部表現として残しています。
+Backend state targets can also use a compact dotted state key:
+
+```python
+spec = {
+    "opt_vals": {"joint_angles": {"dim": 7, "init": [0.0] * 7}},
+    "terms": [
+        {
+            "name": "ee_pos",
+            "state": "kinematics.link.ee.pos",
+            "var": "joint_angles",
+            "target": [0.4, 0.1, 0.3],
+            "constraint": "eq",
+        }
+    ],
+}
+```
+
+TOML spec は標準の人間向けテキスト入口です。低レベル DSL は
+compile/debug/advanced 用の内部表現として残しています。
 
 ## Canonical Namespace
 
@@ -252,7 +271,7 @@ Run examples from the repository root:
 ```bash
 uv run python examples/minimize_quadratic.py
 uv run python examples/get_state_minimal.py
-uv run python examples/json_spec_problem.py
+uv run python examples/toml_spec_problem.py
 uv run python examples/stationarity_ioc.py
 ```
 

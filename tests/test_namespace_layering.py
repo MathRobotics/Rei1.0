@@ -23,7 +23,7 @@ from rei.equations import (
     solve_simplex_min_norm,
     term_constraint_kind,
 )
-from rei.optimize.builder import compile_nls_problem, compile_nls_problem_spec
+from rei.optimize.builder import compile_nls_problem, compile_nls_problem_spec, compile_nls_problem_spec_toml
 from rei.optimize.costs import L2Cost
 from rei.optimize.dsl import prepare_trajectory_problem_dsl
 from rei.problem import NLSProblem
@@ -83,6 +83,7 @@ class TestNamespaceLayering:
     def test_canonical_entrypoints_exist(self) -> None:
         assert callable(prepare_trajectory_problem_dsl)
         assert callable(compile_nls_problem_spec)
+        assert callable(compile_nls_problem_spec_toml)
         assert callable(build_nullspace_equality_reduction)
         assert callable(format_solve_report)
         assert callable(build_term_gradient_matrix)

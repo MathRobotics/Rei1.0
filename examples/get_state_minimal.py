@@ -55,23 +55,16 @@ def build_state(x_all, *, pack=None, time=None, required=None):
 
 def main() -> None:
     spec = {
-        "variables": {
-            "q": {"dim": 2, "init": [0.0, 0.0]},
+        "opt_vals": {
+            "joint_angles": {"dim": 2, "init": [0.0, 0.0]},
         },
         "terms": [
             {
                 "name": "ee_pos_error",
-                "residual": {
-                    "state": "ee_pos",
-                    "var": "q",
-                    "at": 0,
-                    "owner_type": "link",
-                    "owner": "ee",
-                    "dtype": DTYPE_KINEMATICS,
-                    "field": "pos",
-                    "frame": "world",
-                    "target": [1.5, -0.5, 0.0],
-                },
+                "state": "kinematics.link.ee.pos",
+                "var": "joint_angles",
+                "frame": "world",
+                "target": [1.5, -0.5, 0.0],
             }
         ],
     }

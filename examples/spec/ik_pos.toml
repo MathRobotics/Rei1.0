@@ -1,0 +1,16 @@
+[opt_vals.joint_angles]
+dim = 2
+init = [0.0, 0.0]
+
+[[terms]]
+name = "ee_pos_error"
+state = "kinematics.link.ee.pos"
+frame = "world"
+var = "joint_angles"
+target = [1.5, 0.5, 0.0]
+
+[[terms]]
+name = "joint_q_nominal"
+weight = 1e-6
+var = "joint_angles"
+target = [0.0, 0.0]

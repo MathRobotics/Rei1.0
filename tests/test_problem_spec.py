@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
-
 import numpy as np
+import pytest
 
 from rei.optimize.builder import compile_nls_problem
-from rei import compile_nls_problem_spec, compile_nls_problem_spec_json
-from rei.optimize.dsl import load_problem_spec_json, problem_spec_to_dsl
+from rei import compile_nls_problem_spec, compile_nls_problem_spec_toml
+from rei.optimize.dsl import load_problem_spec_toml, problem_spec_to_dsl
 
 
 def test_problem_spec_to_dsl_builds_basic_quadratic() -> None:
@@ -44,60 +43,140 @@ def test_problem_spec_to_dsl_builds_basic_quadratic() -> None:
     assert np.allclose(r_spec, r)
 
 
-def test_problem_spec_json_loader_converts_constraint_state_target(tmp_path) -> None:
-    path = tmp_path / "problem.json"
-    path.write_text(
-        json.dumps(
+def test_problem_spec_accepts_term_state_target_shorthand() -> None:
+    spec = {
+        "optimization_variables": {"q": {"dim": 2, "init": [0.0, 0.0]}},
+        "terms": [
             {
-                "time": {"N": 3, "dt": 0.1},
-                "variables": {"p": {"dim": 4, "init": {"fill": 0.0}}},
-                "terms": [
-                    {
-                        "name": "q_init",
-                        "kind": "eq",
-                        "weight": 100.0,
-                        "attrs": {"nullspace_eq": True},
-                        "residual": {
-                            "state": "joint_q_init",
-                            "var": "p",
-                            "at": 0,
-                            "owner_type": "total_joint",
-                            "owner": "robot",
-                            "dtype": "coord",
-                            "field": "q",
-                            "target": {"fill": 1.57},
-                        },
-                    },
-                ],
+                "name": "ee_pos",
+                "state": "kinematics.link.ee.pos",
+                "var": "q",
+                "target": [0.4, 0.1, 0.3],
+                "constraint": "eq",
             }
-        ),
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0] == {
+        "expr": {
+            "type": "sub",
+            "name": "ee_pos",
+            "a": {
+                "type": "get_state",
+                "name": "ee_pos_value",
+                "key": {
+                    "k": 0,
+                    "owner_type": "link",
+                    "owner_name": "ee",
+                    "dtype": "kinematics",
+                    "field": "pos",
+                },
+                "jac": {"var": "q"},
+            },
+            "b": {
+                "type": "const",
+                "name": "ee_pos_target",
+                "var": "q",
+                "value": [0.4, 0.1, 0.3],
+            },
+        },
+        "cost": {"type": "l2"},
+        "constraint": {"kind": "eq"},
+    }
+
+
+def test_problem_spec_resolves_reserved_opt_vals() -> None:
+    spec = {
+        "opt_vals": {
+            "joint_angles": {"dim": 2, "init": [0.0, 0.0]},
+        },
+        "terms": [
+            {
+                "name": "posture",
+                "var": "joint_angles",
+                "target": [0.2, -0.1],
+            },
+            {
+                "name": "ee_pos",
+                "state": "kinematics.link.ee.pos",
+                "var": "joint_angles",
+                "target": [0.4, 0.1, 0.3],
+            },
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["variables"] == [{"name": "q", "dim": 2, "init": [0.0, 0.0]}]
+    assert dsl["terms"][0]["expr"]["a"] == {
+        "type": "get_var",
+        "name": "posture_value",
+        "var": "q",
+    }
+    assert dsl["terms"][0]["expr"]["b"] == {
+        "type": "const",
+        "name": "posture_target",
+        "var": "q",
+        "value": [0.2, -0.1],
+    }
+    assert dsl["terms"][1]["expr"]["a"]["jac"] == {"var": "q"}
+    assert dsl["terms"][1]["expr"]["b"]["var"] == "q"
+
+
+def test_problem_spec_rejects_duplicate_opt_val_canonical_variable() -> None:
+    with pytest.raises(ValueError, match="defined more than once"):
+        problem_spec_to_dsl(
+            {
+                "optimization_variables": {"q": 2},
+                "opt_vals": {"joint_angles": 2},
+                "terms": [],
+            }
+        )
+
+
+def test_problem_spec_rejects_mixed_optimization_variable_sections() -> None:
+    with pytest.raises(ValueError, match="both optimization_variables and variables"):
+        problem_spec_to_dsl(
+            {
+                "optimization_variables": {"q": 2},
+                "variables": {"q": 2},
+                "terms": [],
+            }
+        )
+
+
+def test_problem_spec_toml_loader_is_standard_text_entrypoint(tmp_path) -> None:
+    path = tmp_path / "problem.toml"
+    path.write_text(
+        """
+[opt_vals.joint_angles]
+dim = 2
+init = [0.0, 0.0]
+
+[[terms]]
+name = "ee_pos"
+state = "kinematics.link.ee.pos"
+var = "joint_angles"
+target = [0.4, 0.1, 0.3]
+constraint = "eq"
+""",
         encoding="utf-8",
     )
 
-    dsl = load_problem_spec_json(path)
-    runtime = compile_nls_problem_spec_json(path, build_state=lambda *_args, **_kwargs: {})
-    assert runtime.pack.n_total == 4
-    term = dsl["terms"][0]
+    dsl = load_problem_spec_toml(path)
+    runtime = compile_nls_problem_spec_toml(path, build_state=lambda *_args, **_kwargs: {})
 
-    assert term["constraint"] == {"kind": "eq"}
-    assert term["attrs"] == {"nullspace_eq": True}
-    assert term["expr"]["a"] == {
-        "type": "get_state",
-        "name": "joint_q_init",
-        "key": {
-            "k": 0,
-            "owner_type": "total_joint",
-            "owner_name": "robot",
-            "dtype": "coord",
-            "field": "q",
-        },
-        "jac": {"var": "p"},
-    }
-    assert term["expr"]["b"] == {
-        "type": "const",
-        "name": "q_init_target",
-        "var": "p",
-        "value": {"fill": 1.57},
+    assert runtime.pack.n_total == 2
+    assert dsl["variables"] == [{"name": "q", "dim": 2, "init": [0.0, 0.0]}]
+    assert dsl["terms"][0]["constraint"] == {"kind": "eq"}
+    assert dsl["terms"][0]["expr"]["a"]["key"] == {
+        "k": 0,
+        "owner_type": "link",
+        "owner_name": "ee",
+        "dtype": "kinematics",
+        "field": "pos",
     }
 
 

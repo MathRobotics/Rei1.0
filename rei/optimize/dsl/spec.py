@@ -1,21 +1,22 @@
 from __future__ import annotations
 
-import json
+import tomllib
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from ...core.mapping import mapping_as_dict
+from .spec_reserved import resolve_opt_vals
 
 
-def load_problem_spec_json(path: str | Path) -> dict[str, Any]:
-    """Load a human-oriented problem spec JSON file and convert it to DSL."""
+def load_problem_spec_toml(path: str | Path) -> dict[str, Any]:
+    """Load a human-oriented problem spec TOML file and convert it to DSL."""
 
     p = Path(path)
-    data = json.loads(p.read_text(encoding="utf-8"))
+    data = tomllib.loads(p.read_text(encoding="utf-8"))
     if not isinstance(data, Mapping):
-        raise TypeError("Problem spec JSON must decode to an object.")
+        raise TypeError("Problem spec TOML must decode to an object.")
     return problem_spec_to_dsl(data)
 
 
@@ -38,14 +39,21 @@ def problem_spec_to_dsl(spec: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"spec.{key} must be an object.")
             dsl[key] = deepcopy(dict(value))
 
-    variables = _convert_variables(spec_dict.get("variables", []))
+    opt_vals = resolve_opt_vals(spec_dict.get("opt_vals", None))
+    variables = _merge_optimization_variables(
+        _convert_variables(_raw_optimization_variables(spec_dict)),
+        list(opt_vals.variables),
+    )
     if variables:
         dsl["variables"] = variables
 
     terms_raw = spec_dict.get("terms", [])
     if not isinstance(terms_raw, Sequence) or isinstance(terms_raw, (str, bytes, bytearray)):
         raise ValueError("spec.terms must be a list.")
-    dsl["terms"] = [_convert_term(t, i) for i, t in enumerate(terms_raw)]
+    dsl["terms"] = [
+        _convert_term(t, i, var_aliases=opt_vals.aliases)
+        for i, t in enumerate(terms_raw)
+    ]
     return dsl
 
 
@@ -68,13 +76,40 @@ def _convert_variables(raw: Any) -> list[dict[str, Any]]:
         out = []
         for i, value in enumerate(raw):
             if not isinstance(value, Mapping):
-                raise ValueError(f"spec.variables[{i}] must be an object.")
+                raise ValueError(f"spec optimization variable entry at index {i} must be an object.")
             out.append(deepcopy(dict(value)))
         return out
-    raise ValueError("spec.variables must be an object or list.")
+    raise ValueError("spec.optimization_variables must be an object or list.")
 
 
-def _convert_term(raw: Any, index: int) -> dict[str, Any]:
+def _raw_optimization_variables(spec: Mapping[str, Any]) -> Any:
+    has_preferred = "optimization_variables" in spec
+    has_legacy = "variables" in spec
+    if has_preferred and has_legacy:
+        raise ValueError("spec must not contain both optimization_variables and variables.")
+    if has_preferred:
+        return spec.get("optimization_variables", [])
+    return spec.get("variables", [])
+
+
+def _merge_optimization_variables(
+    explicit_variables: list[dict[str, Any]],
+    opt_val_variables: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in [*explicit_variables, *opt_val_variables]:
+        name = str(entry.get("name", ""))
+        if name == "":
+            raise ValueError("optimization variable entries must define a non-empty name.")
+        if name in seen:
+            raise ValueError(f"optimization variable {name!r} is defined more than once.")
+        seen.add(name)
+        out.append(entry)
+    return out
+
+
+def _convert_term(raw: Any, index: int, *, var_aliases: Mapping[str, str]) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise ValueError(f"spec.terms[{index}] must be an object.")
     term = mapping_as_dict(raw, where=f"spec.terms[{index}]")
@@ -87,10 +122,19 @@ def _convert_term(raw: Any, index: int) -> dict[str, Any]:
 
     residual_raw = term.get("residual", term.get("expr", None))
     if residual_raw is None:
-        raise ValueError(f"spec.terms[{index}] must contain residual, expr, or dsl.")
+        residual_raw = _term_shorthand_residual(term)
+    if residual_raw is None:
+        raise ValueError(f"spec.terms[{index}] must contain residual, expr, dsl, or a term shorthand.")
 
     name = str(term.get("name", f"term_{index}"))
-    out: dict[str, Any] = {"expr": _convert_residual(residual_raw, name=name, where=f"spec.terms[{index}].residual")}
+    out: dict[str, Any] = {
+        "expr": _convert_residual(
+            residual_raw,
+            name=name,
+            where=f"spec.terms[{index}].residual",
+            var_aliases=var_aliases,
+        )
+    }
 
     cost_raw = term.get("cost", None)
     weight_raw = term.get("weight", term.get("w", None))
@@ -115,7 +159,13 @@ def _convert_term(raw: Any, index: int) -> dict[str, Any]:
     return out
 
 
-def _convert_residual(raw: Any, *, name: str, where: str) -> dict[str, Any]:
+def _convert_residual(
+    raw: Any,
+    *,
+    name: str,
+    where: str,
+    var_aliases: Mapping[str, str],
+) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise ValueError(f"{where} must be an object.")
     node = mapping_as_dict(raw, where=where)
@@ -129,7 +179,7 @@ def _convert_residual(raw: Any, *, name: str, where: str) -> dict[str, Any]:
         return out
 
     if "op" in node or "type" in node:
-        return _convert_op_node(node, name=name, where=where)
+        return _convert_op_node(node, name=name, where=where, var_aliases=var_aliases)
 
     target = node.get("target", node.get("equals", None))
     if target is not None:
@@ -139,14 +189,24 @@ def _convert_residual(raw: Any, *, name: str, where: str) -> dict[str, Any]:
         return {
             "type": "sub",
             "name": name,
-            "a": _convert_leaf(lhs, name=_child_name(name, "value"), where=where),
-            "b": _target_to_expr(target, name=_child_name(name, "target"), var=_node_var(node)),
+            "a": _convert_leaf(lhs, name=_child_name(name, "value"), where=where, var_aliases=var_aliases),
+            "b": _target_to_expr(
+                target,
+                name=_child_name(name, "target"),
+                var=_node_var(node, var_aliases=var_aliases),
+            ),
         }
 
-    return _convert_leaf(node, name=name, where=where)
+    return _convert_leaf(node, name=name, where=where, var_aliases=var_aliases)
 
 
-def _convert_op_node(node: Mapping[str, Any], *, name: str, where: str) -> dict[str, Any]:
+def _convert_op_node(
+    node: Mapping[str, Any],
+    *,
+    name: str,
+    where: str,
+    var_aliases: Mapping[str, str],
+) -> dict[str, Any]:
     op = str(node.get("op", node.get("type"))).strip()
     if op in ("sub", "add"):
         a = node.get("a", None)
@@ -156,8 +216,18 @@ def _convert_op_node(node: Mapping[str, Any], *, name: str, where: str) -> dict[
         return {
             "type": op,
             "name": str(node.get("name", name)),
-            "a": _convert_residual(a, name=_child_name(name, "a"), where=f"{where}.a"),
-            "b": _convert_residual(b, name=_child_name(name, "b"), where=f"{where}.b"),
+            "a": _convert_residual(
+                a,
+                name=_child_name(name, "a"),
+                where=f"{where}.a",
+                var_aliases=var_aliases,
+            ),
+            "b": _convert_residual(
+                b,
+                name=_child_name(name, "b"),
+                where=f"{where}.b",
+                var_aliases=var_aliases,
+            ),
         }
     if op == "hinge":
         base = node.get("base", None)
@@ -166,7 +236,12 @@ def _convert_op_node(node: Mapping[str, Any], *, name: str, where: str) -> dict[
         return {
             "type": "hinge",
             "name": str(node.get("name", name)),
-            "base": _convert_residual(base, name=_child_name(name, "base"), where=f"{where}.base"),
+            "base": _convert_residual(
+                base,
+                name=_child_name(name, "base"),
+                where=f"{where}.base",
+                var_aliases=var_aliases,
+            ),
         }
     if op == "stack":
         range_raw = node.get("range", None)
@@ -179,18 +254,33 @@ def _convert_op_node(node: Mapping[str, Any], *, name: str, where: str) -> dict[
             "type": "stack",
             "name": str(node.get("name", name)),
             "range": deepcopy(dict(range_raw)),
-            "inner": _convert_residual(inner_raw, name=_child_name(name, "k"), where=f"{where}.inner"),
+            "inner": _convert_residual(
+                inner_raw,
+                name=_child_name(name, "k"),
+                where=f"{where}.inner",
+                var_aliases=var_aliases,
+            ),
         }
-    return _convert_leaf(node, name=name, where=where)
+    return _convert_leaf(node, name=name, where=where, var_aliases=var_aliases)
 
 
-def _convert_leaf(node: Mapping[str, Any], *, name: str, where: str) -> dict[str, Any]:
+def _convert_leaf(
+    node: Mapping[str, Any],
+    *,
+    name: str,
+    where: str,
+    var_aliases: Mapping[str, str],
+) -> dict[str, Any]:
     if "var" in node and set(node.keys()).issubset({"type", "op", "name", "var"}):
-        return {"type": "get_var", "name": str(node.get("name", name)), "var": str(node["var"])}
+        return {
+            "type": "get_var",
+            "name": str(node.get("name", name)),
+            "var": _resolve_var_alias(node["var"], var_aliases=var_aliases),
+        }
 
     if "state" in node:
         state = node["state"]
-        state_dsl = dict(state) if isinstance(state, Mapping) else {"name": str(state)}
+        state_dsl = _state_spec_from_raw(state, where=f"{where}.state")
         out = {
             "type": "get_state",
             "name": str(node.get("name", state_dsl.pop("name", name))),
@@ -198,7 +288,7 @@ def _convert_leaf(node: Mapping[str, Any], *, name: str, where: str) -> dict[str
         }
         var = node.get("var", state_dsl.get("var", None))
         if var is not None:
-            out["jac"] = {"var": str(var)}
+            out["jac"] = {"var": _resolve_var_alias(var, var_aliases=var_aliases)}
         return out
 
     if "traj" in node or "trajectory" in node:
@@ -210,7 +300,7 @@ def _convert_leaf(node: Mapping[str, Any], *, name: str, where: str) -> dict[str
         out = {
             "type": "get_traj_var",
             "name": str(node.get("name", traj_dsl.get("name", name))),
-            "var": str(var),
+            "var": _resolve_var_alias(var, var_aliases=var_aliases),
         }
         for src, dst in (("at", "k"), ("k", "k"), ("derivative", "derivative_order"), ("derivative_order", "derivative_order")):
             value = node.get(src, traj_dsl.get(src, None))
@@ -222,17 +312,112 @@ def _convert_leaf(node: Mapping[str, Any], *, name: str, where: str) -> dict[str
         return out
 
     if "const_repeat" in node:
-        return _const_expr(node["const_repeat"], name=name, var=node.get("var", None), repeat=True)
+        return _const_expr(
+            node["const_repeat"],
+            name=name,
+            var=_resolve_optional_var_alias(node.get("var", None), var_aliases=var_aliases),
+            repeat=True,
+        )
 
     if "const" in node or "value" in node:
         value = node.get("const", node.get("value"))
         repeat = bool(node.get("repeat", False))
-        return _const_expr(value, name=str(node.get("name", name)), var=node.get("var", None), repeat=repeat)
+        return _const_expr(
+            value,
+            name=str(node.get("name", name)),
+            var=_resolve_optional_var_alias(node.get("var", None), var_aliases=var_aliases),
+            repeat=repeat,
+        )
 
     typ = node.get("type", node.get("op", None))
     if typ is not None:
         return deepcopy(dict(node))
     raise ValueError(f"{where}: unsupported residual leaf. Use var, state, traj, const, or dsl.")
+
+
+_TERM_SHORTHAND_METADATA_KEYS = {
+    "name",
+    "residual",
+    "expr",
+    "dsl",
+    "cost",
+    "weight",
+    "w",
+    "kind",
+    "constraint",
+    "attrs",
+}
+_TERM_SHORTHAND_LEAF_KEYS = {
+    "var",
+    "state",
+    "traj",
+    "trajectory",
+    "const",
+    "value",
+    "const_repeat",
+    "target",
+    "equals",
+    "repeat",
+    "at",
+    "k",
+    "derivative",
+    "derivative_order",
+    "derivative_wrt",
+    "owner_type",
+    "owner",
+    "owner_name",
+    "dtype",
+    "field",
+    "frame",
+    "rel_frame",
+}
+
+
+def _term_shorthand_residual(term: Mapping[str, Any]) -> dict[str, Any] | None:
+    if not any(key in term for key in _TERM_SHORTHAND_LEAF_KEYS):
+        return None
+    residual: dict[str, Any] = {}
+    for key, value in term.items():
+        key_str = str(key)
+        if key_str in _TERM_SHORTHAND_METADATA_KEYS:
+            continue
+        if key_str in _TERM_SHORTHAND_LEAF_KEYS:
+            residual[key_str] = deepcopy(value)
+            continue
+        raise ValueError(
+            "term shorthand contains unsupported key "
+            f"{key_str!r}. Move advanced expressions under `residual` or `dsl`."
+        )
+    return residual
+
+
+def _state_spec_from_raw(raw: Any, *, where: str) -> dict[str, Any]:
+    if isinstance(raw, Mapping):
+        return deepcopy(dict(raw))
+
+    text = str(raw)
+    parsed = _parse_dotted_state_ref(text, where=where)
+    if parsed is not None:
+        return parsed
+    return {"name": text}
+
+
+def _parse_dotted_state_ref(text: str, *, where: str) -> dict[str, Any] | None:
+    if "." not in text:
+        return None
+    parts = text.split(".")
+    if len(parts) != 4 or any(part == "" for part in parts):
+        raise ValueError(
+            f"{where}: dotted state shorthand must be "
+            "`<dtype>.<owner_type>.<owner_name>.<field>`, got {text!r}."
+        )
+    dtype, owner_type, owner_name, field = parts
+    return {
+        "dtype": dtype,
+        "owner_type": owner_type,
+        "owner_name": owner_name,
+        "field": field,
+    }
 
 
 def _target_to_expr(target: Any, *, name: str, var: Any) -> dict[str, Any]:
@@ -260,12 +445,23 @@ def _const_expr(value: Any, *, name: str, var: Any, repeat: bool = False) -> dic
     return out
 
 
-def _node_var(node: Mapping[str, Any]) -> Any:
+def _resolve_var_alias(value: Any, *, var_aliases: Mapping[str, str]) -> str:
+    text = str(value)
+    return str(var_aliases.get(text, text))
+
+
+def _resolve_optional_var_alias(value: Any, *, var_aliases: Mapping[str, str]) -> str | None:
+    if value is None:
+        return None
+    return _resolve_var_alias(value, var_aliases=var_aliases)
+
+
+def _node_var(node: Mapping[str, Any], *, var_aliases: Mapping[str, str]) -> Any:
     if "var" in node:
-        return node.get("var", None)
+        return _resolve_optional_var_alias(node.get("var", None), var_aliases=var_aliases)
     traj = node.get("traj", node.get("trajectory", None))
     if isinstance(traj, Mapping) and "var" in traj:
-        return traj.get("var", None)
+        return _resolve_optional_var_alias(traj.get("var", None), var_aliases=var_aliases)
     return None
 
 
@@ -314,6 +510,6 @@ def _child_name(name: str, suffix: str) -> str:
 
 
 __all__ = [
-    "load_problem_spec_json",
+    "load_problem_spec_toml",
     "problem_spec_to_dsl",
 ]

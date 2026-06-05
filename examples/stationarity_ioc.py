@@ -18,32 +18,26 @@ from rei import (
 
 def build_demo_runtime(*, x_demo: float) -> object:
     spec = {
-        "variables": {
+        "opt_vals": {
             "x": {"dim": 1, "init": [float(x_demo)]},
         },
         "terms": [
             {
                 "name": "x_to_1",
                 "weight": 1.0,
-                "residual": {
-                    "var": "x",
-                    "target": [1.0],
-                },
+                "var": "x",
+                "target": [1.0],
             },
             {
                 "name": "x_to_minus_1",
                 "weight": 1.0,
-                "residual": {
-                    "var": "x",
-                    "target": [-1.0],
-                },
+                "var": "x",
+                "target": [-1.0],
             },
             {
                 "name": "x_keep",
                 "weight": 0.2,
-                "residual": {
-                    "var": "x",
-                },
+                "var": "x",
             },
         ],
     }

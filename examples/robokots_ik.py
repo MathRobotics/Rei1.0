@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rei import compile_nls_problem_spec_json, format_solve_report, solve
+from rei import compile_nls_problem_spec_toml, format_solve_report, solve
 
 try:
     from robokots.kots import Kots
@@ -15,14 +15,14 @@ except ImportError as e:  # pragma: no cover
     ) from e
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
-_SPEC_PATH = _EXAMPLES_DIR / "spec" / "ik_pos.json"
+_SPEC_PATH = _EXAMPLES_DIR / "spec" / "ik_pos.toml"
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 _ORDER = 3
 
 
 def main() -> None:
     if not _SPEC_PATH.is_file():
-        raise SystemExit(f"JSON spec file not found: {_SPEC_PATH}")
+        raise SystemExit(f"TOML spec file not found: {_SPEC_PATH}")
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
 
@@ -36,7 +36,7 @@ def main() -> None:
         fields=("pos",),
         dynamics_fields=None,
     )
-    runtime = compile_nls_problem_spec_json(_SPEC_PATH, build_state=builder.build_state)
+    runtime = compile_nls_problem_spec_toml(_SPEC_PATH, build_state=builder.build_state)
 
     x0 = runtime.pack.get().copy()
     out = solve(

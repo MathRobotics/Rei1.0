@@ -19,16 +19,14 @@ def main() -> None:
     target = [float(args.target[0]), float(args.target[1])]
 
     spec = {
-        "variables": {
-            "q": {"dim": 2, "init": [0.0, 0.0]},
+        "opt_vals": {
+            "joint_angles": {"dim": 2, "init": [0.0, 0.0]},
         },
         "terms": [
             {
                 "name": "q_minus_target",
-                "residual": {
-                    "var": "q",
-                    "target": target,
-                },
+                "var": "joint_angles",
+                "target": target,
             }
         ],
     }

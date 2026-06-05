@@ -1,0 +1,56 @@
+[time]
+N = 20
+dt = 0.1
+
+[trajectory]
+type = "bspline"
+var = "p"
+degree = 4
+num_ctrl_points = 8
+
+[opt_vals.trajectory_params.init]
+fill = 0.0
+
+[[terms]]
+name = "q_init"
+kind = "eq"
+weight = 100.0
+state = "coord.total_joint.robot.q"
+var = "trajectory_params"
+at = 0
+target = [1.57, 0.0]
+attrs = { plot = { type = "state_traj", name = "joint_q" } }
+
+[[terms]]
+name = "q_terminal"
+kind = "eq"
+weight = 100.0
+state = "coord.total_joint.robot.q"
+var = "trajectory_params"
+at = "last"
+target = [-1.57, 0.0]
+
+[[terms]]
+name = "qdot_init"
+kind = "eq"
+weight = 100.0
+traj = { name = "joint_qdot_init", var = "trajectory_params", derivative = 1, derivative_wrt = "time", at = 0 }
+target = { fill = 0.0 }
+
+[[terms]]
+name = "qdot_terminal"
+kind = "eq"
+weight = 100.0
+traj = { name = "joint_qdot_terminal", var = "trajectory_params", derivative = 1, derivative_wrt = "time", at = "last" }
+target = { fill = 0.0 }
+
+[[terms]]
+name = "qdot_traj_regularization"
+weight = 1e-3
+traj = { var = "trajectory_params", derivative = 1, derivative_wrt = "time" }
+
+[[terms]]
+name = "torque_traj_regularization"
+weight = 1e-10
+attrs = { plot = { type = "state_traj", name = "joint_torque", owner_type = "total_joint", owner_name = "robot", dtype = "dynamics", field = "torque" } }
+residual = { op = "stack", range = { k0 = 0, k1 = "last" }, inner = { state = "dynamics.total_joint.robot.torque", var = "trajectory_params" } }
