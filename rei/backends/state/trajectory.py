@@ -19,6 +19,7 @@ class TrajectoryStateBuilderMixin:
       - `trajectory_map`
       - `_extract_q`, `_route_for_key`, `_state_ref`, and `_dispatch`
       - `_compose_motion_and_jac(p, k=...)`
+      - optionally `_compose_motion(p, k=...)` for value-only evaluation
       - `_chain_param_jac(...)`
 
     Backend-specific behavior is kept in hooks so Kots can use matvec fast
@@ -56,6 +57,10 @@ class TrajectoryStateBuilderMixin:
         del k, motion_k
         self._update_kinematics(q_k)
 
+    def _compose_motion(self, p: Array, *, k: int) -> Array:
+        motion, _dmotiondp = self._compose_motion_and_jac(p, k=k)
+        return np.asarray(motion, dtype=float).reshape(-1)
+
     def _finalize_trajectory_build(self) -> None:
         return None
 
@@ -66,11 +71,16 @@ class TrajectoryStateBuilderMixin:
         entry: Any,
         state_ref: Any,
         q_k: Array,
-        dqdp_k: Array,
-        dmotiondp_k: Array,
+        dqdp_k: Array | None,
+        dmotiondp_k: Array | None,
     ) -> Any:
         value = entry.handler(q_k, key, state_ref)
         if self._is_param_jac_key(key):
+            if dqdp_k is None or dmotiondp_k is None:
+                raise RuntimeError(
+                    f"{self._trajectory_error_prefix()}: internal error: "
+                    "parameter Jacobian key evaluated without trajectory Jacobian data."
+                )
             value = self._chain_param_jac(
                 value,
                 key=key,
@@ -110,12 +120,19 @@ class TrajectoryStateBuilderMixin:
         out: dict[StateKey, Any] = {}
         try:
             for k in sorted(grouped.keys()):
+                entries_k = grouped[k]
                 q_k = np.asarray(self.trajectory_map.q_at(p, k), dtype=float).reshape(-1)
-                dqdp_k = np.asarray(self.trajectory_map.dqdp_at(k), dtype=float)
-                motion_k, dmotiondp_k = self._compose_motion_and_jac(p, k=k)
+                needs_param_jac = any(self._is_param_jac_key(key) for key, _entry in entries_k)
+                if needs_param_jac:
+                    dqdp_k = np.asarray(self.trajectory_map.dqdp_at(k), dtype=float)
+                    motion_k, dmotiondp_k = self._compose_motion_and_jac(p, k=k)
+                else:
+                    dqdp_k = None
+                    dmotiondp_k = None
+                    motion_k = self._compose_motion(p, k=k)
                 self._update_trajectory_step(k=k, q_k=q_k, motion_k=motion_k)
 
-                for key, entry in grouped[k]:
+                for key, entry in entries_k:
                     state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
                     out[key] = self._evaluate_trajectory_entry(
                         key=key,

@@ -54,8 +54,10 @@ class SolverProblem:
         return np.asarray(r, dtype=float).reshape(-1), np.asarray(J, dtype=float)
 
     def residual(self, x: Array | Any | None = None) -> Array:
-        r, _J = self.linearize(x)
-        return r
+        if x is not None:
+            self.set_point(x)
+        r = self.linear_problem.eval(required=self.required)
+        return np.asarray(r, dtype=float).reshape(-1)
 
     def jacobian(self, x: Array | Any | None = None) -> Array:
         _r, J = self.linearize(x)

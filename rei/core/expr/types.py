@@ -97,8 +97,11 @@ class DirectVectorExpr:
     fn_value: Callable[[RuntimeContext], Array]
     fn_blocks: Callable[[RuntimeContext], Sequence[Array]]
 
+    def eval_value(self, ctx: RuntimeContext) -> Array:
+        return np.asarray(self.fn_value(ctx), dtype=float).reshape(-1)
+
     def eval(self, ctx: RuntimeContext) -> Tuple[Array, Sequence[Array]]:
-        r = np.asarray(self.fn_value(ctx), dtype=float).reshape(-1)
+        r = self.eval_value(ctx)
 
         blocks = [np.asarray(B, dtype=float) for B in self.fn_blocks(ctx)]
         if len(blocks) != len(self.vars):
@@ -116,6 +119,9 @@ class DirectVectorExpr:
         return r, checked
 
     def deps(self) -> Iterable[StateKey]:
+        return []
+
+    def value_deps(self) -> Iterable[StateKey]:
         return []
 
 

@@ -53,6 +53,21 @@ class NLSRuntimeLinearProblem:
         return np.asarray(r, dtype=float).reshape(-1), np.asarray(J, dtype=float)
 
     def eval(self, *, required: Iterable[StateKey] | None = None) -> Array:
+        eval_stacked = getattr(self.runtime, "eval_stacked_terms", None)
+        if callable(eval_stacked):
+            return np.asarray(
+                eval_stacked(
+                    required=required,
+                    weighted=bool(self.weighted),
+                    term_indices=self.term_indices,
+                ),
+                dtype=float,
+            ).reshape(-1)
+
+        eval_fn = getattr(self.runtime, "eval", None)
+        if callable(eval_fn):
+            return np.asarray(eval_fn(required=required), dtype=float).reshape(-1)
+
         r, _J = self.linearize(required=required)
         return np.asarray(r, dtype=float).reshape(-1)
 

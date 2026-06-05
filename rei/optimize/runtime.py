@@ -45,6 +45,34 @@ def collect_required(problem: NLSProblem) -> list[StateKey]:
     return _dedupe_required(req)
 
 
+def collect_value_required(
+    problem: NLSProblem,
+    *,
+    term_indices: Iterable[int] | None = None,
+) -> list[StateKey]:
+    req: list[StateKey] = []
+    n_terms = len(problem.terms)
+    idxs = range(n_terms) if term_indices is None else [int(i) for i in term_indices]
+    for idx in idxs:
+        if idx < 0 or idx >= n_terms:
+            raise IndexError(
+                f"collect_value_required: term index out of range: {idx}. "
+                f"Expected 0..{n_terms - 1}."
+            )
+        expr, _cost = problem.terms[idx]
+        value_deps = getattr(expr, "value_deps", None)
+        if callable(value_deps):
+            try:
+                req.extend(list(value_deps()))
+                continue
+            except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                pass
+        deps = getattr(expr, "deps", None)
+        if callable(deps):
+            req.extend(list(deps()))
+    return _dedupe_required(req)
+
+
 @dataclass(frozen=True)
 class LinearizedTerm:
     term_index: int
@@ -124,6 +152,9 @@ class NLSRuntime:
         req = self.required_list(required)
         self.update_state_if_needed(required=req)
         return self.problem.linearize(ctx=self.ctx, time=self.time, required=req)
+
+    def eval(self, *, required: Iterable[StateKey] | None = None) -> Array:
+        return self.eval_stacked_terms(required=required, weighted=True, term_indices=None)
 
     def _normalize_term_indices(self, term_indices: Iterable[int] | None = None) -> list[int]:
         if term_indices is None:
@@ -365,6 +396,90 @@ class NLSRuntime:
             jacobians.append(J_use)
         return idxs, names, attrs_list, residuals, jacobians
 
+    def _eval_expr_value(self, expr: Any) -> Array:
+        value_fn = getattr(expr, "eval_value", None)
+        if callable(value_fn):
+            try:
+                return np.asarray(value_fn(self.ctx), dtype=float).reshape(-1)
+            except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                pass
+        r_raw, _blocks_raw = expr.eval(self.ctx)
+        return np.asarray(r_raw, dtype=float).reshape(-1)
+
+    def _apply_cost_to_residual_value(
+        self,
+        *,
+        cost: Any,
+        expr: Any,
+        r_raw: Array,
+    ) -> Array:
+        apply_cost = getattr(cost, "apply", None)
+        if not callable(apply_cost):
+            raise TypeError("eval_stacked_terms: Cost object has no callable apply(r, blocks).")
+        try:
+            r_weighted, _blocks_weighted = apply_cost(r_raw, [])
+            return np.asarray(r_weighted, dtype=float).reshape(-1)
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+            blocks_zero = [
+                np.zeros((int(np.asarray(r_raw, dtype=float).reshape(-1).size), int(v.dim())), dtype=float)
+                for v in expr.vars
+            ]
+            r_weighted, _blocks_weighted = apply_cost(r_raw, blocks_zero)
+            return np.asarray(r_weighted, dtype=float).reshape(-1)
+
+    def _eval_term_arrays(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        weighted: bool = True,
+        term_indices: Iterable[int] | None = None,
+    ) -> tuple[list[int], list[str], list[dict[str, Any]], list[Array]]:
+        idxs = self._normalize_term_indices(term_indices)
+        if required is None:
+            req = collect_value_required(self.problem, term_indices=idxs)
+        else:
+            req = self.required_list(required)
+        self.update_state_if_needed(required=req)
+
+        names: list[str] = []
+        attrs_list: list[dict[str, Any]] = []
+        residuals: list[Array] = []
+
+        for idx in idxs:
+            expr, cost = self.problem.terms[idx]
+            term_name = self._term_display_name(idx)
+            attrs = self.problem.term_attrs_at(idx)
+
+            r_raw = self._eval_expr_value(expr)
+            r_use = (
+                self._apply_cost_to_residual_value(cost=cost, expr=expr, r_raw=r_raw)
+                if weighted
+                else r_raw
+            )
+
+            names.append(term_name)
+            attrs_list.append(attrs)
+            residuals.append(np.asarray(r_use, dtype=float).reshape(-1))
+        return idxs, names, attrs_list, residuals
+
+    def eval_stacked_terms(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        weighted: bool = True,
+        term_indices: Iterable[int] | None = None,
+    ) -> Array:
+        """Evaluate selected terms and return stacked residuals without Jacobians."""
+
+        _idxs, _names, _attrs_list, residuals = self._eval_term_arrays(
+            required=required,
+            weighted=weighted,
+            term_indices=term_indices,
+        )
+        if len(residuals) == 0:
+            return np.zeros((0,), dtype=float)
+        return np.concatenate([np.asarray(r, dtype=float).reshape(-1) for r in residuals], axis=0)
+
     def _stack_term_arrays(
         self,
         *,
@@ -585,7 +700,7 @@ class NLSRuntime:
         return np.vstack(rows)
 
     def cost_value(self, *, required: Iterable[StateKey] | None = None) -> float:
-        r_all, _ = self.linearize(required=required)
+        r_all = self.eval_stacked_terms(required=required, weighted=True, term_indices=None)
         return float(r_all @ r_all)
 
     def _term_display_name(self, index: int) -> str:

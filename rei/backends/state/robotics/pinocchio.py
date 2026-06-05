@@ -254,6 +254,24 @@ class PinocchioTrajectoryStateBuilder(TrajectoryStateBuilderMixin, PinocchioStat
             error_prefix="PinocchioTrajectoryStateBuilder",
         )
 
+    def _compose_motion(self, p: Array, *, k: int) -> Array:
+        p_vec = np.asarray(p, dtype=float).reshape(-1)
+        dof = int(self.trajectory_map.q_dim)
+        parts: list[Array] = []
+        for deriv_order in (0, 1, 2):
+            traj = self.trajectory_derivative_maps.get(int(deriv_order), None)
+            if traj is None:
+                q_r = np.zeros((dof,), dtype=float)
+            else:
+                q_r = np.asarray(traj.q_at(p_vec, k), dtype=float).reshape(-1)
+                if q_r.size != dof:
+                    raise ValueError(
+                        "PinocchioTrajectoryStateBuilder: derivative map q size mismatch. "
+                        f"order={deriv_order}, expected {dof}, got {q_r.size}."
+                    )
+            parts.append(q_r)
+        return np.concatenate(parts, axis=0)
+
     def _active_motion_triplet(self, *, q: Array, key: StateKey) -> tuple[Array, Array, Array]:
         q_vec = np.asarray(q, dtype=float).reshape(-1)
         dof = int(q_vec.size)

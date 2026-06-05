@@ -98,6 +98,39 @@ class GetVarExpr:
     def value_deps(self):
         return []
 
+    def eval_value(self, ctx: RuntimeContext):
+        x = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
+        n_total = int(x.size)
+
+        if self.k is None:
+            return x.copy()
+
+        k = int(self.k)
+
+        steps = 1
+        time = getattr(ctx, "time", None)
+        if time is not None and hasattr(time, "N"):
+            try:
+                steps = int(time.N) + 1
+            except Exception:
+                steps = 1
+
+        chunked = bool(steps > 1 and n_total % steps == 0)
+        if not chunked:
+            if k != 0:
+                raise ValueError(
+                    f"{self.name}: requested k={k}, but variable '{self.vars[0].name}' is not time-chunked "
+                    f"(dim={n_total}, steps={steps})."
+                )
+            return x.copy()
+
+        if k < 0 or k >= steps:
+            raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+
+        n = int(n_total // steps)
+        start = int(k * n)
+        return x[start : start + n].copy()
+
     def eval(self, ctx: RuntimeContext):
         x = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
         n_total = int(x.size)
@@ -151,6 +184,29 @@ class TrajectoryVarExpr:
     def value_deps(self):
         return []
 
+    def eval_value(self, ctx: RuntimeContext):
+        del ctx
+        p = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
+        if p.size != self.trajectory.p_dim:
+            raise ValueError(
+                f"{self.name}: parameter size mismatch. "
+                f"Expected {self.trajectory.p_dim}, got {p.size}."
+            )
+        y_all = (self.trajectory.A @ p + self.trajectory.b).reshape(-1)
+
+        if self.k is None:
+            return y_all
+
+        k = int(self.k)
+        steps = int(self.trajectory.steps)
+        if k < 0 or k >= steps:
+            raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+
+        seg = int(self.trajectory.q_dim)
+        start = int(k * seg)
+        stop = int(start + seg)
+        return y_all[start:stop].copy()
+
     def eval(self, ctx: RuntimeContext):
         del ctx
         p = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
@@ -187,8 +243,55 @@ class TrajectoryVarDerivativesExpr:
     def deps(self):
         return []
 
-    def eval(self, ctx: RuntimeContext):
+    def value_deps(self):
+        return []
+
+    def eval_value(self, ctx: RuntimeContext):
         del ctx
+        if len(self.trajectories) == 0:
+            raise ValueError(f"{self.name}: trajectories must be non-empty.")
+
+        p = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
+        p_dim = int(self.trajectories[0].p_dim)
+        if p.size != p_dim:
+            raise ValueError(
+                f"{self.name}: parameter size mismatch. "
+                f"Expected {p_dim}, got {p.size}."
+            )
+
+        steps = int(self.trajectories[0].steps)
+        q_dim = int(self.trajectories[0].q_dim)
+        for i, traj in enumerate(self.trajectories):
+            if traj.p_dim != p_dim:
+                raise ValueError(
+                    f"{self.name}: trajectory[{i}] p_dim mismatch. "
+                    f"Expected {p_dim}, got {traj.p_dim}."
+                )
+            if traj.steps != steps or traj.q_dim != q_dim:
+                raise ValueError(
+                    f"{self.name}: trajectory[{i}] shape mismatch. "
+                    f"Expected steps={steps}, q_dim={q_dim}, got steps={traj.steps}, q_dim={traj.q_dim}."
+                )
+
+        if self.k is not None:
+            k = int(self.k)
+            if k < 0 or k >= steps:
+                raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+
+            start = int(k * q_dim)
+            stop = int(start + q_dim)
+            y_parts = []
+            for traj in self.trajectories:
+                y_all = (traj.A @ p + traj.b).reshape(-1)
+                y_parts.append(y_all[start:stop].copy())
+            return np.concatenate(y_parts, axis=0)
+
+        return np.concatenate(
+            [(traj.A @ p + traj.b).reshape(-1) for traj in self.trajectories],
+            axis=0,
+        )
+
+    def eval(self, ctx: RuntimeContext):
         if len(self.trajectories) == 0:
             raise ValueError(f"{self.name}: trajectories must be non-empty.")
 
@@ -258,6 +361,49 @@ class TimeDiffExpr:
 
     def deps(self):
         return self.base.deps()
+
+    def value_deps(self):
+        deps = getattr(self.base, "value_deps", None)
+        if not callable(deps):
+            raise AttributeError(f"{self.name}: value_deps fast path is not available.")
+        return deps()
+
+    def eval_value(self, ctx: RuntimeContext):
+        value = getattr(self.base, "eval_value", None)
+        if not callable(value):
+            raise AttributeError(f"{self.name}: value fast path is not available.")
+        y = np.asarray(value(ctx), dtype=float).reshape(-1)
+
+        seg = int(self.segment_dim)
+        if seg <= 0:
+            raise ValueError(f"{self.name}: segment_dim must be > 0, got {seg}.")
+        if y.size % seg != 0:
+            raise ValueError(
+                f"{self.name}: base size {y.size} is not divisible by segment_dim={seg}."
+            )
+
+        steps = int(y.size // seg)
+        if steps < 2:
+            raise ValueError(f"{self.name}: need at least 2 steps, got {steps}.")
+
+        y2 = y.reshape(steps, seg)
+
+        scale = float(self.scale)
+        if self.use_time_dt:
+            dt = self.dt
+            if dt is None:
+                time = getattr(ctx, "time", None)
+                if time is None or not hasattr(time, "dt"):
+                    raise ValueError(f"{self.name}: wrt='time' requires time.dt in context or explicit dt in DSL.")
+                try:
+                    dt = float(time.dt)
+                except Exception as e:
+                    raise ValueError(f"{self.name}: invalid time.dt in context: {getattr(time, 'dt', None)!r}") from e
+            if dt <= 0.0:
+                raise ValueError(f"{self.name}: dt must be > 0 for wrt='time', got {dt}.")
+            scale = scale / float(dt)
+
+        return scale * (y2[1:, :] - y2[:-1, :]).reshape(-1)
 
     def eval(self, ctx: RuntimeContext):
         y, blocks = self.base.eval(ctx)
@@ -438,6 +584,24 @@ class StackExpr:
             out.extend(list(p.deps()))
         return out
 
+    def value_deps(self):
+        out = []
+        for p in self.parts:
+            deps = getattr(p, "value_deps", None)
+            if not callable(deps):
+                raise AttributeError(f"{self.name}: value_deps fast path is not available.")
+            out.extend(list(deps()))
+        return out
+
+    def eval_value(self, ctx: RuntimeContext):
+        r_list = []
+        for p in self.parts:
+            value = getattr(p, "eval_value", None)
+            if not callable(value):
+                raise AttributeError(f"{self.name}: value fast path is not available.")
+            r_list.append(np.asarray(value(ctx), float).reshape(-1))
+        return np.concatenate(r_list, axis=0) if r_list else np.zeros((0,), float)
+
     def eval(self, ctx: RuntimeContext):
         r_list = []
         J_list = None
@@ -468,6 +632,32 @@ class ComponentExpr:
 
     def deps(self):
         return self.base.deps()
+
+    def value_deps(self):
+        deps = getattr(self.base, "value_deps", None)
+        if not callable(deps):
+            raise AttributeError(f"{self.name}: value_deps fast path is not available.")
+        return deps()
+
+    def eval_value(self, ctx: RuntimeContext):
+        value = getattr(self.base, "eval_value", None)
+        if not callable(value):
+            raise AttributeError(f"{self.name}: value fast path is not available.")
+        y = np.asarray(value(ctx), dtype=float).reshape(-1)
+
+        seg = int(self.segment_dim)
+        idx = int(self.index)
+        if seg <= 0:
+            raise ValueError(f"{self.name}: segment_dim must be > 0, got {seg}.")
+        if idx < 0 or idx >= seg:
+            raise ValueError(f"{self.name}: index must be in [0, {seg - 1}], got {idx}.")
+        if y.size % seg != 0:
+            raise ValueError(
+                f"{self.name}: base size {y.size} is not divisible by segment_dim={seg}."
+            )
+
+        steps = int(y.size // seg)
+        return y.reshape(steps, seg)[:, idx].reshape(-1)
 
     def eval(self, ctx: RuntimeContext):
         y, blocks = self.base.eval(ctx)
@@ -509,6 +699,19 @@ class HingeExpr:
 
     def deps(self):
         return self.base.deps()
+
+    def value_deps(self):
+        deps = getattr(self.base, "value_deps", None)
+        if not callable(deps):
+            raise AttributeError(f"{self.name}: value_deps fast path is not available.")
+        return deps()
+
+    def eval_value(self, ctx: RuntimeContext):
+        value = getattr(self.base, "eval_value", None)
+        if not callable(value):
+            raise AttributeError(f"{self.name}: value fast path is not available.")
+        h = np.asarray(value(ctx), dtype=float).reshape(-1)
+        return np.maximum(0.0, h)
 
     def eval(self, ctx: RuntimeContext):
         h, blocks = self.base.eval(ctx)

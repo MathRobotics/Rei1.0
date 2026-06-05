@@ -312,6 +312,24 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             error_prefix="KotsTrajectoryStateBuilder",
         )
 
+    def _compose_motion(self, p: Array, *, k: int) -> Array:
+        p_vec = np.asarray(p, dtype=float).reshape(-1)
+        dof = int(self.trajectory_map.q_dim)
+        order = int(self._model_order())
+        motion = np.zeros((dof * order,), dtype=float)
+        for deriv_order, traj in self.trajectory_derivative_maps.items():
+            deriv_order_i = int(deriv_order)
+            if deriv_order_i >= order:
+                continue
+            q_r = np.asarray(traj.q_at(p_vec, k), dtype=float).reshape(-1)
+            if q_r.size != dof:
+                raise ValueError(
+                    "KotsTrajectoryStateBuilder: derivative map q size mismatch. "
+                    f"order={deriv_order_i}, expected {dof}, got {q_r.size}."
+                )
+            motion[deriv_order_i::order] = q_r
+        return motion
+
     def _chain_param_jac(
         self,
         J_raw: Array,

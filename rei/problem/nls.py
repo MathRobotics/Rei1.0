@@ -140,8 +140,12 @@ class NLSProblem:
 
         return r_all, J_all
 
+    def eval(self, *, ctx: Any = None, time: Any = None, required: Any = None) -> Array:
+        r_all, _J_all = self.linearize(ctx=ctx, time=time, required=required)
+        return np.asarray(r_all, dtype=float).reshape(-1)
+
     def cost_value(self, *, ctx: Any = None, time: Any = None, required: Any = None) -> float:
-        r_all, _ = self.linearize(ctx=ctx, time=time, required=required)
+        r_all = self.eval(ctx=ctx, time=time, required=required)
         return float(r_all @ r_all)
 
 

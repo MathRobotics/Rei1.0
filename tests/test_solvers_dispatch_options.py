@@ -6,8 +6,12 @@ import types
 import numpy as np
 import pytest
 
+from rei.core.expr.types import DirectVectorExpr, RuntimeContext, Variable, VariablePack
+from rei.optimize.costs import L2Cost
 from rei.optimize.builder import compile_nls_problem
+from rei.optimize.runtime import NLSRuntime
 from rei.optimize.solvers import solve
+from rei.problem import NLSProblem
 
 
 def _build_scalar_runtime(target: float = 0.0):
@@ -151,3 +155,31 @@ class TestSolverDispatchOptions:
                 solver="gauss_newton",
                 options={"max_iters": 5, "print_level": 0},
             )
+
+    def test_solve_gauss_newton_uses_value_only_for_setup_and_line_search(self) -> None:
+        x_var = Variable(name="x", x=np.array([0.0], dtype=float))
+        pack = VariablePack([x_var])
+        calls = {"value": 0, "blocks": 0}
+
+        def value(ctx: RuntimeContext) -> np.ndarray:
+            calls["value"] += 1
+            x = float(ctx.pack.vars[0].x[0])
+            return np.array([x - 1.0], dtype=float)
+
+        def blocks(_ctx: RuntimeContext) -> list[np.ndarray]:
+            calls["blocks"] += 1
+            return [np.array([[1.0]], dtype=float)]
+
+        expr = DirectVectorExpr(name="x_minus_target", vars=[x_var], fn_value=value, fn_blocks=blocks)
+        problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = NLSRuntime(problem=problem, ctx=RuntimeContext(pack=pack), required=[])
+
+        out = solve(
+            runtime,
+            solver="gauss_newton",
+            options={"max_iters": 3, "tol_r": 1e-14, "tol_dx": 1e-14},
+        )
+
+        assert out.converged
+        assert calls["blocks"] == int(out.stats.iterations) + 1
+        assert calls["value"] > calls["blocks"]

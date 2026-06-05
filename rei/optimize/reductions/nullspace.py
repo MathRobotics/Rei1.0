@@ -176,6 +176,33 @@ class NullspaceReducedRuntime:
             term_indices=full_idxs,
         )
 
+    def _eval_full_stacked(
+        self,
+        *,
+        required: Iterable[StateKey] | None,
+        weighted: bool,
+        term_indices: Iterable[int] | None,
+    ) -> Array:
+        req = self.required_list(required)
+        self._sync_full_from_reduced()
+        full_idxs = self._selected_full_term_indices(term_indices)
+        eval_stacked = getattr(self.full_runtime, "eval_stacked_terms", None)
+        if callable(eval_stacked):
+            return np.asarray(
+                eval_stacked(
+                    required=req,
+                    weighted=weighted,
+                    term_indices=full_idxs,
+                ),
+                dtype=float,
+            ).reshape(-1)
+        r_full, _J_full = self.full_runtime.linearize_stacked_terms(
+            required=req,
+            weighted=weighted,
+            term_indices=full_idxs,
+        )
+        return np.asarray(r_full, dtype=float).reshape(-1)
+
     def _linearize_full_stacked_with_layout(
         self,
         *,
@@ -205,6 +232,19 @@ class NullspaceReducedRuntime:
             term_indices=term_indices,
         )
         return np.asarray(r_full, dtype=float).reshape(-1), np.asarray(J_full, dtype=float) @ self.nullspace_basis
+
+    def eval_stacked_terms(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        weighted: bool = True,
+        term_indices: Iterable[int] | None = None,
+    ) -> Array:
+        return self._eval_full_stacked(
+            required=required,
+            weighted=weighted,
+            term_indices=term_indices,
+        )
 
     def linearize_stacked_terms_with_layout(
         self,
@@ -255,8 +295,15 @@ class NullspaceReducedRuntime:
         )
         return r_red, J_red
 
+    def eval(self, *, required: Iterable[StateKey] | None = None) -> Array:
+        return self.eval_stacked_terms(
+            required=required,
+            weighted=True,
+            term_indices=None,
+        )
+
     def cost_value(self, *, required: Iterable[StateKey] | None = None) -> float:
-        r, _ = self.linearize(required=required)
+        r = self.eval(required=required)
         return float(r @ r)
 
 

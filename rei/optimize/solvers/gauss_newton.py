@@ -48,7 +48,8 @@ def solve_gauss_newton(
             linear_problem.set_point(as_vec(x0, expected_size=n_total, name="x0"))
         x0_start = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
         req = linear_problem.required_list(required)
-        r_init, _J_init = linear_problem.linearize(required=req)
+        eval_required = None if required is None else tuple(required)
+        r_init = np.asarray(linear_problem.eval(required=eval_required), dtype=float).reshape(-1)
         initial_cost = float(r_init @ r_init)
 
     rnorm = float("inf")
@@ -154,7 +155,7 @@ def solve_gauss_newton(
             for _ in range(max_ls):
                 x_trial = x_cur + step * dx
                 linear_problem.set_point(x_trial)
-                r_trial, _ = linear_problem.linearize(required=req)
+                r_trial = np.asarray(linear_problem.eval(required=eval_required), dtype=float).reshape(-1)
                 cost_trial = float(r_trial @ r_trial)
 
                 if cost_trial < best_cost:
@@ -197,7 +198,7 @@ def solve_gauss_newton(
             )
 
     with prof.span("solve.final.linearize"):
-        r_all, _J_all = linear_problem.linearize(required=req)
+        r_all = np.asarray(linear_problem.eval(required=eval_required), dtype=float).reshape(-1)
     rnorm = float(np.linalg.norm(r_all))
     cost = float(r_all @ r_all)
     return _outcome(

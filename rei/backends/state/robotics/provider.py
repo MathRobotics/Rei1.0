@@ -842,6 +842,47 @@ class TrajectoryRoboticsStateProvider(TrajectoryStateBuilderMixin, RoboticsState
             error_prefix="TrajectoryRoboticsStateProvider",
         )
 
+    def _compose_motion(self, p: Array, *, k: int) -> Array:
+        p_vec = np.asarray(p, dtype=float).reshape(-1)
+        if self.motion_layout == "q":
+            return np.asarray(self.trajectory_map.q_at(p_vec, k), dtype=float).reshape(-1)
+
+        dof = int(self.trajectory_map.q_dim)
+        if self.motion_layout == "stacked":
+            parts: list[Array] = []
+            for deriv_order in self.derivative_orders:
+                traj = self.trajectory_derivative_maps.get(int(deriv_order), None)
+                q_r = (
+                    np.zeros((dof,), dtype=float)
+                    if traj is None
+                    else np.asarray(traj.q_at(p_vec, k), dtype=float).reshape(-1)
+                )
+                if q_r.size != dof:
+                    raise ValueError(
+                        "TrajectoryRoboticsStateProvider: derivative map q size mismatch. "
+                        f"order={deriv_order}, expected {dof}, got {q_r.size}."
+                    )
+                parts.append(q_r)
+            return np.concatenate(parts, axis=0)
+
+        order = self.motion_order
+        if order is None:
+            order = max(self.trajectory_derivative_maps.keys()) + 1
+        order_i = int(order)
+        motion = np.zeros((dof * order_i,), dtype=float)
+        for deriv_order, traj in self.trajectory_derivative_maps.items():
+            deriv_order_i = int(deriv_order)
+            if deriv_order_i >= order_i:
+                continue
+            q_r = np.asarray(traj.q_at(p_vec, k), dtype=float).reshape(-1)
+            if q_r.size != dof:
+                raise ValueError(
+                    "TrajectoryRoboticsStateProvider: derivative map q size mismatch. "
+                    f"order={deriv_order_i}, expected {dof}, got {q_r.size}."
+                )
+            motion[deriv_order_i::order_i] = q_r
+        return motion
+
     def _update_trajectory_step(self, *, k: int, q_k: Array, motion_k: Array) -> None:
         q_vec = np.asarray(q_k, dtype=float).reshape(-1)
         motion_vec = np.asarray(motion_k, dtype=float).reshape(-1)
