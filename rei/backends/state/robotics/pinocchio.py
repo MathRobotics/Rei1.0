@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -9,77 +8,47 @@ import numpy as np
 from ....core.state_cache import StateKey
 from ....core.state_schema import (
     DTYPE_COORD,
-    DTYPE_DYNAMICS,
     DTYPE_KINEMATICS,
     canonical_field_name,
 )
 from ....core.trajectory import TrajectoryMap
-from .spatial import Jacobian6Order, linear_part_from_jacobian6
-from .trajectory import (
+from .spatial import Jacobian6Order
+from ..trajectory import (
     chain_param_jacobian,
     compose_stacked_motion_and_jac,
     TrajectoryStateBuilderMixin,
     validate_trajectory_derivative_maps,
 )
-from .optional import import_optional_backend, require_module_attrs
 from ..dispatch.template import BackendDispatchStateBuilder
-
-pin = import_optional_backend(
-    "pinocchio",
-    backend_name="rei.backends.state.robotics.pinocchio",
-    install_hint="uv sync --group pinocchio",
-)
-
-_REQUIRED_ATTRS = ("buildModelFromUrdf", "computeFrameJacobian", "forwardKinematics", "updateFramePlacements")
-require_module_attrs(
-    pin,
-    _REQUIRED_ATTRS,
-    backend_name="rei.backends.state.robotics.pinocchio",
-    install_hint="uv sync --group pinocchio",
-    extra_hint="You may have installed a different PyPI package named `pinocchio`.",
-)
+from .pinocchio_adapter import compute_pinocchio_frame_jacobian, PinocchioAdapter
+from .provider import register_robot_binding_table
 
 Array = np.ndarray
 STATE_JACOBIAN_VAR = "state"
 
 
-def compute_pinocchio_frame_jacobian(model: Any, data: Any, q: Array, frame_ref: Any) -> Array:
-    """Pinocchio-specific `computeFrameJacobian` wrapper with API/version fallbacks."""
-    frame_id = int(frame_ref)
-
-    ref = getattr(pin, "ReferenceFrame", None)
-    for name in ("LOCAL_WORLD_ALIGNED", "LOCAL"):
-        rf = getattr(ref, name, None) if ref is not None else None
-        if rf is None:
-            continue
-        try:
-            return pin.computeFrameJacobian(model, data, q, frame_id, rf)
-        except TypeError:
-            break
-
-    return pin.computeFrameJacobian(model, data, q, frame_id)
-
-
-@dataclass(frozen=True)
-class PinocchioFieldFamily:
-    field: str
-    value_handler_name: str
-    jac_handler_name: str
-
-
-# pinocchio.py 内で「どの field ファミリを提供するか」を宣言する登録リスト。
+# pinocchio.py 内で「どの field ファミリを提供するか」を宣言する登録表。
 # StateKey の (dtype, owner_type, field) マッチは BackendDispatchStateBuilder 側で自動実行される。
-PINOCCHIO_DEFAULT_FIELD_FAMILIES: tuple[PinocchioFieldFamily, ...] = (
-    PinocchioFieldFamily(field="pos", value_handler_name="_handle_pos", jac_handler_name="_handle_pos_jac"),
-    PinocchioFieldFamily(field="rot", value_handler_name="_handle_rot", jac_handler_name="_handle_rot_jac"),
-    PinocchioFieldFamily(field="frame", value_handler_name="_handle_frame", jac_handler_name="_handle_frame_jac"),
-)
+PINOCCHIO_DEFAULT_BINDINGS: dict[str, str] = {
+    "kinematics.link.pos": "pos",
+    "kinematics.link.pos.J_state": "pos_jac",
+    "kinematics.link.rot": "rot",
+    "kinematics.link.rot.J_state": "rot_jac",
+    "kinematics.link.frame": "frame",
+    "kinematics.link.frame.J_state": "frame_jac",
+}
+
+PINOCCHIO_DYNAMICS_BINDINGS: dict[str, tuple[str, str]] = {
+    "torque": ("torque", "torque_jac"),
+    "momentum": ("momentum", "momentum_jac"),
+    "force": ("force", "force_jac"),
+}
 
 
 class PinocchioStateBuilder(BackendDispatchStateBuilder):
     """Pinocchio -> `build_state()` bridge with StateKey-based automatic dispatch.
 
-    `PINOCCHIO_DEFAULT_FIELD_FAMILIES` をもとに、
+    `PINOCCHIO_DEFAULT_BINDINGS` をもとに、
     `(dtype="kinematics", owner_type="link", field=<...>)` の handler を一括登録する。
     """
 
@@ -114,32 +83,48 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
                 "'auto', 'analytic', or 'finite_difference'."
             )
         self.torque_jacobian = torque_jacobian_name
+        self.adapter = PinocchioAdapter(
+            self.model,
+            self.data,
+            owner_type=self.owner_type,
+            dynamics_owner_type=self.dynamics_owner_type,
+            jac6_order=self.jac6_order,
+            finite_diff_eps=self.finite_diff_eps,
+            torque_jacobian=self.torque_jacobian,
+        )
 
-        family_map = {spec.field: spec for spec in PINOCCHIO_DEFAULT_FIELD_FAMILIES}
-        selected_fields = [spec.field for spec in PINOCCHIO_DEFAULT_FIELD_FAMILIES] if fields is None else [str(f) for f in fields]
+        supported_fields = {
+            key.split(".")[2]
+            for key in PINOCCHIO_DEFAULT_BINDINGS
+            if not key.endswith(".J_state")
+        }
+        selected_fields = sorted(supported_fields) if fields is None else [str(f) for f in fields]
         if len(selected_fields) == 0:
             raise ValueError("PinocchioStateBuilder: fields must be non-empty.")
 
         self.field_to_jac: dict[str, str] = {}
-        for field in selected_fields:
-            spec = family_map.get(field, None)
-            if spec is None:
-                supported = ", ".join(sorted(family_map.keys()))
+        kinematics_bindings: dict[str, str] = {}
+        for field_raw in selected_fields:
+            field = canonical_field_name(field_raw)
+            if field not in supported_fields:
+                supported = ", ".join(sorted(supported_fields))
                 raise ValueError(
                     f"PinocchioStateBuilder: unsupported field {field!r}. "
                     f"Supported fields: {supported}."
                 )
-            value_handler = getattr(self, spec.value_handler_name)
-            jac_handler = getattr(self, spec.jac_handler_name)
-            _value_name, jac_name = self.register_value_and_jac(
-                dtype=self.dtype,
-                owner_type=self.owner_type,
-                field=spec.field,
-                value_handler=value_handler,
-                jac_handler=jac_handler,
-                jacobian_wrt=STATE_JACOBIAN_VAR,
-            )
-            self.field_to_jac[spec.field] = jac_name
+            kinematics_bindings[f"kinematics.link.{field}"] = PINOCCHIO_DEFAULT_BINDINGS[f"kinematics.link.{field}"]
+            kinematics_bindings[f"kinematics.link.{field}.J_state"] = PINOCCHIO_DEFAULT_BINDINGS[
+                f"kinematics.link.{field}.J_state"
+            ]
+        registered = register_robot_binding_table(
+            self,
+            kinematics_bindings,
+            handler_owner=self.adapter,
+            default_jacobian_wrt=STATE_JACOBIAN_VAR,
+        )
+        for (_dtype, _owner_type, field), jac_name in registered.items():
+            if jac_name is not None:
+                self.field_to_jac[field] = jac_name
 
         if dynamics_fields is not None:
             dyn_fields = [canonical_field_name(str(f)) for f in dynamics_fields]
@@ -147,46 +132,29 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
             if len(dyn_fields) == 0:
                 raise ValueError("PinocchioStateBuilder: dynamics_fields must be non-empty when provided.")
             for field in dyn_fields:
-                if field == "torque":
-                    self.register_value_and_jac(
-                        dtype=DTYPE_DYNAMICS,
-                        owner_type=self.dynamics_owner_type,
-                        field="torque",
-                        value_handler=self._handle_torque,
-                        jac_handler=self._handle_torque_jac,
-                        jacobian_wrt=STATE_JACOBIAN_VAR,
-                    )
-                    continue
-                if field == "momentum":
-                    self.register_value_and_jac(
-                        dtype=DTYPE_DYNAMICS,
-                        owner_type=self.dynamics_owner_type,
-                        field="momentum",
-                        value_handler=self._handle_momentum,
-                        jac_handler=self._handle_momentum_jac,
-                        jacobian_wrt=STATE_JACOBIAN_VAR,
-                    )
-                    continue
-                if field == "force":
-                    # Joint-space generalized force alias. In this backend it maps to torque.
-                    self.register_value_and_jac(
-                        dtype=DTYPE_DYNAMICS,
-                        owner_type=self.dynamics_owner_type,
-                        field="force",
-                        value_handler=self._handle_force,
-                        jac_handler=self._handle_force_jac,
-                        jacobian_wrt=STATE_JACOBIAN_VAR,
+                if field in PINOCCHIO_DYNAMICS_BINDINGS:
+                    value_name, jac_name = PINOCCHIO_DYNAMICS_BINDINGS[field]
+                    register_robot_binding_table(
+                        self,
+                        {
+                            f"dynamics.{self.dynamics_owner_type}.{field}": value_name,
+                            f"dynamics.{self.dynamics_owner_type}.{field}.J_state": jac_name,
+                        },
+                        handler_owner=self.adapter,
+                        owner_types=("total_joint", self.dynamics_owner_type),
+                        default_jacobian_wrt=STATE_JACOBIAN_VAR,
                     )
                     continue
                 if dynamics_custom_handlers is not None and field in dynamics_custom_handlers:
                     value_handler, jac_handler = dynamics_custom_handlers[field]
-                    self.register_value_and_jac(
-                        dtype=DTYPE_DYNAMICS,
-                        owner_type=self.dynamics_owner_type,
-                        field=field,
-                        value_handler=value_handler,
-                        jac_handler=jac_handler,
-                        jacobian_wrt=STATE_JACOBIAN_VAR,
+                    register_robot_binding_table(
+                        self,
+                        {
+                            f"dynamics.{self.dynamics_owner_type}.{field}": value_handler,
+                            f"dynamics.{self.dynamics_owner_type}.{field}.J_state": jac_handler,
+                        },
+                        owner_types=("total_joint", self.dynamics_owner_type),
+                        default_jacobian_wrt=STATE_JACOBIAN_VAR,
                     )
                     continue
                 raise ValueError(
@@ -196,296 +164,10 @@ class PinocchioStateBuilder(BackendDispatchStateBuilder):
                 )
 
     def _update_kinematics(self, q: Array) -> None:
-        pin.forwardKinematics(self.model, self.data, q)
-        if hasattr(pin, "computeJointJacobians"):
-            pin.computeJointJacobians(self.model, self.data, q)
-        pin.updateFramePlacements(self.model, self.data)
+        self.adapter.update(q)
 
     def _resolve_state_ref(self, key: StateKey) -> Any:
-        owner = getattr(key, "owner", None)
-        owner_type = getattr(owner, "owner_type", None)
-        owner_name = getattr(owner, "owner_name", None)
-        if not isinstance(owner_name, str) or owner_name == "":
-            raise ValueError(f"Pinocchio backend expects non-empty owner_name in key, got: {key!r}")
-
-        if owner_type == self.owner_type:
-            return int(self.model.getFrameId(owner_name))
-
-        if owner_type == self.dynamics_owner_type and getattr(key, "dtype", None) == DTYPE_DYNAMICS:
-            return ("dynamics", owner_name)
-
-        if (
-            owner_type == "total_joint"
-            and getattr(key, "dtype", None) == DTYPE_COORD
-            and str(getattr(key, "field", "")) == "q"
-        ):
-            return ("total_joint", owner_name, "q")
-
-        raise ValueError(
-            "Pinocchio backend expects owner_type="
-            f"{self.owner_type!r} (kinematics) or {self.dynamics_owner_type!r} (dynamics), got: {key!r}"
-        )
-
-    def _frame_pos(self, frame_ref: Any) -> Array:
-        frame_id = int(frame_ref)
-        return np.asarray(self.data.oMf[frame_id].translation, dtype=float).reshape(3)
-
-    def _frame_rot(self, frame_ref: Any) -> Array:
-        frame_id = int(frame_ref)
-        rot = np.asarray(self.data.oMf[frame_id].rotation, dtype=float).reshape(3, 3)
-        return rot.reshape(-1)
-
-    def _frame_value(self, field: str, frame_ref: Any) -> Array:
-        if field == "pos":
-            return self._frame_pos(frame_ref)
-        if field == "rot":
-            return self._frame_rot(frame_ref)
-        if field == "frame":
-            return np.concatenate([self._frame_pos(frame_ref), self._frame_rot(frame_ref)], axis=0)
-        raise ValueError(f"PinocchioStateBuilder: unsupported value field: {field!r}")
-
-    def _finite_difference_jacobian(
-        self,
-        q: Array,
-        *,
-        frame_ref: Any,
-        value_fn: Callable[[Any], Array],
-    ) -> Array:
-        q0 = np.asarray(q, dtype=float).reshape(-1)
-        y0 = np.asarray(value_fn(frame_ref), dtype=float).reshape(-1)
-        m = int(y0.size)
-        n = int(q0.size)
-        J = np.zeros((m, n), dtype=float)
-        if n == 0:
-            return J
-
-        eps = float(self.finite_diff_eps)
-        try:
-            for i in range(n):
-                h = eps * max(1.0, abs(float(q0[i])))
-                q_plus = q0.copy()
-                q_plus[i] += h
-                self._update_kinematics(q_plus)
-                y_plus = np.asarray(value_fn(frame_ref), dtype=float).reshape(-1)
-                J[:, i] = (y_plus - y0) / h
-        finally:
-            self._update_kinematics(q0)
-
-        return J
-
-    def _handle_pos(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
-        del q, key
-        return self._frame_pos(frame_ref)
-
-    def _handle_pos_jac(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
-        del key
-        J6 = compute_pinocchio_frame_jacobian(self.model, self.data, q, frame_ref)
-        return linear_part_from_jacobian6(J6, order=self.jac6_order)
-
-    def _handle_rot(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
-        del q, key
-        return self._frame_rot(frame_ref)
-
-    def _handle_rot_jac(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
-        del key
-        return self._finite_difference_jacobian(
-            q,
-            frame_ref=frame_ref,
-            value_fn=self._frame_rot,
-        )
-
-    def _handle_frame(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
-        del q, key
-        return self._frame_value("frame", frame_ref)
-
-    def _handle_frame_jac(self, q: Array, key: StateKey, frame_ref: Any) -> Array:
-        del key
-        return self._finite_difference_jacobian(
-            q,
-            frame_ref=frame_ref,
-            value_fn=lambda ref: self._frame_value("frame", ref),
-        )
-
-    def _pin_nv(self, *, default: int) -> int:
-        raw = getattr(self.model, "nv", None)
-        if raw is None:
-            return int(default)
-        try:
-            return int(raw)
-        except Exception:
-            return int(default)
-
-    def _torque_value_with_motion(
-        self,
-        *,
-        q_vec: Array,
-        v_vec: Array,
-        a_vec: Array,
-    ) -> Array:
-        q_use = np.asarray(q_vec, dtype=float).reshape(-1)
-        nv = self._pin_nv(default=int(q_use.size))
-        v_use = np.asarray(v_vec, dtype=float).reshape(-1)
-        a_use = np.asarray(a_vec, dtype=float).reshape(-1)
-        if v_use.size != nv:
-            raise ValueError(
-                "PinocchioStateBuilder: velocity size mismatch for torque computation. "
-                f"Expected nv={nv}, got {v_use.size}."
-            )
-        if a_use.size != nv:
-            raise ValueError(
-                "PinocchioStateBuilder: acceleration size mismatch for torque computation. "
-                f"Expected nv={nv}, got {a_use.size}."
-            )
-
-        if hasattr(pin, "rnea"):
-            tau = pin.rnea(self.model, self.data, q_use, v_use, a_use)
-            return _as_dyn_vec(tau)
-
-        if hasattr(pin, "computeGeneralizedGravity"):
-            tau = pin.computeGeneralizedGravity(self.model, self.data, q_use)
-            return _as_dyn_vec(tau)
-
-        raise ValueError("PinocchioStateBuilder: torque computation requires rnea or computeGeneralizedGravity.")
-
-    def _torque_value(self, q: Array) -> Array:
-        q_vec = np.asarray(q, dtype=float).reshape(-1)
-        nv = self._pin_nv(default=int(q_vec.size))
-        v0 = np.zeros((nv,), dtype=float)
-        a0 = np.zeros((nv,), dtype=float)
-        return self._torque_value_with_motion(
-            q_vec=q_vec,
-            v_vec=v0,
-            a_vec=a0,
-        )
-
-    def _handle_torque(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del key, state_ref
-        return self._torque_value(q)
-
-    def _handle_torque_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del key
-        nv = self._pin_nv(default=int(np.asarray(q, dtype=float).reshape(-1).size))
-        v0 = np.zeros((nv,), dtype=float)
-        a0 = np.zeros((nv,), dtype=float)
-        J_motion = self._torque_motion_jacobian(
-            q_vec=q,
-            v_vec=v0,
-            a_vec=a0,
-        )
-        if J_motion is not None:
-            q_size = int(np.asarray(q, dtype=float).reshape(-1).size)
-            return J_motion[:, :q_size]
-
-        q0 = np.asarray(q, dtype=float).reshape(-1)
-        y0 = self._torque_value(q0)
-        m = int(y0.size)
-        n = int(q0.size)
-        J = np.zeros((m, n), dtype=float)
-        if n == 0:
-            return J
-
-        eps = float(self.finite_diff_eps)
-        for i in range(n):
-            h = eps * max(1.0, abs(float(q0[i])))
-            qp = q0.copy()
-            qp[i] += h
-            yp = self._torque_value(qp)
-            J[:, i] = (yp - y0) / h
-        return J
-
-    def _torque_motion_jacobian(
-        self,
-        *,
-        q_vec: Array,
-        v_vec: Array,
-        a_vec: Array,
-    ) -> Array | None:
-        mode = str(getattr(self, "torque_jacobian", "auto"))
-        if mode == "finite_difference":
-            return None
-        if not hasattr(pin, "computeRNEADerivatives"):
-            if mode == "analytic":
-                raise ValueError(
-                    "PinocchioStateBuilder: torque_jacobian='analytic' requires "
-                    "pin.computeRNEADerivatives."
-                )
-            return None
-
-        q_use = np.asarray(q_vec, dtype=float).reshape(-1)
-        v_use = np.asarray(v_vec, dtype=float).reshape(-1)
-        a_use = np.asarray(a_vec, dtype=float).reshape(-1)
-        out = pin.computeRNEADerivatives(self.model, self.data, q_use, v_use, a_use)
-        if out is None:
-            parts_raw = (
-                getattr(self.data, "dtau_dq", None),
-                getattr(self.data, "dtau_dv", None),
-                getattr(self.data, "dtau_da", None),
-            )
-        else:
-            parts_raw = tuple(out)
-        if len(parts_raw) < 3:
-            raise ValueError(
-                "PinocchioStateBuilder: computeRNEADerivatives must provide "
-                "(dtau_dq, dtau_dv, dtau_da)."
-            )
-        parts = [np.asarray(p, dtype=float) for p in parts_raw[:3]]
-        if any(p.ndim != 2 for p in parts):
-            shapes = [p.shape for p in parts]
-            raise ValueError(
-                "PinocchioStateBuilder: RNEA derivative blocks must be 2D, "
-                f"got {shapes}."
-            )
-        return np.hstack(parts)
-
-    def _momentum_value(self, q: Array) -> Array:
-        q_vec = np.asarray(q, dtype=float).reshape(-1)
-        nv = int(getattr(self.model, "nv", q_vec.size))
-        v0 = np.zeros((nv,), dtype=float)
-
-        if hasattr(pin, "computeCentroidalMomentum"):
-            h = pin.computeCentroidalMomentum(self.model, self.data, q_vec, v0)
-            return _as_dyn_vec(h)
-
-        if hasattr(pin, "ccrba"):
-            h = pin.ccrba(self.model, self.data, q_vec, v0)
-            if h is None:
-                h = getattr(self.data, "hg", None)
-            if h is None:
-                raise ValueError("PinocchioStateBuilder: ccrba did not provide centroidal momentum.")
-            return _as_dyn_vec(h)
-
-        raise ValueError("PinocchioStateBuilder: momentum computation requires computeCentroidalMomentum or ccrba.")
-
-    def _handle_momentum(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del key, state_ref
-        return self._momentum_value(q)
-
-    def _handle_momentum_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del key, state_ref
-        q0 = np.asarray(q, dtype=float).reshape(-1)
-        y0 = self._momentum_value(q0)
-        m = int(y0.size)
-        n = int(q0.size)
-        J = np.zeros((m, n), dtype=float)
-        if n == 0:
-            return J
-
-        eps = float(self.finite_diff_eps)
-        for i in range(n):
-            h = eps * max(1.0, abs(float(q0[i])))
-            qp = q0.copy()
-            qp[i] += h
-            yp = self._momentum_value(qp)
-            J[:, i] = (yp - y0) / h
-        return J
-
-    def _handle_force(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del key, state_ref
-        return self._torque_value(q)
-
-    def _handle_force_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        return self._handle_torque_jac(q, key, state_ref)
-
+        return self.adapter.resolve_ref(key)
 
 class PinocchioTrajectoryStateBuilder(TrajectoryStateBuilderMixin, PinocchioStateBuilder):
     """Pinocchio trajectory builder with trajectory parameterization.
@@ -537,6 +219,7 @@ class PinocchioTrajectoryStateBuilder(TrajectoryStateBuilderMixin, PinocchioStat
             dynamics_owner_type=dynamics_owner_type,
             dynamics_custom_handlers=dynamics_custom_handlers,
         )
+        self.adapter.motion_provider = lambda q, key: self._active_motion_triplet(q=q, key=key)
         self.register_value_and_jac(
             dtype=DTYPE_COORD,
             owner_type="total_joint",
@@ -576,7 +259,7 @@ class PinocchioTrajectoryStateBuilder(TrajectoryStateBuilderMixin, PinocchioStat
         dof = int(q_vec.size)
 
         if self._active_step_k is None or self._active_motion is None:
-            nv = self._pin_nv(default=dof)
+            nv = self.adapter.pin_nv(default=dof)
             return q_vec, np.zeros((nv,), dtype=float), np.zeros((nv,), dtype=float)
 
         if int(self._active_step_k) != int(getattr(key, "k", -1)):
@@ -597,60 +280,6 @@ class PinocchioTrajectoryStateBuilder(TrajectoryStateBuilderMixin, PinocchioStat
         dq_use = motion[dof : 2 * dof].copy()
         ddq_use = motion[2 * dof : 3 * dof].copy()
         return q_use, dq_use, ddq_use
-
-    def _torque_from_motion(self, motion: Array, *, dof: int) -> Array:
-        m = np.asarray(motion, dtype=float).reshape(-1)
-        if m.size != 3 * int(dof):
-            raise ValueError(
-                "PinocchioTrajectoryStateBuilder: motion size mismatch for torque computation. "
-                f"Expected {3 * int(dof)}, got {m.size}."
-            )
-        q_use = m[0:dof]
-        dq_use = m[dof : 2 * dof]
-        ddq_use = m[2 * dof : 3 * dof]
-        return self._torque_value_with_motion(
-            q_vec=q_use,
-            v_vec=dq_use,
-            a_vec=ddq_use,
-        )
-
-    def _handle_torque(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del state_ref
-        q_use, dq_use, ddq_use = self._active_motion_triplet(q=q, key=key)
-        return self._torque_value_with_motion(
-            q_vec=q_use,
-            v_vec=dq_use,
-            a_vec=ddq_use,
-        )
-
-    def _handle_torque_jac(self, q: Array, key: StateKey, state_ref: Any) -> Array:
-        del state_ref
-        q_use, dq_use, ddq_use = self._active_motion_triplet(q=q, key=key)
-        J_motion = self._torque_motion_jacobian(
-            q_vec=q_use,
-            v_vec=dq_use,
-            a_vec=ddq_use,
-        )
-        if J_motion is not None:
-            return J_motion
-
-        dof = int(q_use.size)
-        motion0 = np.concatenate([q_use, dq_use, ddq_use], axis=0)
-        y0 = self._torque_from_motion(motion0, dof=dof)
-        m = int(y0.size)
-        n = int(motion0.size)
-        J = np.zeros((m, n), dtype=float)
-        if n == 0:
-            return J
-
-        eps = float(self.finite_diff_eps)
-        for i in range(n):
-            h = eps * max(1.0, abs(float(motion0[i])))
-            mp = motion0.copy()
-            mp[i] += h
-            yp = self._torque_from_motion(mp, dof=dof)
-            J[:, i] = (yp - y0) / h
-        return J
 
     def _update_trajectory_step(self, *, k: int, q_k: Array, motion_k: Array) -> None:
         self._active_step_k = int(k)
@@ -697,17 +326,12 @@ class PinocchioTrajectoryStateBuilder(TrajectoryStateBuilderMixin, PinocchioStat
             f"Expected {self.q_var!r} or {STATE_JACOBIAN_VAR!r}, got {wrt!r}."
         )
 
-def _as_dyn_vec(x: Any) -> Array:
-    if hasattr(x, "vector"):
-        return np.asarray(getattr(x, "vector"), dtype=float).reshape(-1)
-    return np.asarray(x, dtype=float).reshape(-1)
-
-
 __all__ = [
     "Jacobian6Order",
     "compute_pinocchio_frame_jacobian",
-    "PinocchioFieldFamily",
-    "PINOCCHIO_DEFAULT_FIELD_FAMILIES",
+    "PinocchioAdapter",
+    "PINOCCHIO_DEFAULT_BINDINGS",
+    "PINOCCHIO_DYNAMICS_BINDINGS",
     "PinocchioStateBuilder",
     "PinocchioTrajectoryStateBuilder",
 ]
