@@ -47,6 +47,91 @@ class OptValResolution:
         return self.aliases.get(text, text)
 
 
+@dataclass(frozen=True)
+class QuantityAlias:
+    name: str
+    source: str
+    var: str | None = None
+    derivative_order: int | None = None
+    derivative_wrt: str | None = None
+    description: str = ""
+
+
+DEFAULT_QUANTITY_ALIASES: dict[str, QuantityAlias] = {
+    "joint_angles": QuantityAlias(
+        name="joint_angles",
+        source="trajectory",
+        var="trajectory_params",
+        derivative_order=0,
+        description="Joint angle trajectory.",
+    ),
+    "joint_velocities": QuantityAlias(
+        name="joint_velocities",
+        source="trajectory",
+        var="trajectory_params",
+        derivative_order=1,
+        derivative_wrt="time",
+        description="Joint velocity trajectory.",
+    ),
+    "joint_accelerations": QuantityAlias(
+        name="joint_accelerations",
+        source="trajectory",
+        var="trajectory_params",
+        derivative_order=2,
+        derivative_wrt="time",
+        description="Joint acceleration trajectory.",
+    ),
+}
+
+
+def resolve_quantity(
+    raw: Any,
+    *,
+    overrides: Mapping[str, Any] | None = None,
+    aliases: Mapping[str, QuantityAlias] = DEFAULT_QUANTITY_ALIASES,
+) -> dict[str, Any]:
+    if isinstance(raw, Mapping):
+        raw_dict = dict(raw)
+        if "name" not in raw_dict:
+            raise ValueError("quantity object must define name.")
+        name = str(raw_dict.pop("name"))
+        merged_overrides = dict(raw_dict)
+        if overrides is not None:
+            merged_overrides.update(dict(overrides))
+    else:
+        name = str(raw)
+        merged_overrides = {} if overrides is None else dict(overrides)
+
+    if name == "":
+        raise ValueError("quantity name must be non-empty.")
+    alias = aliases.get(name)
+    if alias is None:
+        raise ValueError(f"unknown quantity {name!r}.")
+    if alias.source != "trajectory":
+        raise ValueError(f"quantity {name!r} uses unsupported source {alias.source!r}.")
+
+    traj: dict[str, Any] = {}
+    expr_name = merged_overrides.pop("name", None)
+    if expr_name is not None:
+        traj["name"] = str(expr_name)
+    var = merged_overrides.pop("var", alias.var)
+    if var is not None:
+        traj["var"] = str(var)
+    derivative_order = merged_overrides.pop("derivative", merged_overrides.pop("derivative_order", alias.derivative_order))
+    if derivative_order is not None:
+        traj["derivative"] = int(derivative_order)
+    derivative_wrt = merged_overrides.pop("derivative_wrt", alias.derivative_wrt)
+    if derivative_wrt is not None:
+        traj["derivative_wrt"] = str(derivative_wrt)
+    for src in ("at", "k"):
+        if src in merged_overrides:
+            traj[src] = deepcopy(merged_overrides.pop(src))
+    if merged_overrides:
+        keys = ", ".join(sorted(str(k) for k in merged_overrides))
+        raise ValueError(f"quantity {name!r} has unsupported override key(s): {keys}.")
+    return {"traj": traj}
+
+
 def resolve_opt_vals(
     raw: Any,
     *,
@@ -96,8 +181,11 @@ def resolve_opt_vals(
 
 
 __all__ = [
+    "DEFAULT_QUANTITY_ALIASES",
     "DEFAULT_OPT_VAL_ALIASES",
     "OptValAlias",
     "OptValResolution",
+    "QuantityAlias",
     "resolve_opt_vals",
+    "resolve_quantity",
 ]

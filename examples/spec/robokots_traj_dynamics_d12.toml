@@ -35,7 +35,8 @@ attrs = { nullspace_eq = true }
 name = "qdot_init"
 kind = "eq"
 weight = 100.0
-traj = { name = "joint_qdot_init", var = "trajectory_params", derivative = 1, derivative_wrt = "time", at = 0 }
+quantity = "joint_velocities"
+at = 0
 target = { fill = 0.0 }
 attrs = { nullspace_eq = true }
 
@@ -43,7 +44,8 @@ attrs = { nullspace_eq = true }
 name = "qdot_terminal"
 kind = "eq"
 weight = 100.0
-traj = { name = "joint_qdot_terminal", var = "trajectory_params", derivative = 1, derivative_wrt = "time", at = "last" }
+quantity = "joint_velocities"
+at = "last"
 target = { fill = 0.0 }
 attrs = { nullspace_eq = true }
 
@@ -51,20 +53,20 @@ attrs = { nullspace_eq = true }
 name = "joint_q_upper_violation"
 kind = "ineq"
 weight = 1e5
-residual = { op = "hinge", base = { op = "sub", name = "joint_q_minus_qmax", a = { traj = { name = "joint_q_traj", var = "trajectory_params" } }, b = { const_repeat = { fill = 3.14159 }, name = "joint_q_max", var = "trajectory_params" } } }
+residual = { op = "hinge", base = { op = "sub", name = "joint_q_minus_qmax", a = { quantity = "joint_angles" }, b = { const_repeat = { fill = 3.14159 }, name = "joint_q_max", var = "trajectory_params" } } }
 
 [[terms]]
 name = "joint_q_lower_violation"
 kind = "ineq"
 weight = 1e5
-residual = { op = "hinge", base = { op = "sub", name = "joint_qmin_minus_q", a = { const_repeat = { fill = -3.14159 }, name = "joint_q_min", var = "trajectory_params" }, b = { traj = { name = "joint_q_traj_again", var = "trajectory_params" } } } }
+residual = { op = "hinge", base = { op = "sub", name = "joint_qmin_minus_q", a = { const_repeat = { fill = -3.14159 }, name = "joint_q_min", var = "trajectory_params" }, b = { quantity = "joint_angles" } } }
 
 [[terms]]
 name = "qdot_traj_regularization"
 weight = 1e-4
-traj = { var = "trajectory_params", derivative = 1, derivative_wrt = "time" }
+quantity = "joint_velocities"
 
 [[terms]]
 name = "qddot_traj_regularization"
 weight = 1e-4
-traj = { var = "trajectory_params", derivative = 2, derivative_wrt = "time" }
+quantity = "joint_accelerations"

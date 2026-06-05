@@ -125,6 +125,92 @@ def test_problem_spec_resolves_reserved_opt_vals() -> None:
     assert dsl["terms"][1]["expr"]["b"]["var"] == "q"
 
 
+def test_problem_spec_resolves_reserved_trajectory_quantities() -> None:
+    spec = {
+        "time": {"N": 3, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [
+            {
+                "name": "qdot_init",
+                "quantity": "joint_velocities",
+                "at": 0,
+                "target": {"fill": 0.0},
+            },
+            {
+                "name": "qddot_reg",
+                "quantity": "joint_accelerations",
+            },
+            {
+                "name": "named_qdot",
+                "residual": {"name": "custom_qdot_expr", "quantity": "joint_velocities"},
+            },
+            {
+                "name": "q_upper",
+                "residual": {
+                    "op": "hinge",
+                    "base": {
+                        "op": "sub",
+                        "a": {"quantity": "joint_angles"},
+                        "b": {"const_repeat": {"fill": 3.14}, "var": "trajectory_params"},
+                    },
+                },
+            },
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0]["expr"] == {
+        "type": "sub",
+        "name": "qdot_init",
+        "a": {
+            "type": "get_traj_var",
+            "name": "qdot_init_value",
+            "var": "p",
+            "k": 0,
+            "derivative_order": 1,
+            "derivative_wrt": "time",
+        },
+        "b": {
+            "type": "const",
+            "name": "qdot_init_target",
+            "var": "p",
+            "value": {"fill": 0.0},
+        },
+    }
+    assert dsl["terms"][1]["expr"] == {
+        "type": "get_traj_var",
+        "name": "qddot_reg",
+        "var": "p",
+        "derivative_order": 2,
+        "derivative_wrt": "time",
+    }
+    assert dsl["terms"][2]["expr"] == {
+        "type": "get_traj_var",
+        "name": "custom_qdot_expr",
+        "var": "p",
+        "derivative_order": 1,
+        "derivative_wrt": "time",
+    }
+    assert dsl["terms"][3]["expr"]["base"]["a"] == {
+        "type": "get_traj_var",
+        "name": "q_upper_base_a",
+        "var": "p",
+        "derivative_order": 0,
+    }
+
+
+def test_problem_spec_rejects_unknown_quantity() -> None:
+    with pytest.raises(ValueError, match="unknown quantity"):
+        problem_spec_to_dsl(
+            {
+                "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+                "terms": [{"quantity": "fluid_velocity"}],
+            }
+        )
+
+
 def test_problem_spec_rejects_duplicate_opt_val_canonical_variable() -> None:
     with pytest.raises(ValueError, match="defined more than once"):
         problem_spec_to_dsl(

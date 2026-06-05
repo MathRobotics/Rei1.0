@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ...core.mapping import mapping_as_dict
-from .spec_reserved import resolve_opt_vals
+from .spec_reserved import resolve_opt_vals, resolve_quantity
 
 
 def load_problem_spec_toml(path: str | Path) -> dict[str, Any]:
@@ -271,6 +271,15 @@ def _convert_leaf(
     where: str,
     var_aliases: Mapping[str, str],
 ) -> dict[str, Any]:
+    if "quantity" in node:
+        quantity_overrides = {
+            key: deepcopy(value)
+            for key, value in node.items()
+            if key not in ("quantity", "target", "equals")
+        }
+        expanded = resolve_quantity(node["quantity"], overrides=quantity_overrides)
+        return _convert_leaf(expanded, name=name, where=where, var_aliases=var_aliases)
+
     if "var" in node and set(node.keys()).issubset({"type", "op", "name", "var"}):
         return {
             "type": "get_var",
@@ -355,6 +364,7 @@ _TERM_SHORTHAND_LEAF_KEYS = {
     "const",
     "value",
     "const_repeat",
+    "quantity",
     "target",
     "equals",
     "repeat",
@@ -462,6 +472,14 @@ def _node_var(node: Mapping[str, Any], *, var_aliases: Mapping[str, str]) -> Any
     traj = node.get("traj", node.get("trajectory", None))
     if isinstance(traj, Mapping) and "var" in traj:
         return _resolve_optional_var_alias(traj.get("var", None), var_aliases=var_aliases)
+    if "quantity" in node:
+        quantity_overrides = {
+            key: deepcopy(value)
+            for key, value in node.items()
+            if key not in ("quantity", "target", "equals")
+        }
+        expanded = resolve_quantity(node["quantity"], overrides=quantity_overrides)
+        return _node_var(expanded, var_aliases=var_aliases)
     return None
 
 

@@ -96,6 +96,22 @@ spec = {
 TOML spec は標準の人間向けテキスト入口です。低レベル DSL は
 compile/debug/advanced 用の内部表現として残しています。
 
+Trajectory terms can use reserved quantities instead of spelling out the
+trajectory derivative map:
+
+```toml
+[[terms]]
+name = "qdot_init"
+kind = "eq"
+weight = 100.0
+quantity = "joint_velocities"
+at = 0
+target = { fill = 0.0 }
+```
+
+The initial reserved trajectory quantities are `joint_angles`,
+`joint_velocities`, and `joint_accelerations`.
+
 ## Canonical Namespace
 
 - `rei.optimize`: optimization entry points such as `compile_nls_problem` and `solve`
