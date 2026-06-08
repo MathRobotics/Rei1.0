@@ -195,7 +195,7 @@ class StateCache:
                     rhs,
                     pack=pack,
                     time=self._time_last,
-                    update_kinematics=False,
+                    update_kinematics=True,
                 ),
                 dtype=float,
             )
@@ -208,7 +208,7 @@ class StateCache:
                     x_all,
                     value_key,
                     rhs,
-                    update_kinematics=False,
+                    update_kinematics=True,
                 ),
                 dtype=float,
             )

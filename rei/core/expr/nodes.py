@@ -616,6 +616,47 @@ class StackExpr:
         blocks_all = [np.vstack(chunks) for chunks in (J_list or [])]
         return r_all, blocks_all
 
+    def vjp(self, ctx: RuntimeContext, rhs):
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2):
+            raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
+
+        grads = None
+        offset = 0
+        for p in self.parts:
+            value = getattr(p, "eval_value", None)
+            vjp = getattr(p, "vjp", None)
+            if not callable(value) or not callable(vjp):
+                raise AttributeError(f"{self.name}: vjp fast path is not available.")
+
+            y = np.asarray(value(ctx), dtype=float).reshape(-1)
+            m = int(y.size)
+            stop = int(offset + m)
+            rhs_part = r[offset:stop] if r.ndim == 1 else r[offset:stop, :]
+            if int(rhs_part.shape[0]) != m:
+                raise ValueError(
+                    f"{self.name}: rhs size mismatch for vjp. "
+                    f"needed at least {stop} rows, got {r.shape[0]}."
+                )
+
+            part_grads = [np.asarray(g, dtype=float) for g in vjp(ctx, rhs_part)]
+            if grads is None:
+                grads = [np.zeros_like(g, dtype=float) for g in part_grads]
+            if len(part_grads) != len(grads):
+                raise ValueError(f"{self.name}: vjp block len mismatch {len(part_grads)} vs {len(grads)}")
+            for i, g in enumerate(part_grads):
+                if g.shape != grads[i].shape:
+                    raise ValueError(
+                        f"{self.name}: vjp gradient shape mismatch at block {i}: "
+                        f"{g.shape} vs {grads[i].shape}."
+                    )
+                grads[i] += g
+            offset = stop
+
+        if int(r.shape[0]) != int(offset):
+            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {offset} rows, got {r.shape[0]}.")
+        return [] if grads is None else grads
+
 
 @dataclass
 class ComponentExpr:

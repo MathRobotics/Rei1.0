@@ -751,6 +751,74 @@ class TestKotsTrajectoryDynamicsMock:
         assert model.jacobian_transpose_mul_calls > 0
         assert model.jacobian_calls == 0
 
+    def test_compile_trajectory_ioc_problem_kots_uses_transpose_mul_for_stacked_stationarity(self) -> None:
+        model = _FakeKotsModelJacobianTransposeMulNoDenseJac()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.5, -0.25]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "vstack",
+                        "name": "torque_stack",
+                        "parts": [
+                            {
+                                "type": "get_state",
+                                "name": "torque0",
+                                "key": {
+                                    "k": 0,
+                                    "owner_type": "total_joint",
+                                    "owner_name": "robot",
+                                    "dtype": DTYPE_DYNAMICS,
+                                    "field": "torque",
+                                },
+                                "jac": {"var": "p"},
+                            },
+                            {
+                                "type": "get_state",
+                                "name": "torque1",
+                                "key": {
+                                    "k": 1,
+                                    "owner_type": "total_joint",
+                                    "owner_name": "robot",
+                                    "dtype": DTYPE_DYNAMICS,
+                                    "field": "torque",
+                                },
+                                "jac": {"var": "p"},
+                            },
+                        ],
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        compiled = compile_trajectory_ioc_problem(
+            dsl,
+            backend="kots",
+            model=model,
+            data={},
+        )
+        result = estimate_ioc_weights(compiled)
+
+        assert result["backend"] == "kots"
+        assert model.jacobian_transpose_mul_calls > 0
+        assert model.jacobian_calls == 0
+
     def test_compile_kots_trajectory_problem_supports_external_nullspace_eq_runtime(self) -> None:
         model = _FakeKotsModel()
         dsl = {
