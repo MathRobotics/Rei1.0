@@ -168,6 +168,52 @@ class GetVarExpr:
         J[:, start : start + n] = np.eye(n, dtype=float)
         return y, [J]
 
+    def vjp(self, ctx: RuntimeContext, rhs):
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2):
+            raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
+
+        x = np.asarray(self.vars[0].x, dtype=float).reshape(-1)
+        n_total = int(x.size)
+
+        if self.k is None:
+            expected = n_total
+            if int(r.shape[0]) != expected:
+                raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {expected}, got {r.shape[0]}.")
+            return [r.copy()]
+
+        k = int(self.k)
+        steps = 1
+        time = getattr(ctx, "time", None)
+        if time is not None and hasattr(time, "N"):
+            try:
+                steps = int(time.N) + 1
+            except Exception:
+                steps = 1
+
+        chunked = bool(steps > 1 and n_total % steps == 0)
+        if not chunked:
+            if k != 0:
+                raise ValueError(
+                    f"{self.name}: requested k={k}, but variable '{self.vars[0].name}' is not time-chunked "
+                    f"(dim={n_total}, steps={steps})."
+                )
+            if int(r.shape[0]) != n_total:
+                raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {n_total}, got {r.shape[0]}.")
+            return [r.copy()]
+
+        if k < 0 or k >= steps:
+            raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+
+        n = int(n_total // steps)
+        if int(r.shape[0]) != n:
+            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {n}, got {r.shape[0]}.")
+        start = int(k * n)
+        out_shape = (n_total,) if r.ndim == 1 else (n_total, int(r.shape[1]))
+        out = np.zeros(out_shape, dtype=float)
+        out[start : start + n] = r
+        return [out]
+
 
 @dataclass
 class TrajectoryVarExpr:
@@ -229,6 +275,27 @@ class TrajectoryVarExpr:
         start = int(k * seg)
         stop = int(start + seg)
         return y_all[start:stop].copy(), [self.trajectory.A[start:stop, :].copy()]
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        del ctx
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2):
+            raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
+
+        if self.k is None:
+            A = np.asarray(self.trajectory.A, dtype=float)
+        else:
+            k = int(self.k)
+            steps = int(self.trajectory.steps)
+            if k < 0 or k >= steps:
+                raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+            seg = int(self.trajectory.q_dim)
+            start = int(k * seg)
+            stop = int(start + seg)
+            A = np.asarray(self.trajectory.A[start:stop, :], dtype=float)
+        if int(r.shape[0]) != int(A.shape[0]):
+            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {A.shape[0]}, got {r.shape[0]}.")
+        return [np.asarray(A.T @ r, dtype=float)]
 
 
 @dataclass
@@ -338,6 +405,31 @@ class TrajectoryVarDerivativesExpr:
             y_parts.append((traj.A @ p + traj.b).reshape(-1))
             j_parts.append(traj.A.copy())
         return np.concatenate(y_parts, axis=0), [np.vstack(j_parts)]
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        del ctx
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2):
+            raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
+        if len(self.trajectories) == 0:
+            raise ValueError(f"{self.name}: trajectories must be non-empty.")
+
+        if self.k is not None:
+            k = int(self.k)
+            steps = int(self.trajectories[0].steps)
+            q_dim = int(self.trajectories[0].q_dim)
+            if k < 0 or k >= steps:
+                raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
+            start = int(k * q_dim)
+            stop = int(start + q_dim)
+            blocks = [np.asarray(traj.A[start:stop, :], dtype=float) for traj in self.trajectories]
+        else:
+            blocks = [np.asarray(traj.A, dtype=float) for traj in self.trajectories]
+
+        A = np.vstack(blocks)
+        if int(r.shape[0]) != int(A.shape[0]):
+            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {A.shape[0]}, got {r.shape[0]}.")
+        return [np.asarray(A.T @ r, dtype=float)]
 
 
 @dataclass
@@ -452,6 +544,52 @@ class TimeDiffExpr:
             blocks2.append(Bd)
         return r, blocks2
 
+    def vjp(self, ctx: RuntimeContext, rhs):
+        value = getattr(self.base, "eval_value", None)
+        vjp = getattr(self.base, "vjp", None)
+        if not callable(value) or not callable(vjp):
+            raise AttributeError(f"{self.name}: vjp fast path is not available.")
+
+        y = np.asarray(value(ctx), dtype=float).reshape(-1)
+        seg = int(self.segment_dim)
+        if seg <= 0:
+            raise ValueError(f"{self.name}: segment_dim must be > 0, got {seg}.")
+        if y.size % seg != 0:
+            raise ValueError(f"{self.name}: base size {y.size} is not divisible by segment_dim={seg}.")
+        steps = int(y.size // seg)
+        if steps < 2:
+            raise ValueError(f"{self.name}: need at least 2 steps, got {steps}.")
+
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2):
+            raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
+        if int(r.shape[0]) != int((steps - 1) * seg):
+            raise ValueError(
+                f"{self.name}: rhs size mismatch for vjp. Expected {(steps - 1) * seg}, got {r.shape[0]}."
+            )
+
+        scale = float(self.scale)
+        if self.use_time_dt:
+            dt = self.dt
+            if dt is None:
+                time = getattr(ctx, "time", None)
+                if time is None or not hasattr(time, "dt"):
+                    raise ValueError(f"{self.name}: wrt='time' requires time.dt in context or explicit dt in DSL.")
+                dt = float(time.dt)
+            if dt <= 0.0:
+                raise ValueError(f"{self.name}: dt must be > 0 for wrt='time', got {dt}.")
+            scale = scale / float(dt)
+
+        if r.ndim == 1:
+            r2 = r.reshape(steps - 1, seg)
+            base_rhs = np.zeros((steps, seg), dtype=float)
+        else:
+            r2 = r.reshape(steps - 1, seg, int(r.shape[1]))
+            base_rhs = np.zeros((steps, seg, int(r.shape[1])), dtype=float)
+        base_rhs[:-1] -= scale * r2
+        base_rhs[1:] += scale * r2
+        return vjp(ctx, base_rhs.reshape((y.size,) if r.ndim == 1 else (y.size, int(r.shape[1]))))
+
 
 @dataclass
 class ConstantExpr:
@@ -460,6 +598,9 @@ class ConstantExpr:
     vars: Sequence[Variable] = ()
 
     def deps(self):
+        return []
+
+    def value_deps(self):
         return []
 
     def eval_value(self, ctx: RuntimeContext):
@@ -490,6 +631,9 @@ class RepeatConstantExpr:
     vars: Sequence[Variable] = ()
 
     def deps(self):
+        return []
+
+    def value_deps(self):
         return []
 
     def eval_value(self, ctx: RuntimeContext):
@@ -728,6 +872,35 @@ class ComponentExpr:
             blocks2.append(Bm.reshape(steps, seg, Bm.shape[1])[:, idx, :].reshape(steps, Bm.shape[1]))
         return y2, blocks2
 
+    def vjp(self, ctx: RuntimeContext, rhs):
+        value = getattr(self.base, "eval_value", None)
+        vjp = getattr(self.base, "vjp", None)
+        if not callable(value) or not callable(vjp):
+            raise AttributeError(f"{self.name}: vjp fast path is not available.")
+        y = np.asarray(value(ctx), dtype=float).reshape(-1)
+
+        seg = int(self.segment_dim)
+        idx = int(self.index)
+        if seg <= 0:
+            raise ValueError(f"{self.name}: segment_dim must be > 0, got {seg}.")
+        if idx < 0 or idx >= seg:
+            raise ValueError(f"{self.name}: index must be in [0, {seg - 1}], got {idx}.")
+        if y.size % seg != 0:
+            raise ValueError(f"{self.name}: base size {y.size} is not divisible by segment_dim={seg}.")
+        steps = int(y.size // seg)
+
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2):
+            raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
+        if int(r.shape[0]) != steps:
+            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {steps}, got {r.shape[0]}.")
+        if r.ndim == 1:
+            base_rhs = np.zeros((steps, seg), dtype=float)
+        else:
+            base_rhs = np.zeros((steps, seg, int(r.shape[1])), dtype=float)
+        base_rhs[:, idx] = r
+        return vjp(ctx, base_rhs.reshape((y.size,) if r.ndim == 1 else (y.size, int(r.shape[1]))))
+
 
 @dataclass
 class HingeExpr:
@@ -770,3 +943,18 @@ class HingeExpr:
                 raise ValueError(f"{self.name}: block row mismatch: h has {m}, block has {B.shape}")
             blocks2.append(active[:, None] * B)
         return r, blocks2
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        value = getattr(self.base, "eval_value", None)
+        vjp = getattr(self.base, "vjp", None)
+        if not callable(value) or not callable(vjp):
+            raise AttributeError(f"{self.name}: vjp fast path is not available.")
+        h = np.asarray(value(ctx), dtype=float).reshape(-1)
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2):
+            raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
+        if int(r.shape[0]) != int(h.size):
+            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {h.size}, got {r.shape[0]}.")
+        active = (h > 0.0).astype(float)
+        base_rhs = active * r if r.ndim == 1 else active[:, None] * r
+        return vjp(ctx, base_rhs)

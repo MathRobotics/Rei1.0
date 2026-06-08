@@ -73,6 +73,13 @@ def collect_value_required(
     return _dedupe_required(req)
 
 
+def collect_expr_required(expr: Any) -> list[StateKey]:
+    deps = getattr(expr, "deps", None)
+    if callable(deps):
+        return _dedupe_required(list(deps()))
+    return []
+
+
 @dataclass(frozen=True)
 class LinearizedTerm:
     term_index: int
@@ -313,7 +320,7 @@ class NLSRuntime:
                 term_name=term_name,
             )
             if fast is None:
-                req = self.required_list(None)
+                req = collect_expr_required(expr)
                 self.update_state_if_needed(required=req)
                 r_raw, blocks_raw = expr.eval(self.ctx)
                 r_raw = np.asarray(r_raw, dtype=float).reshape(-1)
