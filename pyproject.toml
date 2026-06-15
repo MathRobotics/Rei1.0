@@ -36,7 +36,7 @@ where = ["."]
 include = ["rei*"]
 
 [tool.uv.sources]
-robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "main" }
+robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "develop" }
 
 [dependency-groups]
 dev = [

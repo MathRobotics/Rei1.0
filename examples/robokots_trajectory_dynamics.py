@@ -20,6 +20,7 @@ _EXAMPLES_DIR = Path(__file__).resolve().parent
 _MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 _SPEC_PATH = _EXAMPLES_DIR / "spec" / "robokots_traj_dynamics_d12.toml"
 _ORDER = 5
+_KOTS_BACKEND = "rust"
 
 
 def main() -> None:
@@ -43,6 +44,7 @@ def main() -> None:
         problem,
         model=kots,
         data=kots.state_dict_,
+        kots_backend=_KOTS_BACKEND,
     )
     runtime = compiled.runtime
 
@@ -72,7 +74,7 @@ def main() -> None:
 
     print("=== robokots_trajectory_dynamics ===")
     print(f"spec={_SPEC_PATH}")
-    print(f"model={_MODEL_PATH} (order={_ORDER})")
+    print(f"model={_MODEL_PATH} (order={_ORDER}, kots_backend={_KOTS_BACKEND})")
     print(
         "nullspace="
         f"rank={reduction.rank} "
@@ -91,6 +93,7 @@ def main() -> None:
                 "dt": compiled.dt,
                 "p_dim": compiled.trajectory_map.p_dim,
                 "dynamics_fields": compiled.dynamics_fields,
+                "kots_backend": _KOTS_BACKEND,
             },
         )
     )
