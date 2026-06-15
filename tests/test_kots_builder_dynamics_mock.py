@@ -50,6 +50,8 @@ class _FakeKotsModel:
         self._motion = np.zeros((6,), dtype=float)
         self.kinematics_calls = 0
         self.dynamics_calls = 0
+        self.kinematics_backends = []
+        self.dynamics_backends = []
 
     def dof(self) -> int:
         return 2
@@ -60,11 +62,13 @@ class _FakeKotsModel:
     def import_motions(self, motion) -> None:
         self._motion = np.asarray(motion, dtype=float).reshape(-1).copy()
 
-    def kinematics(self) -> None:
+    def kinematics(self, backend=None) -> None:
         self.kinematics_calls += 1
+        self.kinematics_backends.append(backend)
 
-    def dynamics(self) -> None:
+    def dynamics(self, backend=None) -> None:
         self.dynamics_calls += 1
+        self.dynamics_backends.append(backend)
 
     def _split(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         q = np.array([self._motion[0], self._motion[3]], dtype=float)
@@ -650,6 +654,95 @@ class TestKotsTrajectoryDynamicsMock:
                 {},
                 trajectory_map=trajectory_map,
                 jacobian_strategy="auto",
+            )
+
+    def test_kots_trajectory_builder_passes_kots_backend_to_dynamics_update(self) -> None:
+        model = _FakeKotsModel()
+        trajectory_map = TrajectoryMap.from_blocks(
+            [
+                np.eye(2, dtype=float),
+                2.0 * np.eye(2, dtype=float),
+            ]
+        )
+        builder = KotsTrajectoryStateBuilder(
+            model,
+            {},
+            trajectory_map=trajectory_map,
+            kots_backend="rust",
+        )
+        key = make_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque",
+        )
+
+        out = builder.build_state(np.array([0.5, -0.25], dtype=float), required=[key])
+
+        assert np.allclose(out[key], np.array([0.5, -0.25], dtype=float))
+        assert model.dynamics_backends
+        assert set(model.dynamics_backends) == {"rust"}
+
+    def test_compile_kots_trajectory_problem_passes_kots_backend_to_builder(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                    [2.0, 0.0],
+                    [0.0, 2.0],
+                ],
+            },
+            "variables": [
+                {"name": "p", "dim": 2, "init": [0.5, -0.25]},
+            ],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "get_state",
+                        "name": "torque0",
+                        "key": {
+                            "k": 0,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": "torque",
+                        },
+                        "jac": {"var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data={},
+            kots_backend="rust",
+        )
+
+        compiled.runtime.linearize()
+
+        assert model.dynamics_backends
+        assert set(model.dynamics_backends) == {"rust"}
+
+    def test_kots_trajectory_builder_rejects_unknown_kots_backend(self) -> None:
+        model = _FakeKotsModel()
+        trajectory_map = TrajectoryMap.from_blocks([np.eye(2, dtype=float)])
+
+        with pytest.raises(ValueError, match="kots_backend"):
+            KotsTrajectoryStateBuilder(
+                model,
+                {},
+                trajectory_map=trajectory_map,
+                kots_backend="cuda",
             )
 
     def test_kots_trajectory_param_jacobian_transpose_mul_uses_backend_api(self) -> None:

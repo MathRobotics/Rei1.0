@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import inspect
 from typing import Any
 
 import numpy as np
@@ -39,6 +40,25 @@ class KotsAdapter:
         self._model_dof_cache: int | None = None
         self._model_order_cache: int | None = None
 
+    def _call_update_method(self, fn: Any) -> bool:
+        backend = getattr(self.builder, "kots_backend", None)
+        if backend is None:
+            fn()
+            return True
+        try:
+            sig = inspect.signature(fn)
+        except (TypeError, ValueError):
+            try:
+                fn(backend=backend)
+            except TypeError:
+                return False
+            return True
+        params = sig.parameters
+        if "backend" not in params and not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return False
+        fn(backend=backend)
+        return True
+
     def update_dynamics_if_available(self) -> bool:
         if not bool(getattr(self.builder, "_needs_dynamics_update", False)):
             return False
@@ -46,11 +66,8 @@ class KotsAdapter:
             fn = getattr(self.model, name, None)
             if not callable(fn):
                 continue
-            try:
-                fn()
-            except TypeError:
-                continue
-            return True
+            if self._call_update_method(fn):
+                return True
         return False
 
     def update_kinematics(self, q: Array) -> None:
@@ -73,7 +90,14 @@ class KotsAdapter:
             if self.update_dynamics_if_available():
                 return
 
-        self.model.kinematics()
+        if not self._call_update_method(self.model.kinematics):
+            backend = getattr(self.builder, "kots_backend", None)
+            if backend is None:
+                raise TypeError("KotsStateBuilder: model.kinematics() is not callable with no arguments.")
+            raise TypeError(
+                "KotsStateBuilder: model.kinematics() does not accept "
+                f"kots_backend={backend!r}."
+            )
         if bool(getattr(self.builder, "_needs_dynamics_update", False)):
             self.update_dynamics_if_available()
 

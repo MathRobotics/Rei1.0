@@ -36,6 +36,7 @@ from .provider import register_robot_binding_table
 Array = np.ndarray
 STATE_JACOBIAN_VAR = "state"
 _KOTS_JACOBIAN_STRATEGIES = ("dense", "mul")
+_KOTS_BACKENDS = ("numpy", "rust")
 
 
 def _normalize_kots_jacobian_strategy(strategy: str | None, *, prefer_matvec_jacobian: bool) -> str:
@@ -56,6 +57,18 @@ def _normalize_kots_jacobian_strategy(strategy: str | None, *, prefer_matvec_jac
     if name not in _KOTS_JACOBIAN_STRATEGIES:
         allowed = ", ".join(repr(v) for v in _KOTS_JACOBIAN_STRATEGIES)
         raise ValueError(f"KotsTrajectoryStateBuilder: jacobian_strategy must be one of {allowed}, got {strategy!r}.")
+    return name
+
+
+def _normalize_kots_backend(backend: str | None) -> str | None:
+    if backend is None:
+        return None
+    name = str(backend).strip().lower()
+    if name == "":
+        raise ValueError("KotsStateBuilder: kots_backend must be non-empty when provided.")
+    if name not in _KOTS_BACKENDS:
+        allowed = ", ".join(repr(v) for v in _KOTS_BACKENDS)
+        raise ValueError(f"KotsStateBuilder: kots_backend must be one of {allowed}, got {backend!r}.")
     return name
 
 
@@ -83,10 +96,12 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         dynamics_fields: Sequence[str] | None = DYNAMICS_FIELDS,
         dynamics_owner_type: str = "total_joint",
         prefer_matvec_jacobian: bool = False,
+        kots_backend: str | None = None,
     ) -> None:
         super().__init__(model, data, q_var=q_var)
         self.dtype = DTYPE_KINEMATICS
         self.owner_type = "link"
+        self.kots_backend = _normalize_kots_backend(kots_backend)
         self.dynamics_owner_type = str(dynamics_owner_type)
         if self.dynamics_owner_type == "":
             raise ValueError("KotsStateBuilder: dynamics_owner_type must be non-empty.")
@@ -247,6 +262,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         dynamics_owner_type: str = "total_joint",
         prefer_matvec_jacobian: bool = False,
         jacobian_strategy: str | None = None,
+        kots_backend: str | None = None,
     ) -> None:
         self.trajectory_map = trajectory_map
         self.p_var = str(p_var)
@@ -273,6 +289,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             dynamics_fields=dynamics_fields,
             dynamics_owner_type=dynamics_owner_type,
             prefer_matvec_jacobian=prefer_matvec_jacobian,
+            kots_backend=kots_backend,
         )
         self.register_value_and_jac(
             dtype=DTYPE_COORD,
