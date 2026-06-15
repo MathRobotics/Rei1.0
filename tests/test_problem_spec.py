@@ -490,3 +490,98 @@ def test_problem_spec_converts_vision_and_stack_sections() -> None:
             "jac": {"var": "p"},
         },
     }
+
+
+def test_problem_spec_joint_target_uses_same_term_for_direct_joint_variable() -> None:
+    spec = {
+        "time": {"N": 2, "dt": 0.1},
+        "joint": {"var": "q"},
+        "variables": {"q": {"dim": 6, "init": {"fill": 0.0}}},
+        "terms": [
+            {
+                "type": "joint_target",
+                "name": "q_mid",
+                "at": 1,
+                "target": [1.0, -2.0],
+            },
+            {
+                "type": "joint_target",
+                "name": "q_final_fill",
+                "at": "last",
+                "target": {"fill": 0.5},
+            },
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0]["expr"] == {
+        "type": "sub",
+        "name": "q_mid",
+        "a": {"type": "get_var", "name": "q_mid_value", "var": "q", "k": 1},
+        "b": {"type": "const", "name": "q_mid_target", "var": "q", "value": [1.0, -2.0], "dim": 2},
+    }
+    assert dsl["terms"][1]["expr"]["b"] == {
+        "type": "const",
+        "name": "q_final_fill_target",
+        "var": "q",
+        "value": {"fill": 0.5},
+        "dim": 2,
+    }
+
+    runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+    r, J = runtime.linearize()
+    assert np.allclose(r, np.array([-1.0, 2.0, -0.5, -0.5]))
+    assert J.shape == (4, 6)
+    assert np.allclose(J[:2, 2:4], np.eye(2))
+    assert np.allclose(J[2:, 4:6], np.eye(2))
+
+
+def test_problem_spec_joint_target_uses_same_term_for_bspline_trajectory() -> None:
+    spec = {
+        "time": {"N": 2, "dt": 0.1},
+        "trajectory": {
+            "type": "bspline",
+            "var": "p",
+            "q_dim": 2,
+            "degree": 1,
+            "num_ctrl_points": 2,
+        },
+        "variables": {"p": {"dim": 4, "init": {"fill": 0.0}}},
+        "terms": [
+            {
+                "type": "joint_target",
+                "name": "q_mid",
+                "at": 1,
+                "target": [1.0, -2.0],
+            },
+            {
+                "type": "joint_target",
+                "name": "q_final_fill",
+                "at": "last",
+                "target": {"fill": 0.5},
+            },
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+
+    assert dsl["terms"][0]["expr"] == {
+        "type": "sub",
+        "name": "q_mid",
+        "a": {"type": "get_traj_var", "name": "q_mid_value", "var": "p", "k": 1},
+        "b": {"type": "const", "name": "q_mid_target", "var": "p", "value": [1.0, -2.0]},
+    }
+    assert dsl["terms"][1]["expr"]["a"] == {
+        "type": "get_traj_var",
+        "name": "q_final_fill_value",
+        "var": "p",
+        "k": "last",
+    }
+
+    runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
+    r, J = runtime.linearize()
+    assert np.allclose(r, np.array([-1.0, 2.0, -0.5, -0.5]))
+    assert J.shape == (4, 4)
+    assert np.allclose(J[:2, :], np.array([[0.5, 0.0, 0.5, 0.0], [0.0, 0.5, 0.0, 0.5]]))
+    assert np.allclose(J[2:, :], np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]]))

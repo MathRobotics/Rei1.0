@@ -112,6 +112,20 @@ target = { fill = 0.0 }
 The initial reserved quantities are `joint_angles`, `joint_velocities`,
 `joint_accelerations`, and backend-computed `joint_torques`.
 
+関節角 `q` の評価項は `trajectory` の有無に関係なく同じ形で書けます。
+`trajectory` がある場合は軌道パラメータからの `q(k)`、ない場合は直接の
+関節角変数 `q`（または top-level `joint.var`）に展開されます。
+
+```toml
+[[terms]]
+name = "q_goal"
+type = "joint_target"
+at = "last"
+target = [1.57, 0.0]
+weight = 100.0
+kind = "eq"
+```
+
 ## Canonical Namespace
 
 - `rei.optimize`: optimization entry points such as `compile_nls_problem` and `solve`
