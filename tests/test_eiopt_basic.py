@@ -41,7 +41,17 @@ from rei.optimize.term_gradient_matrix import (
     build_term_gradient_matrix_from_terms,
 )
 from rei.backends.state.dispatch.template import BackendDispatchStateBuilder
-from rei.core.expr.nodes import GetStateExpr, GetVarExpr
+from rei.core.expr.nodes import (
+    ComponentExpr,
+    ConstantExpr,
+    GetStateExpr,
+    GetVarExpr,
+    HingeExpr,
+    SubExpr,
+    TimeDiffExpr,
+    TrajectoryVarDerivativesExpr,
+    TrajectoryVarExpr,
+)
 from rei.core.expr.types import (
     DirectVectorExpr,
     RuntimeContext,
@@ -99,6 +109,59 @@ def _compose_stationarity_weights(
         "inferred": inferred,
         "solve_info": solve_out,
     }
+
+
+def test_term_gradient_contributions_fast_vjp_matches_linearized_terms_for_core_exprs() -> None:
+    p = Variable(name="p", x=np.array([0.2, -0.3, 0.5], dtype=float))
+    pack = VariablePack([p])
+    ctx = RuntimeContext(pack=pack)
+    A0 = np.array(
+        [
+            [1.0, 2.0, 0.0],
+            [0.0, -1.0, 3.0],
+            [2.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ],
+        dtype=float,
+    )
+    traj0 = TrajectoryMap(A=A0, b=np.array([0.1, -0.2, 0.0, 0.3], dtype=float), steps=2, q_dim=2)
+    traj1 = TrajectoryMap(A=0.5 * A0, b=np.zeros((4,), dtype=float), steps=2, q_dim=2)
+    exprs = [
+        GetVarExpr(name="getvar", vars=[p]),
+        TrajectoryVarExpr(name="traj", vars=[p], trajectory=traj0),
+        TrajectoryVarDerivativesExpr(name="trajders", vars=[p], trajectories=[traj0, traj1]),
+        TimeDiffExpr(
+            name="diff",
+            base=TrajectoryVarExpr(name="traj_base", vars=[p], trajectory=traj0),
+            segment_dim=2,
+            scale=2.0,
+        ),
+        ComponentExpr(
+            name="component",
+            base=TrajectoryVarExpr(name="traj_base2", vars=[p], trajectory=traj0),
+            segment_dim=2,
+            index=1,
+        ),
+        HingeExpr(
+            name="hinge",
+            base=SubExpr(
+                name="sub",
+                a=TrajectoryVarExpr(name="traj_base3", vars=[p], trajectory=traj0),
+                b=ConstantExpr(name="target", value=np.zeros((4,), dtype=float), vars=[p]),
+            ),
+        ),
+    ]
+
+    for expr in exprs:
+        problem = NLSProblem(variables=pack, terms=[(expr, L2Cost())])
+        runtime = NLSRuntime(problem=problem, ctx=ctx, required=[])
+        term = runtime.linearize_terms(weighted=False)[0]
+        expected = np.asarray(term.jacobian, dtype=float).T @ np.asarray(term.residual, dtype=float)
+
+        gradients = runtime.term_gradient_contributions()[5]
+
+        assert np.allclose(gradients[0], expected), getattr(expr, "name", type(expr).__name__)
+
 
 class TestReiBasic:
     def test_gauss_newton_solves_linear_scalar(self) -> None:
