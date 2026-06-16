@@ -33,6 +33,7 @@ uv sync --group pinocchio
 python examples/pinocchio_ik.py
 python examples/pinocchio_trajectory_dynamics.py
 python examples/pinocchio_trajectory_dynamics.py --plot
+python examples/compare_robotics_backends.py --backend pinocchio
 ```
 
 ## RoboKots 例
@@ -42,6 +43,7 @@ uv sync --group kots
 python examples/robokots_ik.py
 python examples/robokots_trajectory_dynamics.py
 python examples/robokots_trajectory_dynamics.py --plot
+python examples/compare_robotics_backends.py --backend robokots
 ```
 
 ## サンプル一覧
@@ -53,6 +55,7 @@ python examples/robokots_trajectory_dynamics.py --plot
 - `robokots_ik.py`: Problem Spec + RoboKots `KotsStateBuilder` を使った最小 IK
 - `pinocchio_trajectory_dynamics.py`: TOML spec + Pinocchio の軌道 + dynamics 正則化（`--plot` 対応）
 - `robokots_trajectory_dynamics.py`: TOML spec + RoboKots の軌道 + dynamics 正則化（`--plot` 対応）
+- `compare_robotics_backends.py`: Pinocchio / RoboKots の trajectory compile・solve・IOC 推定時間を比較
 - `stationarity_ioc.py`: Problem Spec 風 dict + Stationarity 方程式ベースの IOC 風重み推定
 
 ## Problem Spec / モデルファイル
