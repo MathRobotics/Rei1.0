@@ -254,6 +254,20 @@ Dense Jacobian assembly is still available by passing
 default strategy is `"mul"`. The older `prefer_matvec_jacobian` option is kept
 only as a deprecated compatibility alias.
 
+World-frame gravity can be forwarded to RoboKots dynamics with, for example,
+`gravity=(0.0, 0.0, -9.81)`. Omitting it preserves RoboKots' backward-compatible
+zero-gravity default:
+
+```python
+compiled = compile_kots_trajectory_problem(
+    problem,
+    model=kots,
+    data=kots.state_dict_,
+    kots_backend="rust",
+    gravity=(0.0, 0.0, -9.81),
+)
+```
+
 For `total_joint` dynamics, Rei expands the request to a list of per-joint
 `StateType("joint", joint_name, field)` entries and passes that list to
 RoboKots. Rei expects RoboKots to support list inputs for `jacobian`,

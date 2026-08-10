@@ -40,12 +40,22 @@ class KotsAdapter:
         self._model_dof_cache: int | None = None
         self._model_order_cache: int | None = None
 
-    def _call_update_method(self, fn: Any, *, materialize_dict: bool | None = None) -> bool:
+    def _call_update_method(
+        self,
+        fn: Any,
+        *,
+        materialize_dict: bool | None = None,
+        gravity: tuple[float, float, float] | None = None,
+    ) -> bool:
         backend = getattr(self.builder, "kots_backend", None)
-        if backend is None:
+        kwargs: dict[str, Any] = {}
+        if backend is not None:
+            kwargs["backend"] = backend
+        if gravity is not None:
+            kwargs["gravity"] = gravity
+        if not kwargs and materialize_dict is None:
             fn()
             return True
-        kwargs: dict[str, Any] = {"backend": backend}
         try:
             sig = inspect.signature(fn)
         except (TypeError, ValueError):
@@ -58,8 +68,13 @@ class KotsAdapter:
             return True
         params = sig.parameters
         accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
-        if "backend" not in params and not accepts_kwargs:
+        if backend is not None and "backend" not in params and not accepts_kwargs:
             return False
+        if gravity is not None and "gravity" not in params and not accepts_kwargs:
+            raise TypeError(
+                "KotsStateBuilder: configured gravity requires a RoboKots "
+                "dynamics method that accepts gravity=."
+            )
         if materialize_dict is not None and ("materialize_dict" in params or accepts_kwargs):
             kwargs["materialize_dict"] = materialize_dict
         fn(**kwargs)
@@ -73,7 +88,8 @@ class KotsAdapter:
             if not callable(fn):
                 continue
             materialize_dict = False if getattr(self.builder, "kots_backend", None) == "rust" else None
-            if self._call_update_method(fn, materialize_dict=materialize_dict):
+            gravity = getattr(self.builder, "gravity", None)
+            if self._call_update_method(fn, materialize_dict=materialize_dict, gravity=gravity):
                 return True
         return False
 

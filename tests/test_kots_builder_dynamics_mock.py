@@ -53,6 +53,7 @@ class _FakeKotsModel:
         self.kinematics_backends = []
         self.dynamics_backends = []
         self.dynamics_materialize_dicts = []
+        self.dynamics_gravities = []
 
     def dof(self) -> int:
         return 2
@@ -67,10 +68,11 @@ class _FakeKotsModel:
         self.kinematics_calls += 1
         self.kinematics_backends.append(backend)
 
-    def dynamics(self, backend=None, materialize_dict=True) -> None:
+    def dynamics(self, backend=None, materialize_dict=True, gravity=(0.0, 0.0, 0.0)) -> None:
         self.dynamics_calls += 1
         self.dynamics_backends.append(backend)
         self.dynamics_materialize_dicts.append(materialize_dict)
+        self.dynamics_gravities.append(tuple(gravity))
 
     def _split(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         q = np.array([self._motion[0], self._motion[3]], dtype=float)
@@ -671,6 +673,7 @@ class TestKotsTrajectoryDynamicsMock:
             {},
             trajectory_map=trajectory_map,
             kots_backend="rust",
+            gravity=(0.0, 0.0, -9.81),
         )
         key = make_key(
             k=0,
@@ -686,6 +689,7 @@ class TestKotsTrajectoryDynamicsMock:
         assert model.dynamics_backends
         assert set(model.dynamics_backends) == {"rust"}
         assert set(model.dynamics_materialize_dicts) == {False}
+        assert set(model.dynamics_gravities) == {(0.0, 0.0, -9.81)}
 
     def test_compile_kots_trajectory_problem_passes_kots_backend_to_builder(self) -> None:
         model = _FakeKotsModel()
@@ -729,6 +733,7 @@ class TestKotsTrajectoryDynamicsMock:
             model=model,
             data={},
             kots_backend="rust",
+            gravity=(0.0, -9.81, 0.0),
         )
 
         compiled.runtime.linearize()
@@ -736,6 +741,29 @@ class TestKotsTrajectoryDynamicsMock:
         assert model.dynamics_backends
         assert set(model.dynamics_backends) == {"rust"}
         assert set(model.dynamics_materialize_dicts) == {False}
+        assert set(model.dynamics_gravities) == {(0.0, -9.81, 0.0)}
+        assert compiled.gravity == (0.0, -9.81, 0.0)
+
+    @pytest.mark.parametrize(
+        ("gravity", "match"),
+        [
+            ((0.0, -9.81), "shape"),
+            ((0.0, 0.0, 0.0, 0.0), "shape"),
+            ((0.0, np.nan, 0.0), "finite"),
+            ((0.0, np.inf, 0.0), "finite"),
+        ],
+    )
+    def test_kots_trajectory_builder_rejects_invalid_gravity(self, gravity, match: str) -> None:
+        model = _FakeKotsModel()
+        trajectory_map = TrajectoryMap.from_blocks([np.eye(2, dtype=float)])
+
+        with pytest.raises(ValueError, match=match):
+            KotsTrajectoryStateBuilder(
+                model,
+                {},
+                trajectory_map=trajectory_map,
+                gravity=gravity,
+            )
 
     def test_kots_trajectory_builder_rejects_unknown_kots_backend(self) -> None:
         model = _FakeKotsModel()

@@ -32,6 +32,7 @@ class KotsTrajectoryCompiledProblem:
     dt: float
     model_order: int
     dynamics_fields: tuple[str, ...] = ()
+    gravity: tuple[float, float, float] | None = None
     diagnostics: TrajectoryProblemDiagnostics | None = None
 
 
@@ -128,7 +129,9 @@ class _KotsTrajectoryCompileAdapter:
     prefer_matvec_jacobian: bool = False
     jacobian_strategy: str | None = None
     kots_backend: str | None = None
+    gravity: Sequence[float] | None = None
     resolved_dynamics_fields: tuple[str, ...] = ()
+    resolved_gravity: tuple[float, float, float] | None = None
 
     def infer_model_dof(self, model: Any) -> int | None:
         return _infer_model_dof(model)
@@ -180,7 +183,7 @@ class _KotsTrajectoryCompileAdapter:
         self.resolved_dynamics_fields = (
             tuple() if dynamics_fields_use is None else tuple(dynamics_fields_use)
         )
-        return KotsTrajectoryStateBuilder(
+        builder = KotsTrajectoryStateBuilder(
             model,
             data,
             trajectory_map=prepared.trajectory_map,
@@ -192,7 +195,10 @@ class _KotsTrajectoryCompileAdapter:
             prefer_matvec_jacobian=self.prefer_matvec_jacobian,
             jacobian_strategy=self.jacobian_strategy,
             kots_backend=self.kots_backend,
+            gravity=self.gravity,
         )
+        self.resolved_gravity = builder.gravity
+        return builder
 
     def validate_runtime(
         self,
@@ -227,6 +233,7 @@ def compile_kots_trajectory_problem(
     prefer_matvec_jacobian: bool = False,
     jacobian_strategy: str | None = None,
     kots_backend: str | None = None,
+    gravity: Sequence[float] | None = None,
 ) -> KotsTrajectoryCompiledProblem:
     model_order = _infer_model_order(model)
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
@@ -251,6 +258,7 @@ def compile_kots_trajectory_problem(
         prefer_matvec_jacobian=prefer_matvec_jacobian,
         jacobian_strategy=jacobian_strategy,
         kots_backend=kots_backend,
+        gravity=gravity,
     )
     compiled = compile_trajectory_problem_with_adapter(
         dsl_use,
@@ -273,6 +281,7 @@ def compile_kots_trajectory_problem(
         dt=float(compiled.prepared.dt),
         model_order=int(compiled.prepared.model_order),
         dynamics_fields=tuple(adapter.resolved_dynamics_fields),
+        gravity=adapter.resolved_gravity,
         diagnostics=diagnostics,
     )
 

@@ -72,6 +72,17 @@ def _normalize_kots_backend(backend: str | None) -> str | None:
     return name
 
 
+def _normalize_kots_gravity(gravity: Sequence[float] | None) -> tuple[float, float, float] | None:
+    if gravity is None:
+        return None
+    values = np.asarray(gravity, dtype=float)
+    if values.shape != (3,):
+        raise ValueError(f"KotsStateBuilder: gravity must have shape (3,), got {values.shape}.")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("KotsStateBuilder: gravity must contain only finite values.")
+    return tuple(float(value) for value in values)
+
+
 # kots.py 内で「どの field ファミリを提供するか」を宣言する登録表。
 KOTS_DEFAULT_BINDINGS: dict[str, str] = {
     "kinematics.link.pos": "value",
@@ -97,11 +108,13 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         dynamics_owner_type: str = "total_joint",
         prefer_matvec_jacobian: bool = False,
         kots_backend: str | None = None,
+        gravity: Sequence[float] | None = None,
     ) -> None:
         super().__init__(model, data, q_var=q_var)
         self.dtype = DTYPE_KINEMATICS
         self.owner_type = "link"
         self.kots_backend = _normalize_kots_backend(kots_backend)
+        self.gravity = _normalize_kots_gravity(gravity)
         self.dynamics_owner_type = str(dynamics_owner_type)
         if self.dynamics_owner_type == "":
             raise ValueError("KotsStateBuilder: dynamics_owner_type must be non-empty.")
@@ -263,6 +276,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         prefer_matvec_jacobian: bool = False,
         jacobian_strategy: str | None = None,
         kots_backend: str | None = None,
+        gravity: Sequence[float] | None = None,
     ) -> None:
         self.trajectory_map = trajectory_map
         self.p_var = str(p_var)
@@ -290,6 +304,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             dynamics_owner_type=dynamics_owner_type,
             prefer_matvec_jacobian=prefer_matvec_jacobian,
             kots_backend=kots_backend,
+            gravity=gravity,
         )
         self.register_value_and_jac(
             dtype=DTYPE_COORD,
