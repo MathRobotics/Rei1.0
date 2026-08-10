@@ -52,6 +52,7 @@ class _FakeKotsModel:
         self.dynamics_calls = 0
         self.kinematics_backends = []
         self.dynamics_backends = []
+        self.dynamics_materialize_dicts = []
 
     def dof(self) -> int:
         return 2
@@ -66,9 +67,10 @@ class _FakeKotsModel:
         self.kinematics_calls += 1
         self.kinematics_backends.append(backend)
 
-    def dynamics(self, backend=None) -> None:
+    def dynamics(self, backend=None, materialize_dict=True) -> None:
         self.dynamics_calls += 1
         self.dynamics_backends.append(backend)
+        self.dynamics_materialize_dicts.append(materialize_dict)
 
     def _split(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         q = np.array([self._motion[0], self._motion[3]], dtype=float)
@@ -683,6 +685,7 @@ class TestKotsTrajectoryDynamicsMock:
         assert np.allclose(out[key], np.array([0.5, -0.25], dtype=float))
         assert model.dynamics_backends
         assert set(model.dynamics_backends) == {"rust"}
+        assert set(model.dynamics_materialize_dicts) == {False}
 
     def test_compile_kots_trajectory_problem_passes_kots_backend_to_builder(self) -> None:
         model = _FakeKotsModel()
@@ -732,6 +735,7 @@ class TestKotsTrajectoryDynamicsMock:
 
         assert model.dynamics_backends
         assert set(model.dynamics_backends) == {"rust"}
+        assert set(model.dynamics_materialize_dicts) == {False}
 
     def test_kots_trajectory_builder_rejects_unknown_kots_backend(self) -> None:
         model = _FakeKotsModel()

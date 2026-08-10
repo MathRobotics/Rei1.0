@@ -40,23 +40,29 @@ class KotsAdapter:
         self._model_dof_cache: int | None = None
         self._model_order_cache: int | None = None
 
-    def _call_update_method(self, fn: Any) -> bool:
+    def _call_update_method(self, fn: Any, *, materialize_dict: bool | None = None) -> bool:
         backend = getattr(self.builder, "kots_backend", None)
         if backend is None:
             fn()
             return True
+        kwargs: dict[str, Any] = {"backend": backend}
         try:
             sig = inspect.signature(fn)
         except (TypeError, ValueError):
             try:
-                fn(backend=backend)
+                if materialize_dict is not None:
+                    kwargs["materialize_dict"] = materialize_dict
+                fn(**kwargs)
             except TypeError:
                 return False
             return True
         params = sig.parameters
-        if "backend" not in params and not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        if "backend" not in params and not accepts_kwargs:
             return False
-        fn(backend=backend)
+        if materialize_dict is not None and ("materialize_dict" in params or accepts_kwargs):
+            kwargs["materialize_dict"] = materialize_dict
+        fn(**kwargs)
         return True
 
     def update_dynamics_if_available(self) -> bool:
@@ -66,7 +72,8 @@ class KotsAdapter:
             fn = getattr(self.model, name, None)
             if not callable(fn):
                 continue
-            if self._call_update_method(fn):
+            materialize_dict = False if getattr(self.builder, "kots_backend", None) == "rust" else None
+            if self._call_update_method(fn, materialize_dict=materialize_dict):
                 return True
         return False
 
