@@ -41,7 +41,7 @@ def _add_revolute_chain(
                 "name": f"chain_link{i + 1}",
                 "mass": 1.0,
                 "cog": [0.1, 0.0, 0.0],
-                "inertia": [0.02, 0.02, 0.02, 0.0, 0.0, 0.0],
+                "inertia": {"ixx": 0.02, "ixy": 0.0, "ixz": 0.0, "iyy": 0.02, "iyz": 0.0, "izz": 0.02},
                 "geometry": "generated_chain.stl",
             }
         )
@@ -70,7 +70,7 @@ def build_serial_chain_model(dof: int) -> dict:
             "name": "base",
             "mass": 10.0,
             "cog": [0.0, 0.0, 0.0],
-            "inertia": [0.1, 0.1, 0.1, 0.0, 0.0, 0.0],
+            "inertia": {"ixx": 0.1, "ixy": 0.0, "ixz": 0.0, "iyy": 0.1, "iyz": 0.0, "izz": 0.1},
             "geometry": "generated_base.stl",
         },
     ]
@@ -78,7 +78,7 @@ def build_serial_chain_model(dof: int) -> dict:
         {
             "id": 0,
             "name": "root",
-            "type": "fix",
+            "type": "fixed",
             "parent_link_id": 0,
             "child_link_id": 1,
             "origin": {
@@ -88,7 +88,7 @@ def build_serial_chain_model(dof: int) -> dict:
         }
     ]
     _add_revolute_chain(links, joints, parent_link_id=1, count=dof)
-    return {"links": links, "joints": joints}
+    return {"schema_version": "0.0.2", "links": links, "joints": joints}
 
 
 def make_kots(dof: int, order: int) -> Kots:

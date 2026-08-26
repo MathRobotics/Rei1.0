@@ -1,4 +1,5 @@
 {
+  "schema_version": "0.0.2",
   "links": [
     {
       "id": 0,
@@ -9,63 +10,63 @@
       "name": "base",
       "mass": 10.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.1, 0.1, 0.1, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.1, "ixy": 0.0, "ixz": 0.0, "iyy": 0.1, "iyz": 0.0, "izz": 0.1}
     },
     {
       "id": 2,
       "name": "arm1",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
     },
     {
       "id": 3,
       "name": "arm2",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
     },
     {
       "id": 4,
       "name": "arm3",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
     },
     {
       "id": 5,
       "name": "arm4",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
     },
     {
       "id": 6,
       "name": "arm5",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
     },
     {
       "id": 7,
       "name": "arm6",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
     },
     {
       "id": 8,
       "name": "end_effector",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
-      "inertia": [0.05, 0.05, 0.02, 0.0, 0.0, 0.0]
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
     }
   ],
   "joints": [
     {
       "id": 0,
       "name": "root",
-      "type": "fix",
+      "type": "fixed",
       "parent_link_id": 0,
       "child_link_id": 1,
       "origin": {
