@@ -258,6 +258,9 @@ For trajectory problems containing `total_joint` coordinates and dynamics,
 Rei batches all requested time steps into RoboKots' batch state and Jacobian
 APIs by default. Set `batch_trajectory=False` to retain per-step evaluation;
 kinematic state requests automatically use that compatible per-step path.
+IOC terms that `vstack` compatible trajectory dynamics states also batch their
+`J_p.T @ rhs` evaluations through the same API, while mixed state stacks retain
+the per-step fallback.
 
 World-frame gravity can be forwarded to RoboKots dynamics with, for example,
 `gravity=(0.0, 0.0, -9.81)`. Omitting it preserves RoboKots' backward-compatible

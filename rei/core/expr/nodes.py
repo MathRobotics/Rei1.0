@@ -765,6 +765,57 @@ class StackExpr:
         if r.ndim not in (1, 2):
             raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
 
+        # IOC commonly stacks identical state fields across trajectory steps.
+        # Give state backends a chance to process those VJPs in one batch before
+        # retaining the generic compositional path below.
+        batch_vjp = getattr(ctx.state, "jacobian_transpose_mul_many", None)
+        if callable(batch_vjp) and len(self.parts) >= 2 and all(isinstance(part, GetStateExpr) for part in self.parts):
+            state_parts = list(self.parts)
+            reference_vars = list(state_parts[0].vars)
+            compatible = all(
+                len(part.vars) == len(reference_vars)
+                and len(part.key_jacs) == len(reference_vars)
+                and all(var is ref for var, ref in zip(part.vars, reference_vars, strict=True))
+                for part in state_parts
+            )
+            if compatible:
+                rhs_parts = []
+                offset = 0
+                for part in state_parts:
+                    y = np.asarray(part.eval_value(ctx), dtype=float).reshape(-1)
+                    stop = int(offset + y.size)
+                    rhs_part = r[offset:stop] if r.ndim == 1 else r[offset:stop, :]
+                    if int(rhs_part.shape[0]) != int(y.size):
+                        raise ValueError(
+                            f"{self.name}: rhs size mismatch for vjp. "
+                            f"needed at least {stop} rows, got {r.shape[0]}."
+                        )
+                    rhs_parts.append(rhs_part)
+                    offset = stop
+                if int(r.shape[0]) != int(offset):
+                    raise ValueError(
+                        f"{self.name}: rhs size mismatch for vjp. Expected {offset} rows, got {r.shape[0]}."
+                    )
+                try:
+                    grads = []
+                    for var_index, _var in enumerate(reference_vars):
+                        requests = [
+                            (part.key_value, part.key_jacs[var_index], rhs_part)
+                            for part, rhs_part in zip(state_parts, rhs_parts, strict=True)
+                        ]
+                        contributions = [np.asarray(value, dtype=float) for value in batch_vjp(requests)]
+                        if len(contributions) != len(state_parts):
+                            raise ValueError(
+                                f"{self.name}: batched VJP returned {len(contributions)} contributions "
+                                f"for {len(state_parts)} state parts."
+                            )
+                        grads.append(np.sum(np.stack(contributions, axis=0), axis=0))
+                    return grads
+                except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                    # Some state families cannot be batched.  Preserve the
+                    # existing per-expression VJP path in that case.
+                    pass
+
         grads = None
         offset = 0
         for p in self.parts:

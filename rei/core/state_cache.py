@@ -217,3 +217,48 @@ class StateCache:
             "StateCache: backend does not expose a matching jacobian_transpose_mul "
             f"for var {jac_var!r}."
         )
+
+    def jacobian_transpose_mul_many(
+        self,
+        requests: Iterable[tuple[StateKey, StateKey, Array | Any]],
+    ) -> list[Array]:
+        """Compute several compatible state Jacobian VJPs in one backend call.
+
+        Backends may opt in with ``param_jacobian_transpose_mul_many``.  The
+        ordinary single-request implementation remains the compatibility
+        fallback for every other backend and state family.
+        """
+        items = list(requests)
+        if len(items) < 2:
+            return [self.jacobian_transpose_mul(value_key, jac_key, rhs) for value_key, jac_key, rhs in items]
+
+        parsed = [str(jac_key.field).partition("_J_") for _value_key, jac_key, _rhs in items]
+        if all(sep and base and jac_var for base, sep, jac_var in parsed):
+            builder = getattr(self.build_state, "__self__", None)
+            pack = self._pack_last
+            p_var = getattr(builder, "p_var", None)
+            batch_vjp = getattr(builder, "param_jacobian_transpose_mul_many", None)
+            if (
+                builder is not None
+                and pack is not None
+                and callable(batch_vjp)
+                and isinstance(p_var, str)
+                and all(jac_var == p_var for _base, _sep, jac_var in parsed)
+            ):
+                x_all = np.asarray(pack.get(), dtype=float).reshape(-1)
+                try:
+                    out = batch_vjp(
+                        x_all,
+                        [(value_key, rhs) for value_key, _jac_key, rhs in items],
+                        pack=pack,
+                        time=self._time_last,
+                    )
+                    if len(out) != len(items):
+                        raise ValueError(
+                            "StateCache: batched backend VJP returned an unexpected number of results."
+                        )
+                    return [np.asarray(value, dtype=float) for value in out]
+                except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                    pass
+
+        return [self.jacobian_transpose_mul(value_key, jac_key, rhs) for value_key, jac_key, rhs in items]

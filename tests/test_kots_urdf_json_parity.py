@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from rei.optimize_backends.kots import compile_kots_trajectory_problem
+from rei.optimize_backends.trajectory_ioc import compile_trajectory_ioc_problem, estimate_ioc_weights
 
 try:
     from robokots.kots import Kots
@@ -222,3 +223,66 @@ def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
     r_stepwise, J_stepwise = linearize(batch_trajectory=False)
     np.testing.assert_allclose(r_batched, r_stepwise, rtol=0.0, atol=0.0)
     np.testing.assert_allclose(J_batched, J_stepwise, rtol=0.0, atol=0.0)
+
+
+def test_kots_batched_ioc_state_vjp_matches_stepwise() -> None:
+    """IOC stacks trajectory state VJPs into one RoboKots batch request."""
+    if Kots is None:
+        pytest.skip("RoboKots is not installed.")
+
+    class _VjpProbe:
+        def __init__(self, model) -> None:
+            self._model = model
+            self.vjp_rhs_shapes: list[tuple[int, ...]] = []
+
+        def __getattr__(self, name):
+            return getattr(self._model, name)
+
+        def jacobian_transpose_mul(self, state_ref, rhs):
+            self.vjp_rhs_shapes.append(tuple(np.asarray(rhs).shape))
+            return self._model.jacobian_transpose_mul(state_ref, rhs)
+
+    root = Path(__file__).resolve().parents[1]
+    model_path = root / "examples" / "models" / "planar2.json"
+    dsl = _minimal_kots_trajectory_dsl(2)
+    dsl["variables"][0]["init"] = [0.1, -0.2, 0.3, 0.4]
+    torque_at_zero = copy.deepcopy(dsl["terms"][2]["expr"])
+    torque_at_one = copy.deepcopy(torque_at_zero)
+    torque_at_one["name"] = "tau1"
+    torque_at_one["key"]["k"] = 1
+    dsl["terms"] = [
+        {
+            "expr": {
+                "type": "vstack",
+                "name": "torque_stack",
+                "parts": [torque_at_zero, torque_at_one],
+            },
+            "cost": {"type": "l2"},
+        }
+    ]
+
+    def estimate(*, batch_trajectory: bool) -> tuple[dict, list[tuple[int, ...]]]:
+        model = _VjpProbe(Kots.from_json_file(str(model_path), order=5))
+        compiled = compile_trajectory_ioc_problem(
+            dsl,
+            backend="kots",
+            model=model,
+            data=model.state_dict_,
+            kots_backend="rust",
+            batch_trajectory=batch_trajectory,
+        )
+        return estimate_ioc_weights(compiled), model.vjp_rhs_shapes
+
+    stepwise, stepwise_shapes = estimate(batch_trajectory=False)
+    batched, batched_shapes = estimate(batch_trajectory=True)
+
+    # Same stationarity result, while the two per-step VJPs become one batch.
+    np.testing.assert_allclose(batched["weights"], stepwise["weights"], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(
+        batched["stationarity"]["ikkt_residual"],
+        stepwise["stationarity"]["ikkt_residual"],
+        rtol=0.0,
+        atol=0.0,
+    )
+    assert stepwise_shapes == [(2,), (2,)]
+    assert batched_shapes == [(2, 2)]
