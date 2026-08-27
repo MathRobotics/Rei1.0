@@ -131,6 +131,7 @@ def inspect_trajectory_problem_backend(
     max_derivative_order: int | None = None,
     dynamics_owner_type: str = "total_joint",
     extra_supported_dynamics_fields: Sequence[str] | None = None,
+    extra_supported_dynamics_owner_fields: Mapping[str, Sequence[str]] | None = None,
     unsupported_action: str = "error",
 ) -> TrajectoryProblemDiagnostics:
     """Inspect trajectory DSL requirements against a backend capability surface."""
@@ -141,6 +142,10 @@ def inspect_trajectory_problem_backend(
         backend=backend_name,
         extra_supported_dynamics_fields=extra_supported_dynamics_fields,
     )
+    owner_fields = {
+        str(owner_type): {canonical_field_name(str(field)) for field in fields}
+        for owner_type, fields in (extra_supported_dynamics_owner_fields or {}).items()
+    }
     max_deriv = None if max_derivative_order is None else int(max_derivative_order)
     if model_order is None:
         order_fn = getattr(model, "order", None)
@@ -237,13 +242,18 @@ def inspect_trajectory_problem_backend(
             )
             supported = True
             reason = None
-            if owner_type != str(dynamics_owner_type):
+            supported_fields_for_owner = (
+                supported_dyn
+                if owner_type == str(dynamics_owner_type)
+                else owner_fields.get(owner_type, set())
+            )
+            if owner_type != str(dynamics_owner_type) and owner_type not in owner_fields:
                 supported = False
                 reason = (
                     f"dynamics owner_type {owner_type!r} is not supported by this compile path; "
                     f"expected {dynamics_owner_type!r}"
                 )
-            elif field not in supported_dyn:
+            elif field not in supported_fields_for_owner:
                 supported = False
                 reason = f"dynamics field is not implemented by {backend_name} trajectory state builder"
             elif req_deriv is not None and max_deriv is not None and int(req_deriv) > int(max_deriv):

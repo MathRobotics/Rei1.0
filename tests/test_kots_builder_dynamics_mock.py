@@ -40,11 +40,13 @@ _ensure_robokots_state_stub()
 _kots_state_mod = importlib.import_module("rei.backends.state.robotics.kots")
 _kots_opt_mod = importlib.import_module("rei.optimize_backends.kots")
 _traj_ioc_mod = importlib.import_module("rei.optimize_backends.trajectory_ioc")
+_traj_diag_mod = importlib.import_module("rei.optimize_backends.trajectory_diagnostics")
 KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
 compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem
 compile_kots_trajectory_problem_template = _kots_opt_mod.compile_kots_trajectory_problem_template
 compile_trajectory_ioc_problem = _traj_ioc_mod.compile_trajectory_ioc_problem
 estimate_ioc_weights = _traj_ioc_mod.estimate_ioc_weights
+inspect_trajectory_problem_backend = _traj_diag_mod.inspect_trajectory_problem_backend
 
 class _FakeKotsModel:
     def __init__(self) -> None:
@@ -2125,3 +2127,36 @@ def test_kots_kinetic_energy_value_jacobian_and_vjp_chain() -> None:
         rtol=0.0,
         atol=0.0,
     )
+
+
+def test_kots_diagnostics_accept_total_body_kinetic_energy() -> None:
+    dsl = {
+        "terms": [
+            {
+                "name": "energy",
+                "expr": {
+                    "type": "get_state",
+                    "key": {
+                        "k": 0,
+                        "owner_type": "total_body",
+                        "owner_name": "total_body",
+                        "dtype": DTYPE_DYNAMICS,
+                        "field": "kinetic_energy",
+                    },
+                    "jac": {"var": "p"},
+                },
+                "cost": {"type": "l2"},
+            }
+        ]
+    }
+    report = inspect_trajectory_problem_backend(
+        dsl,
+        backend="kots",
+        dynamics_owner_type="total_joint",
+        extra_supported_dynamics_owner_fields={"total_body": ("kinetic_energy",)},
+        unsupported_action="skipped",
+    )
+    assert report.supported_terms == (0,)
+    assert report.unsupported_terms == ()
+    assert report.capabilities[0].owner_type == "total_body"
+    assert report.capabilities[0].field == "kinetic_energy"

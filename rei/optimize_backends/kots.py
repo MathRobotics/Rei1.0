@@ -552,6 +552,7 @@ def compile_kots_trajectory_problem(
         model_order=model_order,
         max_derivative_order=max_derivative_order_use,
         dynamics_owner_type=dynamics_owner_type,
+        extra_supported_dynamics_owner_fields={"total_body": ("kinetic_energy",)},
         unsupported_action=("skipped" if unsupported_policy == "warn_skip" else "error"),
     )
     if unsupported_policy == "error":
