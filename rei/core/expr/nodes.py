@@ -714,6 +714,131 @@ class SubExpr:
 
 
 @dataclass
+class JointPowerExpr:
+    """Scalar mechanical joint power ``torque.T @ velocity`` at one time step."""
+
+    name: str
+    torque: Expr
+    velocity: Expr
+
+    @property
+    def vars(self):
+        return self.torque.vars
+
+    def _validate_vars(self) -> None:
+        torque_vars = list(self.torque.vars)
+        velocity_vars = list(self.velocity.vars)
+        if len(torque_vars) != len(velocity_vars) or any(
+            torque_var is not velocity_var
+            for torque_var, velocity_var in zip(torque_vars, velocity_vars, strict=True)
+        ):
+            raise ValueError(f"{self.name}: torque and velocity must use identical variable blocks.")
+
+    def deps(self):
+        return [*self.torque.deps(), *self.velocity.deps()]
+
+    def value_deps(self):
+        torque_deps = getattr(self.torque, "value_deps", None)
+        velocity_deps = getattr(self.velocity, "value_deps", None)
+        if not callable(torque_deps) or not callable(velocity_deps):
+            raise AttributeError(f"{self.name}: value_deps fast path is not available.")
+        return [*torque_deps(), *velocity_deps()]
+
+    def _values(self, ctx: RuntimeContext) -> tuple[Array, Array]:
+        torque_value = getattr(self.torque, "eval_value", None)
+        velocity_value = getattr(self.velocity, "eval_value", None)
+        if not callable(torque_value) or not callable(velocity_value):
+            raise AttributeError(f"{self.name}: value fast path is not available.")
+        torque = np.asarray(torque_value(ctx), dtype=float).reshape(-1)
+        velocity = np.asarray(velocity_value(ctx), dtype=float).reshape(-1)
+        if torque.shape != velocity.shape:
+            raise ValueError(f"{self.name}: torque/velocity shape mismatch {torque.shape} vs {velocity.shape}.")
+        return torque, velocity
+
+    def eval_value(self, ctx: RuntimeContext):
+        self._validate_vars()
+        torque, velocity = self._values(ctx)
+        return np.asarray([float(torque @ velocity)], dtype=float)
+
+    def eval(self, ctx: RuntimeContext):
+        self._validate_vars()
+        torque, torque_blocks = self.torque.eval(ctx)
+        velocity, velocity_blocks = self.velocity.eval(ctx)
+        torque = np.asarray(torque, dtype=float).reshape(-1)
+        velocity = np.asarray(velocity, dtype=float).reshape(-1)
+        if torque.shape != velocity.shape:
+            raise ValueError(f"{self.name}: torque/velocity shape mismatch {torque.shape} vs {velocity.shape}.")
+        if len(torque_blocks) != len(velocity_blocks):
+            raise ValueError(f"{self.name}: torque/velocity Jacobian block mismatch.")
+        blocks = []
+        for var, torque_jac, velocity_jac in zip(self.vars, torque_blocks, velocity_blocks, strict=True):
+            J_tau = np.asarray(torque_jac, dtype=float)
+            J_vel = np.asarray(velocity_jac, dtype=float)
+            expected = (torque.size, var.dim())
+            if J_tau.shape != expected or J_vel.shape != expected:
+                raise ValueError(f"{self.name}: Jacobian shape mismatch for var {var.name!r}.")
+            blocks.append((velocity @ J_tau + torque @ J_vel).reshape(1, -1))
+        return np.asarray([float(torque @ velocity)], dtype=float), blocks
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        self._validate_vars()
+        torque, velocity = self._values(ctx)
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2) or int(r.shape[0]) != 1:
+            raise ValueError(f"{self.name}: rhs must have shape (1,) or (1, n), got {r.shape}.")
+        torque_vjp = getattr(self.torque, "vjp", None)
+        velocity_vjp = getattr(self.velocity, "vjp", None)
+        if not callable(torque_vjp) or not callable(velocity_vjp):
+            raise AttributeError(f"{self.name}: vjp fast path is not available.")
+        scale = r.reshape(()) if r.ndim == 1 else r.reshape(1, -1)
+        torque_rhs = velocity * scale if r.ndim == 1 else velocity.reshape(-1, 1) * scale
+        velocity_rhs = torque * scale if r.ndim == 1 else torque.reshape(-1, 1) * scale
+        torque_grads = [np.asarray(value, dtype=float) for value in torque_vjp(ctx, torque_rhs)]
+        velocity_grads = [np.asarray(value, dtype=float) for value in velocity_vjp(ctx, velocity_rhs)]
+        if len(torque_grads) != len(velocity_grads):
+            raise ValueError(f"{self.name}: torque/velocity VJP block mismatch.")
+        return [torque_grad + velocity_grad for torque_grad, velocity_grad in zip(torque_grads, velocity_grads)]
+
+
+@dataclass
+class JointPowerSquaredExpr:
+    """Squared scalar mechanical joint power ``(torque.T @ velocity)**2``."""
+
+    name: str
+    torque: Expr
+    velocity: Expr
+
+    @property
+    def vars(self):
+        return self.torque.vars
+
+    def _power(self) -> JointPowerExpr:
+        return JointPowerExpr(name=self.name, torque=self.torque, velocity=self.velocity)
+
+    def deps(self):
+        return self._power().deps()
+
+    def value_deps(self):
+        return self._power().value_deps()
+
+    def eval_value(self, ctx: RuntimeContext):
+        power = self._power().eval_value(ctx)
+        return power * power
+
+    def eval(self, ctx: RuntimeContext):
+        power, blocks = self._power().eval(ctx)
+        return power * power, [2.0 * power.reshape(-1, 1) * block for block in blocks]
+
+    def vjp(self, ctx: RuntimeContext, rhs):
+        power = self._power().eval_value(ctx)
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim not in (1, 2) or int(r.shape[0]) != 1:
+            raise ValueError(f"{self.name}: rhs must have shape (1,) or (1, n), got {r.shape}.")
+        scaled_rhs = r * (2.0 * float(power[0]))
+        return self._power().vjp(ctx, scaled_rhs)
+
+
+@dataclass
 class StackExpr:
     name: str
     parts: Sequence[Expr]

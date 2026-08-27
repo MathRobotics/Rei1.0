@@ -294,6 +294,63 @@ template.update_window(
 )
 ```
 
+### Joint Mechanical Power
+
+`joint_power` evaluates the scalar mechanical power `torque.T @ velocity`.
+Use a torque state expression and a trajectory velocity expression at the same
+time index; its VJP propagates analytically to both inputs:
+
+```python
+power = {
+    "type": "joint_power",
+    "torque": {"type": "get_state", "key": torque_key, "jac": {"var": "p"}},
+    "velocity": {
+        "type": "get_traj_var",
+        "var": "p",
+        "derivative_order": 1,
+        "k": k,
+    },
+}
+```
+
+For a non-negative effort objective, use `joint_power_squared` (the alias
+`joint_power_sq` is also accepted).  It evaluates `(torque.T @ velocity)**2`
+and propagates its analytic product-rule VJP to both torque and velocity:
+
+```python
+power_squared = {
+    "type": "joint_power_squared",
+    "torque": {"type": "get_state", "key": torque_key, "jac": {"var": "p"}},
+    "qdot": {
+        "type": "get_traj_var",
+        "var": "p",
+        "derivative_order": 1,
+        "k": k,
+    },
+}
+```
+
+RoboKots kinetic energy is available as the canonical scalar
+`StateType("total_body", "total_body", "kinetic_energy")`.  Register it
+through `dynamics_fields=("kinetic_energy",)` (or let the trajectory compiler
+infer it from the DSL), then use the normal `get_state` form.  Rei delegates
+the value, JVP, and VJP through that StateType and chains its q/qdot derivative
+to trajectory parameters:
+
+```python
+energy = {
+    "type": "get_state",
+    "key": {
+        "k": k,
+        "owner_type": "total_body",
+        "owner_name": "total_body",
+        "dtype": "dynamics",
+        "field": "kinetic_energy",
+    },
+    "jac": {"var": "p"},
+}
+```
+
 World-frame gravity can be forwarded to RoboKots dynamics with, for example,
 `gravity=(0.0, 0.0, -9.81)`. Omitting it preserves RoboKots' backward-compatible
 zero-gravity default:

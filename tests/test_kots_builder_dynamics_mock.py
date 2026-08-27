@@ -137,6 +137,34 @@ class _FakeKotsModel:
         raise ValueError(f"Unsupported jacobian field: {field!r}")
 
 
+class _FakeKotsKineticEnergyModel(_FakeKotsModel):
+    """Minimal model for RoboKots' dedicated kinetic-energy API."""
+
+    def _kinetic_energy(self):
+        q, qdot, _qddot = self._split()
+        return 0.5 * float(q @ q + qdot @ qdot)
+
+    def _kinetic_energy_jacobian(self):
+        q, qdot, _qddot = self._split()
+        return np.array([[q[0], qdot[0], q[1], qdot[1]]], dtype=float)
+
+    def state_info(self, state_ref):
+        if self._state_field_name(state_ref) == "kinetic_energy":
+            return np.asarray([self._kinetic_energy()], dtype=float)
+        return super().state_info(state_ref)
+
+    def jacobian(self, state_ref):
+        if self._state_field_name(state_ref) == "kinetic_energy":
+            return self._kinetic_energy_jacobian()
+        return super().jacobian(state_ref)
+
+    def jacobian_mul(self, state_ref, cols):
+        return self.jacobian(state_ref) @ np.asarray(cols, dtype=float)
+
+    def jacobian_transpose_mul(self, state_ref, rhs):
+        return self.jacobian(state_ref).T @ np.asarray(rhs, dtype=float)
+
+
 class _FakeKotsModelMatvec(_FakeKotsModel):
     def __init__(self) -> None:
         super().__init__()
@@ -2051,3 +2079,49 @@ class TestKotsTrajectoryDynamicsMock:
         out = builder.build_state(np.array([1.0, 2.0], dtype=float), required=[key_tau, key_tau_jac])
         assert np.allclose(out[key_tau], np.array([17.0, 44.0], dtype=float))
         assert np.allclose(out[key_tau_jac], np.array([[17.0, 0.0], [0.0, 22.0]], dtype=float))
+
+
+def test_kots_kinetic_energy_value_jacobian_and_vjp_chain() -> None:
+    maps = {
+        order: TrajectoryMap(
+            A=np.eye(6, dtype=float)[[order, order + 3]],
+            b=np.zeros((2,), dtype=float),
+            steps=1,
+            q_dim=2,
+        )
+        for order in range(3)
+    }
+    builder = KotsTrajectoryStateBuilder(
+        _FakeKotsKineticEnergyModel(),
+        data={},
+        trajectory_map=maps[0],
+        trajectory_derivative_maps={1: maps[1], 2: maps[2]},
+        p_var="p",
+        dynamics_fields=("kinetic_energy",),
+        batch_trajectory=False,
+    )
+    key = make_key(
+        k=0,
+        owner_type="total_body",
+        owner_name="total_body",
+        dtype=DTYPE_DYNAMICS,
+        field="kinetic_energy",
+    )
+    key_jac = make_jac_key(
+        k=0,
+        owner_type="total_body",
+        owner_name="total_body",
+        dtype=DTYPE_DYNAMICS,
+        field="kinetic_energy",
+        var="p",
+    )
+    p = np.arange(1.0, 7.0)
+    out = builder.build_state(p, required=[key, key_jac])
+    np.testing.assert_allclose(out[key], [23.0], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(out[key_jac], [[1.0, 2.0, 0.0, 4.0, 5.0, 0.0]], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(
+        builder.param_jacobian_transpose_mul(p, key, np.array([2.0])),
+        [2.0, 4.0, 0.0, 8.0, 10.0, 0.0],
+        rtol=0.0,
+        atol=0.0,
+    )

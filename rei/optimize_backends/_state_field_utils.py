@@ -176,12 +176,14 @@ def validate_runtime_field_coverage(
     error_prefix: str,
     builder_name: str,
     missing_hint: str,
+    allowed_other_owner_types: Sequence[str] = (),
 ) -> None:
     requested_fields, unsupported_owner_types = required_base_fields(
         runtime=runtime,
         dtype=dtype,
         owner_type=owner_type,
     )
+    unsupported_owner_types.difference_update(str(owner_type) for owner_type in allowed_other_owner_types)
     if unsupported_owner_types:
         unsupported = ", ".join(sorted(unsupported_owner_types))
         raise ValueError(

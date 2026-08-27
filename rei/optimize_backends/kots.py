@@ -396,6 +396,20 @@ def _validate_kots_runtime_dynamics_coverage(
             "(e.g. include 'torque_d1' for first torque derivative), "
             "or remove corresponding get_state dynamics terms."
         ),
+        allowed_other_owner_types=("total_body",),
+    )
+    validate_runtime_field_coverage(
+        runtime=runtime,
+        builder=builder,
+        dtype=DTYPE_DYNAMICS,
+        owner_type="total_body",
+        error_prefix="compile_kots_trajectory_problem",
+        builder_name="KotsTrajectoryStateBuilder",
+        missing_hint=(
+            "Add 'kinetic_energy' to dynamics_fields, or remove corresponding "
+            "total_body get_state terms."
+        ),
+        allowed_other_owner_types=(dynamics_owner_type,),
     )
 
 
@@ -433,12 +447,25 @@ class _KotsTrajectoryCompileAdapter:
                 dtype=DTYPE_DYNAMICS,
                 owner_type=self.dynamics_owner_type,
             )
+            total_body_fields, total_body_unsupported_owner_types = required_base_fields_in_order_from_dsl(
+                dsl=prepared.dsl,
+                dtype=DTYPE_DYNAMICS,
+                owner_type="total_body",
+            )
+            # Each single-owner scan naturally observes the other supported
+            # dynamics owner; only third-party owner types are unsupported.
+            unsupported_owner_types.discard("total_body")
+            total_body_unsupported_owner_types.discard(self.dynamics_owner_type)
+            unsupported_owner_types.update(total_body_unsupported_owner_types)
             if unsupported_owner_types:
                 unsupported = ", ".join(sorted(unsupported_owner_types))
                 raise ValueError(
                     "compile_kots_trajectory_problem: DSL contains dynamics keys with unsupported owner_type(s): "
-                    f"{unsupported}. Supported owner_type is {self.dynamics_owner_type!r}."
+                    f"{unsupported}. Supported owner types are {self.dynamics_owner_type!r} and 'total_body'."
                 )
+            requested_fields_order.extend(
+                field for field in total_body_fields if field not in requested_fields_order
+            )
             dynamics_fields_use = tuple(requested_fields_order) if len(requested_fields_order) > 0 else None
 
         _validate_model_order_for_dynamics_fields(

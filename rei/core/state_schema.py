@@ -14,7 +14,7 @@ FRAME_NAMES: Tuple[str, str] = ("world", "local")
 DEFAULT_FRAME: str = "world"
 
 # Common owner types (not enforced; backends may extend)
-OWNER_TYPES: Tuple[str, ...] = ("joint", "link", "total_link", "total_joint", "total")
+OWNER_TYPES: Tuple[str, ...] = ("joint", "link", "total_link", "total_joint", "total_body", "total")
 
 # Recommended dtype values (not enforced)
 DTYPE_KINEMATICS = "kinematics"
@@ -43,8 +43,9 @@ KIN_FIELDS: Tuple[str, ...] = FRAME_FIELDS
 MOMENTUM_FIELDS: Tuple[str, ...] = ("momentum",)
 FORCE_FIELDS: Tuple[str, ...] = ("force",)
 TORQUE_FIELDS: Tuple[str, ...] = ("torque", "torque_d1")
+KINETIC_ENERGY_FIELDS: Tuple[str, ...] = ("kinetic_energy",)
 
-DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS
+DYNAMICS_FIELDS: Tuple[str, ...] = MOMENTUM_FIELDS + FORCE_FIELDS + TORQUE_FIELDS + KINETIC_ENERGY_FIELDS
 
 # Vision-like fields (minimal set; backends may extend)
 VISION_FIELDS: Tuple[str, ...] = ("reproj", "intrinsics", "extrinsics")

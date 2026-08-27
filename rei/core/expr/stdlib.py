@@ -14,6 +14,8 @@ from .nodes import (
     SubExpr,
     StackExpr,
     HingeExpr,
+    JointPowerExpr,
+    JointPowerSquaredExpr,
     TrajectoryVarExpr,
     TrajectoryVarDerivativesExpr,
     TimeDiffExpr,
@@ -43,6 +45,9 @@ def register_stdlib(expr_register: ExprRegister) -> None:
     expr_register.register_expr("hinge", build_hinge)
     expr_register.register_expr("time_diff", build_time_diff)
     expr_register.register_expr("component", build_component)
+    expr_register.register_expr("joint_power", build_joint_power)
+    expr_register.register_expr("joint_power_squared", build_joint_power_squared)
+    expr_register.register_expr("joint_power_sq", build_joint_power_squared)
 
 
 def _default_var_name(ctx, *, preferred: str = "q") -> str:
@@ -560,6 +565,30 @@ def build_sub(ctx, dsl):
     a = ctx.build_expr(dsl["a"])
     b = ctx.build_expr(dsl["b"])
     return SubExpr(name=dsl.get("name", "sub"), a=a, b=b)
+
+
+def build_joint_power(ctx, dsl):
+    torque_dsl = dsl.get("torque", None)
+    velocity_dsl = dsl.get("velocity", dsl.get("qdot", None))
+    if not isinstance(torque_dsl, Mapping) or not isinstance(velocity_dsl, Mapping):
+        raise ValueError("joint_power requires mapping fields 'torque' and 'velocity' (or 'qdot').")
+    return JointPowerExpr(
+        name=dsl.get("name", "joint_power"),
+        torque=ctx.build_expr(dict(torque_dsl)),
+        velocity=ctx.build_expr(dict(velocity_dsl)),
+    )
+
+
+def build_joint_power_squared(ctx, dsl):
+    torque_dsl = dsl.get("torque", None)
+    velocity_dsl = dsl.get("velocity", dsl.get("qdot", None))
+    if not isinstance(torque_dsl, Mapping) or not isinstance(velocity_dsl, Mapping):
+        raise ValueError("joint_power_squared requires mapping fields 'torque' and 'velocity' (or 'qdot').")
+    return JointPowerSquaredExpr(
+        name=dsl.get("name", "joint_power_squared"),
+        torque=ctx.build_expr(dict(torque_dsl)),
+        velocity=ctx.build_expr(dict(velocity_dsl)),
+    )
 
 
 def build_stack(ctx, dsl):

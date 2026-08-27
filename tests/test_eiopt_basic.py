@@ -47,6 +47,8 @@ from rei.core.expr.nodes import (
     GetStateExpr,
     GetVarExpr,
     HingeExpr,
+    JointPowerExpr,
+    JointPowerSquaredExpr,
     SubExpr,
     TimeDiffExpr,
     TrajectoryVarDerivativesExpr,
@@ -3001,3 +3003,75 @@ class TestReiBasic:
             _ = builder.registered_route_fields(dtype="")
         with pytest.raises(ValueError, match="owner_type must be non-empty"):
             _ = builder.registered_route_fields(owner_type="")
+
+
+def test_joint_power_expr_value_jacobian_and_vjp() -> None:
+    p = Variable(name="p", x=np.array([2.0, 3.0], dtype=float))
+    ctx = RuntimeContext(pack=VariablePack([p]))
+    velocity_map = TrajectoryMap(A=np.eye(2), b=np.zeros((2,)), steps=1, q_dim=2)
+    expr = JointPowerExpr(
+        name="power",
+        torque=GetVarExpr(name="tau", vars=[p]),
+        velocity=TrajectoryVarExpr(name="qdot", vars=[p], trajectory=velocity_map),
+    )
+
+    value, blocks = expr.eval(ctx)
+    np.testing.assert_allclose(value, [13.0], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(blocks[0], [[4.0, 6.0]], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(expr.vjp(ctx, np.array([2.0])), [np.array([8.0, 12.0])], rtol=0.0, atol=0.0)
+
+
+def test_joint_power_expr_is_available_in_dsl() -> None:
+    runtime = compile_nls_problem(
+        {
+            "variables": [{"name": "p", "dim": 2, "init": [2.0, 3.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "joint_power",
+                        "torque": {"type": "get_var", "var": "p"},
+                        "velocity": {"type": "get_var", "var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        },
+        build_state=lambda _x, **_kwargs: {},
+    )
+    residual, jacobian = runtime.linearize()
+    np.testing.assert_allclose(residual, [13.0], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(jacobian, [[4.0, 6.0]], rtol=0.0, atol=0.0)
+
+
+def test_joint_power_squared_expr_value_jacobian_vjp_and_dsl() -> None:
+    p = Variable(name="p", x=np.array([2.0, 3.0], dtype=float))
+    ctx = RuntimeContext(pack=VariablePack([p]))
+    expr = JointPowerSquaredExpr(
+        name="power_sq",
+        torque=GetVarExpr(name="tau", vars=[p]),
+        velocity=GetVarExpr(name="qdot", vars=[p]),
+    )
+    value, blocks = expr.eval(ctx)
+    np.testing.assert_allclose(value, [169.0], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(blocks[0], [[104.0, 156.0]], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(expr.vjp(ctx, np.array([2.0])), [np.array([208.0, 312.0])], rtol=0.0, atol=0.0)
+
+    runtime = compile_nls_problem(
+        {
+            "variables": [{"name": "p", "dim": 2, "init": [2.0, 3.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "joint_power_squared",
+                        "torque": {"type": "get_var", "var": "p"},
+                        "qdot": {"type": "get_var", "var": "p"},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        },
+        build_state=lambda _x, **_kwargs: {},
+    )
+    residual, jacobian = runtime.linearize()
+    np.testing.assert_allclose(residual, [169.0], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(jacobian, [[104.0, 156.0]], rtol=0.0, atol=0.0)

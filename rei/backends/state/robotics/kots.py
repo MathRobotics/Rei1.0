@@ -37,6 +37,8 @@ Array = np.ndarray
 STATE_JACOBIAN_VAR = "state"
 _KOTS_JACOBIAN_STRATEGIES = ("dense", "mul")
 _KOTS_BACKENDS = ("numpy", "rust")
+_KINETIC_ENERGY_FIELD = "kinetic_energy"
+_KINETIC_ENERGY_OWNER_TYPE = "total_body"
 
 
 def _normalize_kots_jacobian_strategy(strategy: str | None, *, prefer_matvec_jacobian: bool) -> str:
@@ -166,8 +168,22 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             dyn_fields = list(dict.fromkeys(dyn_fields))
             if len(dyn_fields) == 0:
                 raise ValueError("KotsStateBuilder: dynamics_fields must be non-empty when provided.")
-            self._needs_dynamics_update = True
             for field in dyn_fields:
+                if field == _KINETIC_ENERGY_FIELD:
+                    # RoboKots exposes this scalar through the canonical
+                    # StateType(total_body, total_body, kinetic_energy).
+                    register_robot_binding_table(
+                        self,
+                        {
+                            f"dynamics.{_KINETIC_ENERGY_OWNER_TYPE}.{field}": "value",
+                            f"dynamics.{_KINETIC_ENERGY_OWNER_TYPE}.{field}.J_state": "jac",
+                        },
+                        handler_owner=self.adapter,
+                        owner_types=(_KINETIC_ENERGY_OWNER_TYPE,),
+                        default_jacobian_wrt=STATE_JACOBIAN_VAR,
+                    )
+                    continue
+                self._needs_dynamics_update = True
                 register_robot_binding_table(
                     self,
                     {
@@ -392,7 +408,10 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 owner_type = getattr(getattr(key, "owner", None), "owner_type", None)
                 if getattr(key, "dtype", None) == DTYPE_COORD and owner_type == "total_joint":
                     continue
-                if getattr(key, "dtype", None) == DTYPE_DYNAMICS and owner_type == self.dynamics_owner_type:
+                if getattr(key, "dtype", None) == DTYPE_DYNAMICS and owner_type in (
+                    self.dynamics_owner_type,
+                    _KINETIC_ENERGY_OWNER_TYPE,
+                ):
                     continue
                 return False
         return True
@@ -427,7 +446,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             return
 
         self.model.import_motions(np.asarray(motions, dtype=float))
-        if not self.adapter.update_dynamics_if_available():
+        if self._needs_dynamics_update and not self.adapter.update_dynamics_if_available():
             raise AttributeError("RoboKots model does not expose a usable batched dynamics method.")
         self._batched_dynamics_cache_key = key
         self._batched_dynamics_cache_misses += 1
@@ -649,10 +668,10 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         field = canonical_field_name(field)
         if field == "torque":
             return min(self._model_order(), 3)
-        try:
-            return min(self._model_order(), torque_derivative_order(field) + 3)
-        except ValueError:
+        deriv_order = torque_derivative_order(field)
+        if deriv_order is None:
             return None
+        return min(self._model_order(), deriv_order + 3)
 
     def _motion_jacobian_chain_candidates(
         self,

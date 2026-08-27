@@ -5,6 +5,8 @@ from .nodes import (
     GetStateExpr,
     GetVarExpr,
     HingeExpr,
+    JointPowerExpr,
+    JointPowerSquaredExpr,
     RepeatConstantExpr,
     StackExpr,
     SubExpr,
@@ -52,4 +54,6 @@ __all__ = [
     "SubExpr",
     "StackExpr",
     "HingeExpr",
+    "JointPowerExpr",
+    "JointPowerSquaredExpr",
 ]
