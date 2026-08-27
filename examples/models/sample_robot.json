@@ -28,6 +28,13 @@
     },
     {
       "id": 4,
+      "name": "arm3",
+      "mass": 5.0,
+      "cog": [0.0, 0.0, 0.0],
+      "inertia": {"ixx": 0.05, "ixy": 0.0, "ixz": 0.0, "iyy": 0.05, "iyz": 0.0, "izz": 0.02}
+    },
+    {
+      "id": 5,
       "name": "ee",
       "mass": 5.0,
       "cog": [0.0, 0.0, 0.0],
@@ -80,6 +87,17 @@
       "child_link_id": 4,
       "axis": [0, 0, 1],
       "limits": {"min": -1.57, "max": 1.57},
+      "origin": {
+        "position": [1, 0, 0],
+        "orientation": [1, 0, 0, 0]
+      }
+    },
+    {
+      "id": 4,
+      "name": "joint4",
+      "type": "fixed",
+      "parent_link_id": 4,
+      "child_link_id": 5,
       "origin": {
         "position": [1, 0, 0],
         "orientation": [1, 0, 0, 0]

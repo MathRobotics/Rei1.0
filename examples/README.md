@@ -68,3 +68,4 @@ python examples/compare_robotics_backends.py --backend robokots
 - `models/planar2.json`: RoboKots 用 2 自由度平面アーム
 - `models/sample_robot.json`: RoboKots 用 3 自由度サンプルロボット
 - `models/sample_robot.urdf`: `sample_robot.json` と同等の URDF 版
+- `models/7_dof_arm.{json,urdf}`: RoboKots の JSON/URDF parity 用 7 自由度アーム

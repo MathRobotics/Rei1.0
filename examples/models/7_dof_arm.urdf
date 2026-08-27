@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<robot name="7_dof_arm">
+  <link name="base"><inertial><origin xyz="0 0 0"/><mass value="10"/><inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/></inertial></link>
+  <link name="arm1"><inertial><origin xyz="0 0 0"/><mass value="5"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.02"/></inertial></link>
+  <link name="arm2"><inertial><origin xyz="0 0 0"/><mass value="5"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.02"/></inertial></link>
+  <link name="arm3"><inertial><origin xyz="0 0 0"/><mass value="5"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.02"/></inertial></link>
+  <link name="arm4"><inertial><origin xyz="0 0 0"/><mass value="5"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.02"/></inertial></link>
+  <link name="arm5"><inertial><origin xyz="0 0 0"/><mass value="5"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.02"/></inertial></link>
+  <link name="arm6"><inertial><origin xyz="0 0 0"/><mass value="5"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.02"/></inertial></link>
+  <link name="end_effector"><inertial><origin xyz="0 0 0"/><mass value="5"/><inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.02"/></inertial></link>
+  <joint name="joint1" type="revolute"><parent link="base"/><child link="arm1"/><origin xyz="0 0 0.1"/><axis xyz="0 0 1"/></joint>
+  <joint name="joint2" type="revolute"><parent link="arm1"/><child link="arm2"/><origin xyz="1 0 0"/><axis xyz="0 0 1"/></joint>
+  <joint name="joint3" type="revolute"><parent link="arm2"/><child link="arm3"/><origin xyz="1 0 0"/><axis xyz="0 0 1"/></joint>
+  <joint name="joint4" type="revolute"><parent link="arm3"/><child link="arm4"/><origin xyz="1 0 0"/><axis xyz="0 0 1"/></joint>
+  <joint name="joint5" type="revolute"><parent link="arm4"/><child link="arm5"/><origin xyz="0 0 0"/><axis xyz="0 0 1"/></joint>
+  <joint name="joint6" type="revolute"><parent link="arm5"/><child link="arm6"/><origin xyz="0 0 0.1"/><axis xyz="0 0 1"/></joint>
+  <joint name="joint7" type="revolute"><parent link="arm6"/><child link="end_effector"/><origin xyz="1 0 0"/><axis xyz="0 0 1"/></joint>
+</robot>
