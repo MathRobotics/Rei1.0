@@ -907,17 +907,26 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 rhs_batch = np.stack([rhs for _index, _key, rhs, _state_ref in group], axis=0)
                 backend_requests.append((refs, rhs_batch))
             try:
-                fused_motion_grads = np.asarray(multi_vjp(backend_requests), dtype=float)
-                self._chain_fused_batched_param_vjp(
-                    out=out,
-                    groups=grouped_items,
-                    motions_and_jacs=group_motions[0],
-                    motion_grads=fused_motion_grads,
-                )
+                grouped_motion_grads = list(multi_vjp(backend_requests))
+                if len(grouped_motion_grads) != len(grouped_items):
+                    raise ValueError("RoboKots multi-VJP must return one result for each input request.")
+                for group, motions_and_jacs, motion_grads in zip(
+                    grouped_items,
+                    group_motions,
+                    grouped_motion_grads,
+                    strict=True,
+                ):
+                    self._chain_batched_param_vjp_group(
+                        out=out,
+                        group=group,
+                        motions_and_jacs=motions_and_jacs,
+                        motion_grads=motion_grads,
+                    )
                 return [np.asarray(value, dtype=float) for value in out]
             except (AttributeError, KeyError, ValueError, TypeError, RuntimeError, IndexError):
-                # A partial RoboKots upgrade may expose the method without the
-                # heterogeneous-state contract.  Retain the established API.
+                # Older RoboKots releases return one fused VJP rather than one
+                # result per input.  That loses IOC term ownership, so retain
+                # the established field-local API in that case.
                 pass
 
         for group in grouped_items:
@@ -942,53 +951,6 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 motion_grads=motion_grads,
             )
         return [np.asarray(value, dtype=float) for value in out]
-
-    def _chain_fused_batched_param_vjp(
-        self,
-        *,
-        out: list[Array | None],
-        groups: Sequence[Sequence[tuple[int, StateKey, Array, Any]]],
-        motions_and_jacs: Sequence[tuple[Array, Array]],
-        motion_grads: Array,
-    ) -> None:
-        """Chain RoboKots' summed multi-state VJP into trajectory parameters.
-
-        ``jacobian_transpose_mul_many`` returns the sum of all requested state
-        VJPs, not one result per request.  StackExpr immediately sums its VJP
-        contributions, so store the fused contribution in the first field and
-        zero-fill the others while preserving that public result shape.
-        """
-        grads = np.asarray(motion_grads, dtype=float)
-        first_group = groups[0]
-        if grads.ndim < 2 or int(grads.shape[0]) != len(first_group):
-            raise ValueError("RoboKots batched multi-VJP output has an invalid time-batch shape.")
-        if any(len(group) != len(first_group) for group in groups):
-            raise ValueError("RoboKots batched multi-VJP requires equally sized field groups.")
-
-        for batch_index, (target_index, key, _rhs, _state_ref) in enumerate(first_group):
-            motion_grad = np.asarray(grads[batch_index], dtype=float)
-            _motion, dmotiondp = motions_and_jacs[batch_index]
-            fused = None
-            # Prefer each field's chain order in turn.  The fused RoboKots
-            # result uses the largest required motion order, which is present
-            # among these candidates (for torque + torque_d1, order four).
-            for group in groups:
-                candidate_key = group[batch_index][1]
-                for cols in self._motion_jacobian_chain_candidates(
-                    dqdp_k=self.trajectory_map.dqdp_at(int(candidate_key.k)),
-                    dmotiondp_k=dmotiondp,
-                    key=candidate_key,
-                ):
-                    if int(cols.shape[0]) == int(motion_grad.shape[0]):
-                        fused = np.asarray(cols.T @ motion_grad, dtype=float)
-                        break
-                if fused is not None:
-                    break
-            if fused is None:
-                raise ValueError("Fused RoboKots VJP motion dimension does not match trajectory chain.")
-            out[target_index] = fused
-            for group in groups[1:]:
-                out[group[batch_index][0]] = np.zeros_like(fused, dtype=float)
 
     def _chain_batched_param_vjp_group(
         self,

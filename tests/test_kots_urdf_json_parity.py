@@ -357,22 +357,27 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
             if not self.expose_many:
                 raise AttributeError("jacobian_transpose_mul_many")
             self.many_calls += 1
-            return self._model.jacobian_transpose_mul_many(requests)
+            # Emulate RoboKots' input-preserving contract introduced for Rei:
+            # one batched VJP result for each (state_ref, rhs) input pair.
+            return [self._model.jacobian_transpose_mul(state_ref, rhs) for state_ref, rhs in requests]
 
     root = Path(__file__).resolve().parents[1]
     model_path = root / "examples" / "models" / "planar2.json"
     dsl = _minimal_kots_trajectory_dsl(2)
     dsl["variables"][0]["init"] = [0.1, -0.2, 0.3, 0.4]
     template = dsl["terms"][2]["expr"]
-    parts = []
+    dsl["terms"] = []
     for field in ("torque", "torque_d1"):
+        parts = []
         for k in (0, 1):
             part = copy.deepcopy(template)
             part["name"] = f"{field}{k}"
             part["key"]["field"] = field
             part["key"]["k"] = k
             parts.append(part)
-    dsl["terms"] = [{"expr": {"type": "vstack", "name": "mixed_tau", "parts": parts}, "cost": {"type": "l2"}}]
+        dsl["terms"].append(
+            {"expr": {"type": "vstack", "name": f"{field}_stack", "parts": parts}, "cost": {"type": "l2"}}
+        )
 
     def estimate(*, expose_many: bool) -> tuple[dict, _VjpProbe]:
         probe = _VjpProbe(Kots.from_json_file(str(model_path), order=5), expose_many=expose_many)
@@ -395,6 +400,13 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
         rtol=0.0,
         atol=1e-10,
     )
+    np.testing.assert_allclose(
+        [term["gradient_norm"] for term in multi["terms"]],
+        [term["gradient_norm"] for term in grouped["terms"]],
+        rtol=0.0,
+        atol=1e-10,
+    )
+    assert multi["stationarity"]["active_indices"] == grouped["stationarity"]["active_indices"]
     assert grouped_probe.single_calls == 2
     assert multi_probe.many_calls == 1
     assert multi_probe.single_calls == 0

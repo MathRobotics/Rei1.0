@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..core.expr.types import RuntimeContext, VariablePack
+from ..core.expr.nodes import GetStateExpr, StackExpr
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import canonical_dtype_name, canonical_field_name
 from ..problem import NLSProblem
@@ -292,6 +293,107 @@ class NLSRuntime:
         except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
             return None
 
+    def _batched_dynamics_stack_contributions(
+        self,
+        *,
+        term_indices: Iterable[int],
+    ) -> dict[int, tuple[Array, Array, Array]]:
+        """Evaluate compatible dynamics stacks across IOC terms in one VJP batch.
+
+        RoboKots' heterogeneous VJP API preserves one output per input state
+        request.  Keeping the request-to-term mapping here is essential: IOC
+        needs one gradient column per cost term, not only their sum.
+        """
+        batch_vjp = getattr(self.state, "jacobian_transpose_mul_many", None) if self.state is not None else None
+        if not callable(batch_vjp):
+            return {}
+
+        candidates: list[dict[str, Any]] = []
+        value_required: list[StateKey] = []
+        reference_vars: list[Any] | None = None
+        for idx in term_indices:
+            expr, cost = self.problem.terms[idx]
+            if not isinstance(expr, StackExpr) or len(expr.parts) < 2:
+                continue
+            if not all(isinstance(part, GetStateExpr) for part in expr.parts):
+                continue
+            parts = list(expr.parts)
+            if not all(getattr(part.key_value, "dtype", None) == "dynamics" for part in parts):
+                continue
+            vars_list = list(expr.vars)
+            if len(vars_list) == 0 or any(
+                len(part.vars) != len(vars_list)
+                or len(part.key_jacs) != len(vars_list)
+                or any(var is not ref for var, ref in zip(part.vars, vars_list, strict=True))
+                for part in parts
+            ):
+                continue
+            if reference_vars is None:
+                reference_vars = vars_list
+            elif len(reference_vars) != len(vars_list) or any(
+                var is not ref for var, ref in zip(vars_list, reference_vars, strict=True)
+            ):
+                continue
+            value_required.extend(part.key_value for part in parts)
+            candidates.append({"idx": idx, "expr": expr, "cost": cost, "parts": parts, "vars": vars_list})
+
+        if len(candidates) < 2 or reference_vars is None:
+            return {}
+
+        try:
+            self.update_state_if_needed(required=_dedupe_required(value_required))
+            requests_by_var: list[list[tuple[StateKey, StateKey, Array]]] = [[] for _ in reference_vars]
+            request_owners: list[list[tuple[dict[str, Any], int]]] = [[] for _ in reference_vars]
+            for candidate in candidates:
+                rhs_parts: list[Array] = []
+                values = [np.asarray(part.eval_value(self.ctx), dtype=float).reshape(-1) for part in candidate["parts"]]
+                raw = np.concatenate(values, axis=0)
+                candidate["raw"] = raw
+                offset = 0
+                for value in values:
+                    stop = offset + int(value.size)
+                    rhs_parts.append(raw[offset:stop])
+                    offset = stop
+                candidate["grads"] = [np.zeros((var.dim(),), dtype=float) for var in reference_vars]
+                for var_index, _var in enumerate(reference_vars):
+                    for part, rhs_part in zip(candidate["parts"], rhs_parts, strict=True):
+                        requests_by_var[var_index].append((part.key_value, part.key_jacs[var_index], rhs_part))
+                        request_owners[var_index].append((candidate, var_index))
+
+            for var_index, requests in enumerate(requests_by_var):
+                contributions = [np.asarray(value, dtype=float) for value in batch_vjp(requests)]
+                if len(contributions) != len(requests):
+                    raise ValueError("batched IOC VJP returned an unexpected number of contributions")
+                for contribution, (candidate, owner_var_index) in zip(
+                    contributions,
+                    request_owners[var_index],
+                    strict=True,
+                ):
+                    candidate["grads"][owner_var_index] += np.asarray(contribution, dtype=float).reshape(-1)
+
+            out: dict[int, tuple[Array, Array, Array]] = {}
+            for candidate in candidates:
+                raw = np.asarray(candidate["raw"], dtype=float).reshape(-1)
+                zeros = [np.zeros((raw.size, var.dim()), dtype=float) for var in candidate["vars"]]
+                apply_cost = getattr(candidate["cost"], "apply", None)
+                if callable(apply_cost):
+                    weighted, _blocks = apply_cost(raw, zeros)
+                    weighted = np.asarray(weighted, dtype=float).reshape(-1)
+                else:
+                    weighted = raw.copy()
+                out[int(candidate["idx"])] = (
+                    raw,
+                    weighted,
+                    self._assemble_global_gradient(
+                        term_name=self._term_display_name(int(candidate["idx"])),
+                        expr_vars=candidate["vars"],
+                        gradients=candidate["grads"],
+                    ),
+                )
+            return out
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+            return {}
+
     def term_gradient_contributions(
         self,
         *,
@@ -302,6 +404,7 @@ class NLSRuntime:
 
         del required
         idxs = self._normalize_term_indices(term_indices)
+        batched_fast = self._batched_dynamics_stack_contributions(term_indices=idxs)
 
         names: list[str] = []
         attrs_list: list[dict[str, Any]] = []
@@ -314,11 +417,13 @@ class NLSRuntime:
             term_name = self._term_display_name(idx)
             attrs = self.problem.term_attrs_at(idx)
 
-            fast = self._term_gradient_contribution_fast(
-                expr=expr,
-                cost=cost,
-                term_name=term_name,
-            )
+            fast = batched_fast.get(idx)
+            if fast is None:
+                fast = self._term_gradient_contribution_fast(
+                    expr=expr,
+                    cost=cost,
+                    term_name=term_name,
+                )
             if fast is None:
                 req = collect_expr_required(expr)
                 self.update_state_if_needed(required=req)
