@@ -42,6 +42,7 @@ _kots_opt_mod = importlib.import_module("rei.optimize_backends.kots")
 _traj_ioc_mod = importlib.import_module("rei.optimize_backends.trajectory_ioc")
 KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
 compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem
+compile_kots_trajectory_problem_template = _kots_opt_mod.compile_kots_trajectory_problem_template
 compile_trajectory_ioc_problem = _traj_ioc_mod.compile_trajectory_ioc_problem
 estimate_ioc_weights = _traj_ioc_mod.estimate_ioc_weights
 
@@ -481,6 +482,51 @@ class TestKotsTrajectoryDynamicsMock:
         r, J = compiled.runtime.linearize()
         assert np.allclose(r, np.array([0.0, 0.0], dtype=float))
         assert np.allclose(J, np.eye(2, dtype=float))
+
+    def test_kots_trajectory_template_reuses_runtime_builder_and_model(self) -> None:
+        model = _FakeKotsModel()
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear",
+                "var": "p",
+                "steps": 2,
+                "q_dim": 2,
+                "A": [[1.0, 0.0], [0.0, 1.0], [2.0, 0.0], [0.0, 2.0]],
+            },
+            "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
+            "terms": [
+                {
+                    "expr": {
+                        "type": "sub",
+                        "a": {"type": "get_var", "var": "p"},
+                        "b": {"type": "const", "name": "window_target", "var": "p", "value": [0.0, 0.0]},
+                    },
+                    "cost": {"type": "l2"},
+                }
+            ],
+        }
+
+        template = compile_kots_trajectory_problem_template(
+            dsl,
+            model=model,
+            data={"window": 0},
+            dynamics_fields=("torque",),
+        )
+        initial_builder = template.compiled.state_builder
+        updated = template.update_window(
+            p=np.array([0.5, -0.25]),
+            constants={"window_target": np.array([0.1, 0.2])},
+            data={"window": 1},
+        )
+
+        assert updated is template.compiled
+        assert updated.state_builder is initial_builder
+        assert template.model is model
+        assert initial_builder.data == {"window": 1}
+        r, J = template.runtime.linearize()
+        assert np.allclose(r, np.array([0.4, -0.45]))
+        assert np.allclose(J, np.eye(2))
 
     def test_compile_trajectory_ioc_problem_kots_uses_matvec_for_param_jacobian(self) -> None:
         model = _FakeKotsModelMatvec()

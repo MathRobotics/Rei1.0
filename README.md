@@ -266,6 +266,23 @@ batch outward state is shared by value, JVP, and IOC VJP evaluation. The cache
 is invalidated when `p`, the time grid, gravity, model order, or batched motion
 sequence changes.
 
+For sequential windows with identical DSL structure and time grid, use
+`compile_kots_trajectory_problem_template(...)` once, then update only the
+window inputs. This retains the RoboKots model/adapter, trajectory maps, and
+runtime structure:
+
+```python
+from rei.optimize_backends.kots import compile_kots_trajectory_problem_template
+
+template = compile_kots_trajectory_problem_template(problem, model=kots, data=kots.state_dict_)
+for p_window, target_window in windows:
+    template.update_window(p=p_window, constants={"window_target": target_window})
+    result = estimate_ioc_weights(template)
+```
+
+Changing the time grid, B-spline shape, or term structure requires a new
+template.
+
 World-frame gravity can be forwarded to RoboKots dynamics with, for example,
 `gravity=(0.0, 0.0, -9.81)`. Omitting it preserves RoboKots' backward-compatible
 zero-gravity default:

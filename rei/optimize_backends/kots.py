@@ -4,7 +4,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 from ..backends.state.robotics.kots import KotsTrajectoryStateBuilder
+from ..core.expr.nodes import ConstantExpr, RepeatConstantExpr
 from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl
@@ -34,6 +37,131 @@ class KotsTrajectoryCompiledProblem:
     dynamics_fields: tuple[str, ...] = ()
     gravity: tuple[float, float, float] | None = None
     diagnostics: TrajectoryProblemDiagnostics | None = None
+    state_builder: KotsTrajectoryStateBuilder | None = None
+
+
+@dataclass
+class KotsTrajectoryProblemTemplate:
+    """Reusable Kots trajectory runtime for structurally identical windows.
+
+    The template intentionally retains the same RoboKots model, adapter, state
+    builder, trajectory maps, expression tree, and runtime.  Per-window calls
+    may change the trajectory parameter, constant targets, and opaque backend
+    data only; changing the time grid or expression structure requires a new
+    template.
+    """
+
+    compiled: KotsTrajectoryCompiledProblem
+
+    @property
+    def backend(self) -> str:
+        return "kots"
+
+    @property
+    def diagnostics(self) -> TrajectoryProblemDiagnostics | None:
+        return self.compiled.diagnostics
+
+    @property
+    def runtime(self) -> NLSRuntime:
+        return self.compiled.runtime
+
+    @property
+    def model(self) -> Any:
+        builder = self.compiled.state_builder
+        if builder is None:
+            raise RuntimeError("Kots trajectory template has no state builder.")
+        return builder.model
+
+    def _constant_exprs_by_name(self) -> dict[str, list[ConstantExpr | RepeatConstantExpr]]:
+        found: dict[str, list[ConstantExpr | RepeatConstantExpr]] = {}
+        seen: set[int] = set()
+
+        def visit(value: Any) -> None:
+            value_id = id(value)
+            if value_id in seen:
+                return
+            seen.add(value_id)
+            if isinstance(value, (ConstantExpr, RepeatConstantExpr)):
+                found.setdefault(str(value.name), []).append(value)
+                return
+            if isinstance(value, Mapping):
+                for item in value.values():
+                    visit(item)
+                return
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    visit(item)
+                return
+            fields = getattr(value, "__dataclass_fields__", None)
+            if fields is not None:
+                for name in fields:
+                    if name not in {"vars", "value"}:
+                        visit(getattr(value, name))
+
+        for expr, _cost in self.runtime.problem.terms:
+            visit(expr)
+        return found
+
+    def update_window(
+        self,
+        *,
+        p: Any | None = None,
+        constants: Mapping[str, Any] | None = None,
+        data: Any = None,
+    ) -> KotsTrajectoryCompiledProblem:
+        """Update mutable window inputs without recompiling the problem.
+
+        ``constants`` maps compiled ``const`` expression names to their base
+        vectors.  A name may refer to multiple constants, which are all updated
+        after shape validation.  Passing ``data`` replaces only the builder's
+        opaque data object; it never replaces the RoboKots model or adapter.
+        """
+        builder = self.compiled.state_builder
+        if builder is None:
+            raise RuntimeError("Kots trajectory template has no state builder.")
+
+        if p is not None:
+            p_vec = np.asarray(p, dtype=float).reshape(-1)
+            if p_vec.size != self.compiled.trajectory_map.p_dim:
+                raise ValueError(
+                    "KotsTrajectoryProblemTemplate: p size mismatch. "
+                    f"Expected {self.compiled.trajectory_map.p_dim}, got {p_vec.size}."
+                )
+            start, stop = self.runtime.pack.slices[self.compiled.p_var]
+            current = self.runtime.pack.get()
+            if not np.array_equal(current[start:stop], p_vec):
+                dx = np.zeros_like(current)
+                dx[start:stop] = p_vec - current[start:stop]
+                self.runtime.pack.apply_dx(dx)
+
+        if constants is not None:
+            available = self._constant_exprs_by_name()
+            for name_raw, value_raw in constants.items():
+                name = str(name_raw)
+                targets = available.get(name, ())
+                if len(targets) == 0:
+                    known = ", ".join(sorted(available))
+                    raise KeyError(
+                        f"KotsTrajectoryProblemTemplate: no constant named {name!r}. "
+                        f"Known constants: {known}."
+                    )
+                value = np.asarray(value_raw, dtype=float)
+                for target in targets:
+                    if value.shape != np.asarray(target.value).shape:
+                        raise ValueError(
+                            f"KotsTrajectoryProblemTemplate: constant {name!r} shape mismatch. "
+                            f"Expected {np.asarray(target.value).shape}, got {value.shape}."
+                        )
+                    target.value = value.copy()
+
+        if data is not None:
+            builder.data = data
+
+        # Constant/data changes are outside VariablePack revisions.  Always
+        # clear state values; the Kots batch cache independently reuses only a
+        # matching p/time/gravity/model-order outward state.
+        self.runtime.state.invalidate()
+        return self.compiled
 
 
 def _infer_model_dof(model: Any) -> int | None:
@@ -287,10 +415,26 @@ def compile_kots_trajectory_problem(
         dynamics_fields=tuple(adapter.resolved_dynamics_fields),
         gravity=adapter.resolved_gravity,
         diagnostics=diagnostics,
+        state_builder=compiled.state_builder,
     )
+
+
+def compile_kots_trajectory_problem_template(
+    dsl: Mapping[str, Any],
+    **kwargs: Any,
+) -> KotsTrajectoryProblemTemplate:
+    """Compile one reusable Kots trajectory template for sequential windows.
+
+    Arguments are identical to :func:`compile_kots_trajectory_problem`.  Call
+    :meth:`KotsTrajectoryProblemTemplate.update_window` before each IOC
+    estimate instead of compiling the same problem structure again.
+    """
+    return KotsTrajectoryProblemTemplate(compiled=compile_kots_trajectory_problem(dsl, **kwargs))
 
 
 __all__ = [
     "KotsTrajectoryCompiledProblem",
+    "KotsTrajectoryProblemTemplate",
     "compile_kots_trajectory_problem",
+    "compile_kots_trajectory_problem_template",
 ]
