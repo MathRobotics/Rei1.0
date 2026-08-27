@@ -294,6 +294,9 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         self._batched_dynamics_cache_key: tuple[Any, ...] | None = None
         self._batched_dynamics_cache_hits = 0
         self._batched_dynamics_cache_misses = 0
+        # None means unprobed.  Older RoboKots returns one fused VJP, whereas
+        # IOC term scheduling requires one result per input request.
+        self._batched_multi_vjp_contract: str | None = None
         self.trajectory_derivative_maps: dict[int, TrajectoryMap] = {0: trajectory_map}
         if trajectory_derivative_maps is not None:
             for order_raw, traj in trajectory_derivative_maps.items():
@@ -876,7 +879,11 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         # state.  The previous per-field loop issued one backend VJP per
         # state_ref_field even though the motion batch was identical.
         multi_vjp = getattr(self.model, "jacobian_transpose_mul_many", None)
-        use_multi_vjp = callable(multi_vjp) and len(grouped_items) >= 2
+        use_multi_vjp = (
+            callable(multi_vjp)
+            and len(grouped_items) >= 2
+            and self._batched_multi_vjp_contract != "fused"
+        )
         group_motions: list[list[tuple[Array, Array]]] = []
         if use_multi_vjp:
             for group in grouped_items:
@@ -907,8 +914,20 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 rhs_batch = np.stack([rhs for _index, _key, rhs, _state_ref in group], axis=0)
                 backend_requests.append((refs, rhs_batch))
             try:
-                grouped_motion_grads = list(multi_vjp(backend_requests))
+                raw_multi_vjp = multi_vjp(backend_requests)
+                if isinstance(raw_multi_vjp, (list, tuple)):
+                    grouped_motion_grads = list(raw_multi_vjp)
+                elif (
+                    isinstance(raw_multi_vjp, np.ndarray)
+                    and raw_multi_vjp.ndim >= 1
+                    and int(raw_multi_vjp.shape[0]) == len(grouped_items)
+                ):
+                    grouped_motion_grads = [raw_multi_vjp[index] for index in range(len(grouped_items))]
+                else:
+                    self._batched_multi_vjp_contract = "fused"
+                    raise AttributeError("RoboKots multi-VJP returned one fused result")
                 if len(grouped_motion_grads) != len(grouped_items):
+                    self._batched_multi_vjp_contract = "fused"
                     raise ValueError("RoboKots multi-VJP must return one result for each input request.")
                 for group, motions_and_jacs, motion_grads in zip(
                     grouped_items,
@@ -922,11 +941,14 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                         motions_and_jacs=motions_and_jacs,
                         motion_grads=motion_grads,
                     )
+                self._batched_multi_vjp_contract = "per_input"
                 return [np.asarray(value, dtype=float) for value in out]
             except (AttributeError, KeyError, ValueError, TypeError, RuntimeError, IndexError):
                 # Older RoboKots releases return one fused VJP rather than one
                 # result per input.  That loses IOC term ownership, so retain
                 # the established field-local API in that case.
+                if self._batched_multi_vjp_contract is None:
+                    self._batched_multi_vjp_contract = "fused"
                 pass
 
         for group in grouped_items:
