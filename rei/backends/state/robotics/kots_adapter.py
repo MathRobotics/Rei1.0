@@ -138,6 +138,10 @@ class KotsAdapter:
         self._model_order_cache = int(order)
         return int(order)
 
+    def model_order_cache_signature(self) -> int:
+        """Read the model order without using the operational lookup cache."""
+        return int(infer_robot_model_order(self.model))
+
     def expand_coordinate_motion(self, q: Array, *, dof: int, order: int) -> Array:
         return expand_coordinate_motion_by_robot_layout(
             self.model,

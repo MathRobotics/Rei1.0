@@ -225,7 +225,12 @@ def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
     np.testing.assert_allclose(J_batched, J_stepwise, rtol=0.0, atol=0.0)
 
 
-def test_kots_batched_ioc_state_vjp_matches_stepwise() -> None:
+@pytest.mark.parametrize("gravity", [None, (0.0, 0.0, -9.81)])
+@pytest.mark.parametrize("fields", [("torque",), ("torque_d1",), ("torque", "torque_d1")])
+def test_kots_batched_ioc_state_vjp_matches_stepwise(
+    fields: tuple[str, ...],
+    gravity: tuple[float, float, float] | None,
+) -> None:
     """IOC stacks trajectory state VJPs into one RoboKots batch request."""
     if Kots is None:
         pytest.skip("RoboKots is not installed.")
@@ -234,6 +239,8 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise() -> None:
         def __init__(self, model) -> None:
             self._model = model
             self.vjp_rhs_shapes: list[tuple[int, ...]] = []
+            self.batch_imports = 0
+            self.dynamics_updates = 0
 
         def __getattr__(self, name):
             return getattr(self._model, name)
@@ -242,26 +249,40 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise() -> None:
             self.vjp_rhs_shapes.append(tuple(np.asarray(rhs).shape))
             return self._model.jacobian_transpose_mul(state_ref, rhs)
 
+        def import_motions(self, motion) -> None:
+            if np.asarray(motion).ndim >= 2:
+                self.batch_imports += 1
+            self._model.import_motions(motion)
+
+        def dynamics(self, *args, **kwargs):
+            self.dynamics_updates += 1
+            return self._model.dynamics(*args, **kwargs)
+
     root = Path(__file__).resolve().parents[1]
     model_path = root / "examples" / "models" / "planar2.json"
     dsl = _minimal_kots_trajectory_dsl(2)
     dsl["variables"][0]["init"] = [0.1, -0.2, 0.3, 0.4]
-    torque_at_zero = copy.deepcopy(dsl["terms"][2]["expr"])
-    torque_at_one = copy.deepcopy(torque_at_zero)
-    torque_at_one["name"] = "tau1"
-    torque_at_one["key"]["k"] = 1
-    dsl["terms"] = [
-        {
-            "expr": {
-                "type": "vstack",
-                "name": "torque_stack",
-                "parts": [torque_at_zero, torque_at_one],
-            },
-            "cost": {"type": "l2"},
-        }
-    ]
+    state_template = copy.deepcopy(dsl["terms"][2]["expr"])
+    dsl["terms"] = []
+    for field in fields:
+        field_at_zero = copy.deepcopy(state_template)
+        field_at_zero["name"] = f"{field}0"
+        field_at_zero["key"]["field"] = field
+        field_at_one = copy.deepcopy(field_at_zero)
+        field_at_one["name"] = f"{field}1"
+        field_at_one["key"]["k"] = 1
+        dsl["terms"].append(
+            {
+                "expr": {
+                    "type": "vstack",
+                    "name": f"{field}_stack",
+                    "parts": [field_at_zero, field_at_one],
+                },
+                "cost": {"type": "l2"},
+            }
+        )
 
-    def estimate(*, batch_trajectory: bool) -> tuple[dict, list[tuple[int, ...]]]:
+    def estimate(*, batch_trajectory: bool) -> tuple[dict, list[tuple[int, ...]], int, int, object]:
         model = _VjpProbe(Kots.from_json_file(str(model_path), order=5))
         compiled = compile_trajectory_ioc_problem(
             dsl,
@@ -270,11 +291,15 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise() -> None:
             data=model.state_dict_,
             kots_backend="rust",
             batch_trajectory=batch_trajectory,
+            gravity=gravity,
         )
-        return estimate_ioc_weights(compiled), model.vjp_rhs_shapes
+        result = estimate_ioc_weights(compiled)
+        return result, model.vjp_rhs_shapes, model.batch_imports, model.dynamics_updates, compiled
 
-    stepwise, stepwise_shapes = estimate(batch_trajectory=False)
-    batched, batched_shapes = estimate(batch_trajectory=True)
+    stepwise, stepwise_shapes, stepwise_imports, stepwise_updates, _stepwise_compiled = estimate(
+        batch_trajectory=False
+    )
+    batched, batched_shapes, batched_imports, batched_updates, batched_compiled = estimate(batch_trajectory=True)
 
     # Same stationarity result, while the two per-step VJPs become one batch.
     np.testing.assert_allclose(batched["weights"], stepwise["weights"], rtol=0.0, atol=0.0)
@@ -284,5 +309,24 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise() -> None:
         rtol=0.0,
         atol=0.0,
     )
-    assert stepwise_shapes == [(2,), (2,)]
-    assert batched_shapes == [(2, 2)]
+    assert stepwise_shapes == [(2,)] * (2 * len(fields))
+    assert batched_shapes == [(2, 2)] * len(fields)
+    # Value evaluation and the following VJP share the same batch outward state.
+    assert batched_imports == 1
+    assert batched_updates == 1
+    assert stepwise_imports == 0
+
+    # Reuse at the same point, then invalidate on each cache-key input.
+    builder = batched_compiled.runtime.ctx.state.build_state.__self__
+    p = batched_compiled.runtime.pack.get()
+    required = batched_compiled.runtime.required
+    builder.build_state(p, time=batched_compiled.runtime.time, required=required)
+    assert builder._batched_dynamics_cache_misses == 1
+    batched_compiled.runtime.time.update(dt=0.1)
+    builder.build_state(p, time=batched_compiled.runtime.time, required=required)
+    assert builder._batched_dynamics_cache_misses == 2
+    builder.gravity = (0.0, 0.0, 0.0) if gravity is not None else (0.0, 0.0, -9.81)
+    builder.build_state(p, time=batched_compiled.runtime.time, required=required)
+    assert builder._batched_dynamics_cache_misses == 3
+    builder.build_state(np.asarray(p, dtype=float) + 1e-6, time=batched_compiled.runtime.time, required=required)
+    assert builder._batched_dynamics_cache_misses == 4

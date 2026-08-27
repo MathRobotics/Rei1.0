@@ -261,6 +261,10 @@ kinematic state requests automatically use that compatible per-step path.
 IOC terms that `vstack` compatible trajectory dynamics states also batch their
 `J_p.T @ rhs` evaluations through the same API, while mixed state stacks retain
 the per-step fallback.
+For an unchanged optimization point and time grid, the materialized RoboKots
+batch outward state is shared by value, JVP, and IOC VJP evaluation. The cache
+is invalidated when `p`, the time grid, gravity, model order, or batched motion
+sequence changes.
 
 World-frame gravity can be forwarded to RoboKots dynamics with, for example,
 `gravity=(0.0, 0.0, -9.81)`. Omitting it preserves RoboKots' backward-compatible

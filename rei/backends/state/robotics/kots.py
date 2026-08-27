@@ -288,6 +288,12 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             prefer_matvec_jacobian=prefer_matvec_jacobian,
         )
         self.batch_trajectory = bool(batch_trajectory)
+        # The RoboKots model owns the materialized outward state.  Retain the
+        # exact batch signature that was loaded so value/JVP/VJP phases of one
+        # IOC evaluation can share it without another import+dynamics pass.
+        self._batched_dynamics_cache_key: tuple[Any, ...] | None = None
+        self._batched_dynamics_cache_hits = 0
+        self._batched_dynamics_cache_misses = 0
         self.trajectory_derivative_maps: dict[int, TrajectoryMap] = {0: trajectory_map}
         if trajectory_derivative_maps is not None:
             for order_raw, traj in trajectory_derivative_maps.items():
@@ -388,10 +394,40 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 return False
         return True
 
-    def _update_batched_dynamics(self, motions: Array) -> None:
+    def _batched_dynamics_key(self, *, p: Array, motions: Array, time: Any = None) -> tuple[Any, ...]:
+        """Identity of the materialized RoboKots batch outward state.
+
+        ``motions`` is included in addition to ``p`` because a caller may ask
+        for a different subset/order of time steps at the same optimization
+        point.  The explicit time, gravity, and model-order fields make cache
+        invalidation independent of StateCache's revision bookkeeping.
+        """
+        p64 = np.ascontiguousarray(np.asarray(p, dtype=np.float64).reshape(-1))
+        motions64 = np.ascontiguousarray(np.asarray(motions, dtype=np.float64))
+        gravity = _normalize_kots_gravity(self.gravity)
+        return (
+            p64.shape,
+            p64.tobytes(),
+            motions64.shape,
+            motions64.tobytes(),
+            int(getattr(time, "revision", 0)) if time is not None else 0,
+            int(getattr(time, "N", self.trajectory_map.steps - 1)) if time is not None else self.trajectory_map.steps - 1,
+            float(getattr(time, "dt", 0.0)) if time is not None else None,
+            gravity,
+            int(self.adapter.model_order_cache_signature()),
+        )
+
+    def _update_batched_dynamics(self, motions: Array, *, p: Array, time: Any = None) -> None:
+        key = self._batched_dynamics_key(p=p, motions=motions, time=time)
+        if key == self._batched_dynamics_cache_key:
+            self._batched_dynamics_cache_hits += 1
+            return
+
         self.model.import_motions(np.asarray(motions, dtype=float))
         if not self.adapter.update_dynamics_if_available():
             raise AttributeError("RoboKots model does not expose a usable batched dynamics method.")
+        self._batched_dynamics_cache_key = key
+        self._batched_dynamics_cache_misses += 1
 
     def _batched_dynamics_value(self, state_ref: Any) -> Array:
         total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(state_ref)
@@ -443,13 +479,14 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         *,
         p: Array,
         grouped: Mapping[int, list[tuple[StateKey, Any]]],
+        time: Any = None,
     ) -> dict[StateKey, Any]:
         self._batch_ks = tuple(sorted(grouped))
         motions_and_jacs = [self._compose_motion_and_jac(p, k=k) for k in self._batch_ks]
         motions = np.stack([motion for motion, _jac in motions_and_jacs], axis=0)
         dmotiondps = [jac for _motion, jac in motions_and_jacs]
         q_values = [np.asarray(self.trajectory_map.q_at(p, k), dtype=float).reshape(-1) for k in self._batch_ks]
-        self._update_batched_dynamics(motions)
+        self._update_batched_dynamics(motions, p=p, time=time)
 
         out: dict[StateKey, Any] = {}
         dynamic_groups: dict[tuple[Any, ...], list[tuple[int, StateKey, Any, Any]]] = {}
@@ -518,7 +555,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         p = self._extract_q(x_all, pack=pack)
         self._validate_trajectory_parameter_size(p)
         try:
-            return self._build_state_batched(p=p, grouped=grouped)
+            return self._build_state_batched(p=p, grouped=grouped, time=time)
         except (AttributeError, KeyError, ValueError, TypeError, RuntimeError, IndexError):
             # Preserve compatibility with older RoboKots versions and unusual
             # state combinations by falling back to the established path.
@@ -837,7 +874,11 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 raise AttributeError("batched RoboKots VJP group has fewer than two requests")
             ks = [int(key.k) for _index, key, _rhs, _state_ref in group]
             motions_and_jacs = [self._compose_motion_and_jac(p, k=k) for k in ks]
-            self._update_batched_dynamics(np.stack([motion for motion, _jac in motions_and_jacs], axis=0))
+            self._update_batched_dynamics(
+                np.stack([motion for motion, _jac in motions_and_jacs], axis=0),
+                p=p,
+                time=time,
+            )
             first_ref = group[0][3]
             total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(first_ref)
             refs: Any = first_ref if total_joint_ref is None else list(total_joint_ref.refs)
