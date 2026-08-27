@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..backends.state.robotics.kots import KotsTrajectoryStateBuilder
-from ..core.expr.nodes import ConstantExpr, RepeatConstantExpr
+from ..core.expr.nodes import ConstantExpr, RepeatConstantExpr, TrajectoryVarDerivativesExpr, TrajectoryVarExpr
 from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl
@@ -26,7 +26,7 @@ from .trajectory_diagnostics import (
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class KotsTrajectoryCompiledProblem:
     runtime: NLSRuntime
     trajectory_map: TrajectoryMap
@@ -52,6 +52,133 @@ class KotsTrajectoryProblemTemplate:
     """
 
     compiled: KotsTrajectoryCompiledProblem
+
+    @staticmethod
+    def _immutable_map(source: TrajectoryMap) -> TrajectoryMap:
+        """Defensively copy a window map; neither caller nor template mutates it."""
+        result = TrajectoryMap(
+            A=np.array(source.A, dtype=float, copy=True),
+            b=np.array(source.b, dtype=float, copy=True),
+            steps=int(source.steps),
+            q_dim=int(source.q_dim),
+        )
+        result.A.setflags(write=False)
+        result.b.setflags(write=False)
+        return result
+
+    def _validate_trajectory_maps(
+        self,
+        trajectory_map: TrajectoryMap,
+        trajectory_derivative_maps: Mapping[int, TrajectoryMap] | None,
+    ) -> dict[int, TrajectoryMap]:
+        if not isinstance(trajectory_map, TrajectoryMap):
+            raise TypeError("KotsTrajectoryProblemTemplate: trajectory_map must be a TrajectoryMap.")
+        builder = self.compiled.state_builder
+        if builder is None:
+            raise RuntimeError("Kots trajectory template has no state builder.")
+        current = dict(builder.trajectory_derivative_maps)
+        requested = {0: trajectory_map}
+        if trajectory_derivative_maps is not None:
+            for order_raw, traj in trajectory_derivative_maps.items():
+                order = int(order_raw)
+                if order <= 0:
+                    raise ValueError(
+                        "KotsTrajectoryProblemTemplate: trajectory_derivative_maps keys must be positive; "
+                        "pass the q map through trajectory_map."
+                    )
+                if not isinstance(traj, TrajectoryMap):
+                    raise TypeError(
+                        "KotsTrajectoryProblemTemplate: every derivative map must be a TrajectoryMap."
+                    )
+                requested[order] = traj
+
+        expected_orders = set(current)
+        if set(requested) != expected_orders:
+            raise ValueError(
+                "KotsTrajectoryProblemTemplate: derivative order set differs from this template. "
+                f"Expected {sorted(expected_orders - {0})}, got {sorted(set(requested) - {0})}. "
+                "Create a new template when derivative-order structure changes."
+            )
+        base = requested[0]
+        if base.q_dim != self.compiled.trajectory_map.q_dim:
+            raise ValueError("KotsTrajectoryProblemTemplate: q_dim differs; create a new template.")
+        if base.p_dim != self.compiled.trajectory_map.p_dim:
+            raise ValueError("KotsTrajectoryProblemTemplate: p_dim differs; create a new template.")
+        if base.steps != self.compiled.trajectory_map.steps:
+            raise ValueError("KotsTrajectoryProblemTemplate: steps differs; create a new template.")
+        if int(self.runtime.time.N) + 1 != base.steps or float(self.runtime.time.dt) != float(self.compiled.dt):
+            raise ValueError("KotsTrajectoryProblemTemplate: time grid/dt differs; create a new template.")
+        for order, traj in requested.items():
+            if traj.A.shape != base.A.shape or traj.b.shape != base.b.shape:
+                raise ValueError(
+                    "KotsTrajectoryProblemTemplate: derivative map A/b shape differs at "
+                    f"order {order}; create a new template."
+                )
+            if traj.q_dim != base.q_dim or traj.p_dim != base.p_dim or traj.steps != base.steps:
+                raise ValueError(
+                    "KotsTrajectoryProblemTemplate: derivative map dimensions differ at "
+                    f"order {order}; create a new template."
+                )
+        return {order: self._immutable_map(traj) for order, traj in requested.items()}
+
+    def _rebind_expression_trajectory_maps(
+        self,
+        *,
+        old_maps: Mapping[int, TrajectoryMap],
+        new_maps: Mapping[int, TrajectoryMap],
+    ) -> None:
+        """Replace compiled trajectory-expression map references after validation."""
+        old_by_id = {id(traj): order for order, traj in old_maps.items()}
+        seen: set[int] = set()
+
+        def order_for(traj: TrajectoryMap) -> int | None:
+            direct = old_by_id.get(id(traj))
+            if direct is not None:
+                return direct
+            for order, old in old_maps.items():
+                if (
+                    traj.steps == old.steps
+                    and traj.q_dim == old.q_dim
+                    and traj.A.shape == old.A.shape
+                    and np.array_equal(traj.A, old.A)
+                    and np.array_equal(traj.b, old.b)
+                ):
+                    return order
+            return None
+
+        def visit(value: Any) -> None:
+            value_id = id(value)
+            if value_id in seen:
+                return
+            seen.add(value_id)
+            if isinstance(value, TrajectoryVarExpr):
+                order = order_for(value.trajectory)
+                if order is not None:
+                    value.trajectory = new_maps[order]
+                return
+            if isinstance(value, TrajectoryVarDerivativesExpr):
+                replaced = []
+                for traj in value.trajectories:
+                    order = order_for(traj)
+                    replaced.append(traj if order is None else new_maps[order])
+                value.trajectories = tuple(replaced)
+                return
+            if isinstance(value, Mapping):
+                for item in value.values():
+                    visit(item)
+                return
+            if isinstance(value, (list, tuple)):
+                for item in value:
+                    visit(item)
+                return
+            fields = getattr(value, "__dataclass_fields__", None)
+            if fields is not None:
+                for name in fields:
+                    if name != "vars":
+                        visit(getattr(value, name))
+
+        for expr, _cost in self.runtime.problem.terms:
+            visit(expr)
 
     @property
     def backend(self) -> str:
@@ -106,12 +233,19 @@ class KotsTrajectoryProblemTemplate:
         self,
         *,
         p: Any | None = None,
+        trajectory_map: TrajectoryMap | None = None,
+        trajectory_derivative_maps: Mapping[int, TrajectoryMap] | None = None,
+        dt: float | None = None,
         constants: Mapping[str, Any] | None = None,
         data: Any = None,
     ) -> KotsTrajectoryCompiledProblem:
         """Update mutable window inputs without recompiling the problem.
 
-        ``constants`` maps compiled ``const`` expression names to their base
+        ``trajectory_map`` and ``trajectory_derivative_maps`` are an opt-in
+        sliding-window map replacement.  All map dimensions and derivative
+        orders must match the template exactly.  ``dt`` is optional metadata
+        for callers that derive maps from an external absolute-time grid; when
+        supplied it must match the compiled time grid. ``constants`` maps compiled ``const`` expression names to their base
         vectors.  A name may refer to multiple constants, which are all updated
         after shape validation.  Passing ``data`` replaces only the builder's
         opaque data object; it never replaces the RoboKots model or adapter.
@@ -119,6 +253,22 @@ class KotsTrajectoryProblemTemplate:
         builder = self.compiled.state_builder
         if builder is None:
             raise RuntimeError("Kots trajectory template has no state builder.")
+
+        if (trajectory_map is None) != (trajectory_derivative_maps is None):
+            raise ValueError(
+                "KotsTrajectoryProblemTemplate: provide trajectory_map and trajectory_derivative_maps together."
+            )
+        if dt is not None and float(dt) != float(self.compiled.dt):
+            raise ValueError("KotsTrajectoryProblemTemplate: dt differs; create a new template.")
+        if trajectory_map is not None:
+            new_maps = self._validate_trajectory_maps(trajectory_map, trajectory_derivative_maps)
+            old_maps = dict(builder.trajectory_derivative_maps)
+            # All checks are complete before replacing any shared reference.
+            builder.trajectory_map = new_maps[0]
+            builder.trajectory_derivative_maps = dict(new_maps)
+            self.compiled.trajectory_map = new_maps[0]
+            self.compiled.trajectory_derivative_maps = dict(new_maps)
+            self._rebind_expression_trajectory_maps(old_maps=old_maps, new_maps=new_maps)
 
         if p is not None:
             p_vec = np.asarray(p, dtype=float).reshape(-1)

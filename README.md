@@ -281,7 +281,18 @@ for p_window, target_window in windows:
 ```
 
 Changing the time grid, B-spline shape, or term structure requires a new
-template.
+template. Absolute-time sliding windows may also replace all maps explicitly;
+the q map and the complete existing derivative-order set must have matching
+dimensions:
+
+```python
+template.update_window(
+    p=p_window,
+    trajectory_map=map_q,
+    trajectory_derivative_maps={1: map_qdot, 2: map_qddot, 3: map_qdddot},
+    dt=1.0 / 120.0,
+)
+```
 
 World-frame gravity can be forwarded to RoboKots dynamics with, for example,
 `gravity=(0.0, 0.0, -9.81)`. Omitting it preserves RoboKots' backward-compatible

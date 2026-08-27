@@ -528,6 +528,77 @@ class TestKotsTrajectoryDynamicsMock:
         assert np.allclose(r, np.array([0.4, -0.45]))
         assert np.allclose(J, np.eye(2))
 
+    def test_kots_trajectory_template_replaces_sliding_window_maps_like_fresh_compile(self) -> None:
+        def make_dsl(A) -> dict:
+            return {
+                "time": {"N": 1, "dt": 0.2},
+                "trajectory": {"type": "linear", "var": "p", "steps": 2, "q_dim": 2, "A": A},
+                "variables": [{"name": "p", "dim": 2, "init": [0.25, -0.5]}],
+                "terms": [
+                    {
+                        "expr": {
+                            "type": "get_state",
+                            "key": {
+                                "k": 0,
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_COORD,
+                                "field": "q",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                        "cost": {"type": "l2"},
+                    },
+                    {
+                        "expr": {
+                            "type": "get_state",
+                            "key": {
+                                "k": 1,
+                                "owner_type": "total_joint",
+                                "owner_name": "robot",
+                                "dtype": DTYPE_DYNAMICS,
+                                "field": "torque",
+                            },
+                            "jac": {"var": "p"},
+                        },
+                        "cost": {"type": "l2"},
+                    },
+                ],
+            }
+
+        dsl_a = make_dsl([[1.0, 0.0], [0.0, 1.0], [2.0, 0.0], [0.0, 2.0]])
+        dsl_b = make_dsl([[3.0, 0.0], [0.0, 4.0], [5.0, 0.0], [0.0, 6.0]])
+        template = compile_kots_trajectory_problem_template(
+            dsl_a,
+            model=_FakeKotsModel(),
+            data={},
+            dynamics_fields=("torque",),
+        )
+        fresh = compile_kots_trajectory_problem(
+            dsl_b,
+            model=_FakeKotsModel(),
+            data={},
+            dynamics_fields=("torque",),
+        )
+        template.update_window(
+            trajectory_map=fresh.trajectory_map,
+            trajectory_derivative_maps={
+                order: traj for order, traj in fresh.trajectory_derivative_maps.items() if order != 0
+            },
+        )
+
+        r_template, J_template = template.runtime.linearize()
+        r_fresh, J_fresh = fresh.runtime.linearize()
+        np.testing.assert_allclose(r_template, r_fresh, rtol=0.0, atol=1e-12)
+        np.testing.assert_allclose(J_template, J_fresh, rtol=0.0, atol=1e-12)
+        template_contribs = template.runtime.term_gradient_contributions()[-1]
+        fresh_contribs = fresh.runtime.term_gradient_contributions()[-1]
+        for actual, expected in zip(template_contribs, fresh_contribs, strict=True):
+            np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-12)
+        template_ioc = estimate_ioc_weights(template)
+        fresh_ioc = estimate_ioc_weights(fresh)
+        np.testing.assert_allclose(template_ioc["weights"], fresh_ioc["weights"], rtol=0.0, atol=1e-12)
+
     def test_compile_trajectory_ioc_problem_kots_uses_matvec_for_param_jacobian(self) -> None:
         model = _FakeKotsModelMatvec()
         dsl = {
