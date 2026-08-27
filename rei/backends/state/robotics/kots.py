@@ -233,6 +233,20 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if route is None or route not in self._dispatch:
             raise ValueError(f"Kots backend has no handler route for key: {key!r}")
 
+        if (
+            owner_type == _KINETIC_ENERGY_OWNER_TYPE
+            and getattr(key, "dtype", None) == DTYPE_DYNAMICS
+            and state_field == _KINETIC_ENERGY_FIELD
+        ):
+            # RoboKots recognizes whole-body kinetic energy only with the
+            # frame-free canonical StateType(total_body, total_body, ...).
+            return self.adapter.make_state_type(
+                owner_type=str(owner_type),
+                owner_name=owner_name,
+                state_field=state_field,
+                frame_name=None,
+            )
+
         frame_name = getattr(key, "frame", None) or "world"
         return self.adapter.make_state_type(
             owner_type=str(owner_type),

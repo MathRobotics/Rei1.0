@@ -152,11 +152,13 @@ class _FakeKotsKineticEnergyModel(_FakeKotsModel):
 
     def state_info(self, state_ref):
         if self._state_field_name(state_ref) == "kinetic_energy":
+            assert getattr(state_ref, "frame", None) is None
             return np.asarray([self._kinetic_energy()], dtype=float)
         return super().state_info(state_ref)
 
     def jacobian(self, state_ref):
         if self._state_field_name(state_ref) == "kinetic_energy":
+            assert getattr(state_ref, "frame", None) is None
             return self._kinetic_energy_jacobian()
         return super().jacobian(state_ref)
 

@@ -225,6 +225,55 @@ def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
     np.testing.assert_allclose(J_batched, J_stepwise, rtol=0.0, atol=0.0)
 
 
+def test_kots_total_body_kinetic_energy_matches_stepwise_with_torque() -> None:
+    """The frame-free total_body StateType works beside joint torque terms."""
+    if Kots is None:
+        pytest.skip("RoboKots is not installed.")
+
+    root = Path(__file__).resolve().parents[1]
+    model_path = root / "examples" / "models" / "planar2.json"
+    dsl = _minimal_kots_trajectory_dsl(2)
+    for k in (0, 1):
+        dsl["terms"].append(
+            {
+                "expr": {
+                    "type": "get_state",
+                    "name": f"kinetic_energy_{k}",
+                    "key": {
+                        "k": k,
+                        "owner_type": "total_body",
+                        "owner_name": "total_body",
+                        "dtype": "dynamics",
+                        "field": "kinetic_energy",
+                    },
+                    "jac": {"var": "p"},
+                },
+                "cost": {"type": "l2"},
+            }
+        )
+
+    def evaluate(*, batch_trajectory: bool):
+        model = Kots.from_json_file(str(model_path), order=5)
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data=model.state_dict_,
+            kots_backend="rust",
+            batch_trajectory=batch_trajectory,
+        )
+        residual, jacobian = compiled.runtime.linearize()
+        _idx, _names, _attrs, _raw, _weighted, gradients = compiled.runtime.term_gradient_contributions()
+        return residual, jacobian, gradients
+
+    batched = evaluate(batch_trajectory=True)
+    stepwise = evaluate(batch_trajectory=False)
+    np.testing.assert_allclose(batched[0], stepwise[0], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(batched[1], stepwise[1], rtol=0.0, atol=0.0)
+    for batch_gradient, step_gradient in zip(batched[2], stepwise[2], strict=True):
+        assert np.all(np.isfinite(batch_gradient))
+        np.testing.assert_allclose(batch_gradient, step_gradient, rtol=0.0, atol=0.0)
+
+
 @pytest.mark.parametrize("gravity", [None, (0.0, 0.0, -9.81)])
 @pytest.mark.parametrize("fields", [("torque",), ("torque_d1",), ("torque", "torque_d1")])
 def test_kots_batched_ioc_state_vjp_matches_stepwise(
