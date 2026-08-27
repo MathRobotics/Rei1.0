@@ -330,3 +330,71 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise(
     assert builder._batched_dynamics_cache_misses == 3
     builder.build_state(np.asarray(p, dtype=float) + 1e-6, time=batched_compiled.runtime.time, required=required)
     assert builder._batched_dynamics_cache_misses == 4
+
+
+def test_kots_multi_vjp_combines_torque_fields() -> None:
+    """Prefer RoboKots' heterogeneous-state VJP API over field grouping."""
+    if Kots is None:
+        pytest.skip("RoboKots is not installed.")
+
+    class _VjpProbe:
+        def __init__(self, model, *, expose_many: bool) -> None:
+            self._model = model
+            self.expose_many = expose_many
+            self.single_calls = 0
+            self.many_calls = 0
+
+        def __getattr__(self, name):
+            if name == "jacobian_transpose_mul_many" and not self.expose_many:
+                raise AttributeError(name)
+            return getattr(self._model, name)
+
+        def jacobian_transpose_mul(self, state_ref, rhs):
+            self.single_calls += 1
+            return self._model.jacobian_transpose_mul(state_ref, rhs)
+
+        def jacobian_transpose_mul_many(self, requests):
+            if not self.expose_many:
+                raise AttributeError("jacobian_transpose_mul_many")
+            self.many_calls += 1
+            return self._model.jacobian_transpose_mul_many(requests)
+
+    root = Path(__file__).resolve().parents[1]
+    model_path = root / "examples" / "models" / "planar2.json"
+    dsl = _minimal_kots_trajectory_dsl(2)
+    dsl["variables"][0]["init"] = [0.1, -0.2, 0.3, 0.4]
+    template = dsl["terms"][2]["expr"]
+    parts = []
+    for field in ("torque", "torque_d1"):
+        for k in (0, 1):
+            part = copy.deepcopy(template)
+            part["name"] = f"{field}{k}"
+            part["key"]["field"] = field
+            part["key"]["k"] = k
+            parts.append(part)
+    dsl["terms"] = [{"expr": {"type": "vstack", "name": "mixed_tau", "parts": parts}, "cost": {"type": "l2"}}]
+
+    def estimate(*, expose_many: bool) -> tuple[dict, _VjpProbe]:
+        probe = _VjpProbe(Kots.from_json_file(str(model_path), order=5), expose_many=expose_many)
+        compiled = compile_trajectory_ioc_problem(
+            dsl,
+            backend="kots",
+            model=probe,
+            data=probe.state_dict_,
+            kots_backend="rust",
+            batch_trajectory=True,
+        )
+        return estimate_ioc_weights(compiled), probe
+
+    grouped, grouped_probe = estimate(expose_many=False)
+    multi, multi_probe = estimate(expose_many=True)
+    np.testing.assert_allclose(multi["weights"], grouped["weights"], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(
+        multi["stationarity"]["ikkt_residual"],
+        grouped["stationarity"]["ikkt_residual"],
+        rtol=0.0,
+        atol=1e-10,
+    )
+    assert grouped_probe.single_calls == 2
+    assert multi_probe.many_calls == 1
+    assert multi_probe.single_calls == 0
