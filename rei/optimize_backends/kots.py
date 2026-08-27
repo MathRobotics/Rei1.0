@@ -130,6 +130,7 @@ class _KotsTrajectoryCompileAdapter:
     jacobian_strategy: str | None = None
     kots_backend: str | None = None
     gravity: Sequence[float] | None = None
+    batch_trajectory: bool = True
     resolved_dynamics_fields: tuple[str, ...] = ()
     resolved_gravity: tuple[float, float, float] | None = None
 
@@ -196,6 +197,7 @@ class _KotsTrajectoryCompileAdapter:
             jacobian_strategy=self.jacobian_strategy,
             kots_backend=self.kots_backend,
             gravity=self.gravity,
+            batch_trajectory=self.batch_trajectory,
         )
         self.resolved_gravity = builder.gravity
         return builder
@@ -234,6 +236,7 @@ def compile_kots_trajectory_problem(
     jacobian_strategy: str | None = None,
     kots_backend: str | None = None,
     gravity: Sequence[float] | None = None,
+    batch_trajectory: bool = True,
 ) -> KotsTrajectoryCompiledProblem:
     model_order = _infer_model_order(model)
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
@@ -259,6 +262,7 @@ def compile_kots_trajectory_problem(
         jacobian_strategy=jacobian_strategy,
         kots_backend=kots_backend,
         gravity=gravity,
+        batch_trajectory=batch_trajectory,
     )
     compiled = compile_trajectory_problem_with_adapter(
         dsl_use,

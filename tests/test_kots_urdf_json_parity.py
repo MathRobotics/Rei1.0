@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import pytest
 
 from pathlib import Path
@@ -192,3 +193,32 @@ class TestKotsUrdfJsonParity:
                 atol=0.0,
                 err_msg=f"jacobian mismatch at sample {i}",
             )
+
+
+def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
+    if Kots is None:
+        pytest.skip("RoboKots is not installed.")
+
+    root = Path(__file__).resolve().parents[1]
+    model_path = root / "examples" / "models" / "planar2.json"
+    dsl = _minimal_kots_trajectory_dsl(2)
+    torque_at_step_one = copy.deepcopy(dsl["terms"][2])
+    torque_at_step_one["expr"]["name"] = "tau1"
+    torque_at_step_one["expr"]["key"]["k"] = 1
+    dsl["terms"].append(torque_at_step_one)
+
+    def linearize(*, batch_trajectory: bool) -> tuple[np.ndarray, np.ndarray]:
+        model = Kots.from_json_file(str(model_path), order=5)
+        compiled = compile_kots_trajectory_problem(
+            dsl,
+            model=model,
+            data=model.state_dict_,
+            kots_backend="rust",
+            batch_trajectory=batch_trajectory,
+        )
+        return compiled.runtime.linearize()
+
+    r_batched, J_batched = linearize(batch_trajectory=True)
+    r_stepwise, J_stepwise = linearize(batch_trajectory=False)
+    np.testing.assert_allclose(r_batched, r_stepwise, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(J_batched, J_stepwise, rtol=0.0, atol=0.0)

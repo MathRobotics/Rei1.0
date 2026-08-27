@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 import warnings
 
@@ -277,6 +277,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         jacobian_strategy: str | None = None,
         kots_backend: str | None = None,
         gravity: Sequence[float] | None = None,
+        batch_trajectory: bool = True,
     ) -> None:
         self.trajectory_map = trajectory_map
         self.p_var = str(p_var)
@@ -286,6 +287,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             jacobian_strategy,
             prefer_matvec_jacobian=prefer_matvec_jacobian,
         )
+        self.batch_trajectory = bool(batch_trajectory)
         self.trajectory_derivative_maps: dict[int, TrajectoryMap] = {0: trajectory_map}
         if trajectory_derivative_maps is not None:
             for order_raw, traj in trajectory_derivative_maps.items():
@@ -361,6 +363,168 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 )
             motion[deriv_order_i::order] = q_r
         return motion
+
+    def _can_batch_trajectory_entries(self, grouped: Mapping[int, list[tuple[StateKey, Any]]]) -> bool:
+        """Whether all requested trajectory entries can use RoboKots batch APIs.
+
+        Coordinate entries are evaluated locally. Dynamics entries share one
+        batched RoboKots state and are grouped by their StateType below.
+        Kinematic entries retain the existing per-step path because world-frame
+        rotation handling is currently state-local in Rei.
+        """
+        if not self.batch_trajectory or len(grouped) < 2:
+            return False
+        if not callable(getattr(self.model, "state_info_list", None)):
+            return False
+        if not callable(getattr(self.model, "jacobian_mul", None)):
+            return False
+        for entries in grouped.values():
+            for key, _entry in entries:
+                owner_type = getattr(getattr(key, "owner", None), "owner_type", None)
+                if getattr(key, "dtype", None) == DTYPE_COORD and owner_type == "total_joint":
+                    continue
+                if getattr(key, "dtype", None) == DTYPE_DYNAMICS and owner_type == self.dynamics_owner_type:
+                    continue
+                return False
+        return True
+
+    def _update_batched_dynamics(self, motions: Array) -> None:
+        self.model.import_motions(np.asarray(motions, dtype=float))
+        if not self.adapter.update_dynamics_if_available():
+            raise AttributeError("RoboKots model does not expose a usable batched dynamics method.")
+
+    def _batched_dynamics_value(self, state_ref: Any) -> Array:
+        total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(state_ref)
+        if total_joint_ref is not None:
+            try:
+                return np.asarray(self.model.state_info_list(list(total_joint_ref.refs)), dtype=float)
+            except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+                pass
+            parts = [np.asarray(self.model.state_info(ref), dtype=float) for ref in total_joint_ref.refs]
+            return np.concatenate(parts, axis=-1)
+        return np.asarray(self.model.state_info(state_ref), dtype=float)
+
+    def _batched_dynamics_param_jacobian(
+        self,
+        *,
+        key: StateKey,
+        state_ref: Any,
+        dmotiondps: Sequence[Array],
+    ) -> Array:
+        total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(state_ref)
+        refs: Any = state_ref if total_joint_ref is None else list(total_joint_ref.refs)
+        last_error: Exception | None = None
+        for candidate_index in range(len(self._motion_jacobian_chain_candidates(
+            dqdp_k=self.trajectory_map.dqdp_at(int(key.k)),
+            dmotiondp_k=np.asarray(dmotiondps[0], dtype=float),
+            key=key,
+        ))):
+            try:
+                cols = np.stack(
+                    [
+                        self._motion_jacobian_chain_candidates(
+                            dqdp_k=self.trajectory_map.dqdp_at(int(k)),
+                            dmotiondp_k=np.asarray(dmotiondp, dtype=float),
+                            key=key,
+                        )[candidate_index]
+                        for k, dmotiondp in zip(self._batch_ks, dmotiondps, strict=True)
+                    ],
+                    axis=0,
+                )
+                return np.asarray(self.model.jacobian_mul(refs, cols), dtype=float)
+            except (AttributeError, KeyError, ValueError, TypeError, RuntimeError, IndexError) as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise AttributeError("RoboKots model does not expose a usable batched jacobian_mul method.")
+
+    def _build_state_batched(
+        self,
+        *,
+        p: Array,
+        grouped: Mapping[int, list[tuple[StateKey, Any]]],
+    ) -> dict[StateKey, Any]:
+        self._batch_ks = tuple(sorted(grouped))
+        motions_and_jacs = [self._compose_motion_and_jac(p, k=k) for k in self._batch_ks]
+        motions = np.stack([motion for motion, _jac in motions_and_jacs], axis=0)
+        dmotiondps = [jac for _motion, jac in motions_and_jacs]
+        q_values = [np.asarray(self.trajectory_map.q_at(p, k), dtype=float).reshape(-1) for k in self._batch_ks]
+        self._update_batched_dynamics(motions)
+
+        out: dict[StateKey, Any] = {}
+        dynamic_groups: dict[tuple[Any, ...], list[tuple[int, StateKey, Any, Any]]] = {}
+        for batch_index, k in enumerate(self._batch_ks):
+            for key, entry in grouped[k]:
+                state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
+                if getattr(key, "dtype", None) == DTYPE_COORD:
+                    value = entry.handler(q_values[batch_index], key, state_ref)
+                    if self._is_param_jac_key(key):
+                        value = self._chain_param_jac(
+                            value,
+                            key=key,
+                            jacobian_wrt=entry.jacobian_wrt,
+                            dqdp_k=self.trajectory_map.dqdp_at(k),
+                            dmotiondp_k=dmotiondps[batch_index],
+                        )
+                    out[key] = value
+                    continue
+                signature = (
+                    entry.state_ref_field,
+                    getattr(key, "dtype", None),
+                    getattr(getattr(key, "owner", None), "owner_type", None),
+                    getattr(getattr(key, "owner", None), "owner_name", None),
+                    getattr(key, "frame", None),
+                    self._is_param_jac_key(key),
+                )
+                dynamic_groups.setdefault(signature, []).append((batch_index, key, entry, state_ref))
+
+        for entries in dynamic_groups.values():
+            first_index, first_key, first_entry, first_ref = entries[0]
+            if self._is_param_jac_key(first_key):
+                if first_entry.jacobian_wrt != STATE_JACOBIAN_VAR:
+                    raise ValueError("Batched RoboKots dynamics requires state-space Jacobian metadata.")
+                values = self._batched_dynamics_param_jacobian(
+                    key=first_key,
+                    state_ref=first_ref,
+                    dmotiondps=dmotiondps,
+                )
+            else:
+                values = self._batched_dynamics_value(first_ref)
+            for batch_index, key, _entry, _state_ref in entries:
+                out[key] = np.asarray(values[batch_index], dtype=float).copy()
+        return out
+
+    def build_state(
+        self,
+        x_all: Array,
+        *,
+        pack: Any = None,
+        time: Any = None,
+        required: Iterable[StateKey] | None = None,
+    ) -> dict[StateKey, Any]:
+        if required is None:
+            return super().build_state(x_all, pack=pack, time=time, required=required)
+        steps = self._expected_steps(time=time)
+        grouped: dict[int, list[tuple[StateKey, Any]]] = {}
+        for key in required:
+            if not self._accept_required_key_for_traj(key, steps=steps):
+                continue
+            route = self._route_for_key(key)
+            entry = None if route is None else self._dispatch.get(route)
+            if entry is not None:
+                grouped.setdefault(int(key.k), []).append((key, entry))
+        if not self._can_batch_trajectory_entries(grouped):
+            return super().build_state(x_all, pack=pack, time=time, required=required)
+        p = self._extract_q(x_all, pack=pack)
+        self._validate_trajectory_parameter_size(p)
+        try:
+            return self._build_state_batched(p=p, grouped=grouped)
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError, IndexError):
+            # Preserve compatibility with older RoboKots versions and unusual
+            # state combinations by falling back to the established path.
+            return super().build_state(x_all, pack=pack, time=time, required=required)
+        finally:
+            self._batch_ks = ()
 
     def _chain_param_jac(
         self,
