@@ -60,8 +60,8 @@ from rei.core.expr.types import (
     Variable,
     VariablePack,
 )
-from rei.optimize.costs import L2Cost
-from rei.problem import NLSProblem
+from rei.optimize.costs import DiagonalWeightCost, L2Cost, ScalarWeightCost
+from rei.problem import NLSProblem, NLSRuntimeLinearProblem
 from rei.optimize.reductions import build_nullspace_equality_reduction
 from rei.optimize.runtime import NLSRuntime
 from rei.optimize.solvers import solve, solve_gauss_newton
@@ -163,6 +163,41 @@ def test_term_gradient_contributions_fast_vjp_matches_linearized_terms_for_core_
         gradients = runtime.term_gradient_contributions()[5]
 
         assert np.allclose(gradients[0], expected), getattr(expr, "name", type(expr).__name__)
+
+
+def test_weighted_residual_vjp_uses_expression_operators_without_dense_jacobian(monkeypatch) -> None:
+    p = Variable(name="p", x=np.array([3.0, 4.0], dtype=float))
+    pack = VariablePack([p])
+    expr = GetVarExpr(name="p", vars=[p])
+    runtime = NLSRuntime(
+        problem=NLSProblem(
+            variables=pack,
+            terms=[
+                (expr, DiagonalWeightCost(np.array([4.0, 9.0]))),
+                (expr, ScalarWeightCost(4.0)),
+            ],
+        ),
+        ctx=RuntimeContext(pack=pack),
+        required=[],
+    )
+    rhs = np.array([5.0, -2.0, 7.0, 11.0])
+    residual, jacobian = runtime.linearize_stacked_terms(weighted=True)
+    expected = jacobian.T @ rhs
+    np.testing.assert_allclose(expected, [24.0, 16.0], rtol=0.0, atol=0.0)
+
+    def fail_dense(*_args, **_kwargs):
+        raise AssertionError("dense Jacobian construction must not be used by residual_vjp")
+
+    monkeypatch.setattr(runtime, "_assemble_global_jacobian", fail_dense)
+    np.testing.assert_allclose(runtime.weighted_residual_vjp(rhs), expected, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(
+        runtime.residual_vjp(rhs, weighted=False),
+        [12.0, 9.0],
+        rtol=0.0,
+        atol=0.0,
+    )
+    operator_problem = NLSRuntimeLinearProblem(runtime=runtime, weighted=True)
+    np.testing.assert_allclose(operator_problem.vjp(rhs), expected, rtol=0.0, atol=0.0)
 
 
 class TestReiBasic:

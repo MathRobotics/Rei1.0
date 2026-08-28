@@ -164,6 +164,97 @@ class NLSRuntime:
     def eval(self, *, required: Iterable[StateKey] | None = None) -> Array:
         return self.eval_stacked_terms(required=required, weighted=True, term_indices=None)
 
+    def residual_vjp(
+        self,
+        rhs: Array | Any,
+        *,
+        weighted: bool = True,
+        required: Iterable[StateKey] | None = None,
+        term_indices: Iterable[int] | None = None,
+    ) -> Array:
+        """Return the selected stacked residual VJP without forming a dense Jacobian.
+
+        With ``weighted=True`` (the default), ``rhs`` is a cotangent for the
+        residual after each term's cost weighting, and the result is
+        ``J_weighted.T @ rhs``.  Costs must expose ``residual_vjp(r, rhs)``
+        so their weighting can be reversed without materializing a residual
+        Jacobian.  Built-in Rei costs provide that operation.
+        """
+        idxs = self._normalize_term_indices(term_indices)
+        if required is None:
+            req = collect_value_required(self.problem, term_indices=idxs)
+        else:
+            req = self.required_list(required)
+        self.update_state_if_needed(required=req)
+
+        terms: list[tuple[int, Any, Any, str, Array, int]] = []
+        residual_size = 0
+        for idx in idxs:
+            expr, cost = self.problem.terms[idx]
+            value_fn = getattr(expr, "eval_value", None)
+            vjp_fn = getattr(expr, "vjp", None)
+            if not callable(value_fn) or not callable(vjp_fn):
+                raise TypeError(
+                    "residual_vjp requires expressions with eval_value(ctx) and vjp(ctx, rhs); "
+                    f"term[{idx}] {self._term_display_name(idx)!r} does not provide the operator interface."
+                )
+            r_raw = np.asarray(value_fn(self.ctx), dtype=float).reshape(-1)
+            if weighted:
+                r_use = self._apply_cost_to_residual_value(cost=cost, expr=expr, r_raw=r_raw)
+            else:
+                r_use = r_raw
+            terms.append((idx, expr, cost, self._term_display_name(idx), r_raw, int(r_use.size)))
+            residual_size += int(r_use.size)
+
+        rhs_vec = np.asarray(rhs, dtype=float)
+        if rhs_vec.ndim != 1 or rhs_vec.size != residual_size:
+            raise ValueError(
+                "residual_vjp: rhs must be a 1D vector matching the selected stacked residual size. "
+                f"Expected {(residual_size,)}, got {rhs_vec.shape}."
+            )
+
+        out = np.zeros((int(self.pack.n_total),), dtype=float)
+        offset = 0
+        for idx, expr, cost, term_name, r_raw, use_size in terms:
+            rhs_use = rhs_vec[offset : offset + use_size]
+            offset += use_size
+            rhs_raw = rhs_use
+            if weighted:
+                cost_vjp = getattr(cost, "residual_vjp", None)
+                if not callable(cost_vjp):
+                    raise TypeError(
+                        "residual_vjp(weighted=True): Cost object for term "
+                        f"[{idx}] {term_name!r} has no callable residual_vjp(r, rhs)."
+                    )
+                rhs_raw = np.asarray(cost_vjp(r_raw, rhs_use), dtype=float).reshape(-1)
+                if rhs_raw.size != r_raw.size:
+                    raise ValueError(
+                        "residual_vjp: cost residual_vjp output size mismatch for term "
+                        f"[{idx}] {term_name!r}. Expected {r_raw.size}, got {rhs_raw.size}."
+                    )
+            gradients = expr.vjp(self.ctx, rhs_raw)
+            out += self._assemble_global_gradient(
+                term_name=term_name,
+                expr_vars=expr.vars,
+                gradients=gradients,
+            )
+        return out
+
+    def weighted_residual_vjp(
+        self,
+        rhs: Array | Any,
+        *,
+        required: Iterable[StateKey] | None = None,
+        term_indices: Iterable[int] | None = None,
+    ) -> Array:
+        """Return ``J_weighted.T @ rhs`` without materializing ``J_weighted``."""
+        return self.residual_vjp(
+            rhs,
+            weighted=True,
+            required=required,
+            term_indices=term_indices,
+        )
+
     def _normalize_term_indices(self, term_indices: Iterable[int] | None = None) -> list[int]:
         if term_indices is None:
             return list(range(len(self.problem.terms)))

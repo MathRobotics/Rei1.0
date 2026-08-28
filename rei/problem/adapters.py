@@ -77,6 +77,17 @@ class NLSRuntimeLinearProblem:
         return np.asarray(J, dtype=float) @ v_vec
 
     def vjp(self, w: Array | Any, *, required: Iterable[StateKey] | None = None) -> Array:
+        residual_vjp = getattr(self.runtime, "residual_vjp", None)
+        if callable(residual_vjp):
+            return np.asarray(
+                residual_vjp(
+                    w,
+                    weighted=bool(self.weighted),
+                    required=required,
+                    term_indices=self.term_indices,
+                ),
+                dtype=float,
+            ).reshape(-1)
         r, J = self.linearize(required=required)
         w_vec = as_vec(w, expected_size=int(np.asarray(r, dtype=float).reshape(-1).size), name="w")
         return np.asarray(J, dtype=float).T @ w_vec

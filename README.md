@@ -379,6 +379,23 @@ PYTHONPATH=/path/to/RoboKots:. python developer/benchmarks/robokots_jacobian_mul
 
 ## Solvers
 
+### Residual VJP operators
+
+For large trajectory parameter vectors, use `NLSRuntime.weighted_residual_vjp`
+to compute `J_weighted.T @ rhs` without materializing the stacked dense
+Jacobian.  `rhs` is ordered like `eval_stacked_terms(weighted=True)`.  The
+more general `residual_vjp(rhs, weighted=False)` applies the raw residual
+Jacobian instead.
+
+```python
+rhs = np.ones(runtime.eval_stacked_terms(weighted=True).shape)
+gradient = runtime.weighted_residual_vjp(rhs)
+```
+
+Built-in costs propagate their residual weighting in reverse before Rei calls
+the expression VJP.  Custom costs used with this operator must implement
+`residual_vjp(r, rhs)` alongside `apply(r, blocks)`.
+
 `solve()` accepts these solver names:
 
 - `"gauss_newton"`: built-in Gauss-Newton solver
