@@ -518,9 +518,22 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         time: Any = None,
     ) -> dict[StateKey, Any]:
         self._batch_ks = tuple(sorted(grouped))
-        motions_and_jacs = [self._compose_motion_and_jac(p, k=k) for k in self._batch_ks]
-        motions = np.stack([motion for motion, _jac in motions_and_jacs], axis=0)
-        dmotiondps = [jac for _motion, jac in motions_and_jacs]
+        # A value-only state build must stay on the sparse trajectory path.
+        # In particular, compose_interleaved_motion_and_jac calls dqdp_at(),
+        # which is unnecessary for values and used to force all requested
+        # time steps to construct parameter Jacobians.
+        needs_param_jac = any(
+            self._is_param_jac_key(key)
+            for entries in grouped.values()
+            for key, _entry in entries
+        )
+        if needs_param_jac:
+            motions_and_jacs = [self._compose_motion_and_jac(p, k=k) for k in self._batch_ks]
+            motions = np.stack([motion for motion, _jac in motions_and_jacs], axis=0)
+            dmotiondps: list[Array] | None = [jac for _motion, jac in motions_and_jacs]
+        else:
+            motions = np.stack([self._compose_motion(p, k=k) for k in self._batch_ks], axis=0)
+            dmotiondps = None
         q_values = [np.asarray(self.trajectory_map.q_at(p, k), dtype=float).reshape(-1) for k in self._batch_ks]
         self._update_batched_dynamics(motions, p=p, time=time)
 
@@ -532,6 +545,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 if getattr(key, "dtype", None) == DTYPE_COORD:
                     value = entry.handler(q_values[batch_index], key, state_ref)
                     if self._is_param_jac_key(key):
+                        assert dmotiondps is not None
                         value = self._chain_param_jac(
                             value,
                             key=key,
@@ -556,6 +570,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             if self._is_param_jac_key(first_key):
                 if first_entry.jacobian_wrt != STATE_JACOBIAN_VAR:
                     raise ValueError("Batched RoboKots dynamics requires state-space Jacobian metadata.")
+                assert dmotiondps is not None
                 values = self._batched_dynamics_param_jacobian(
                     key=first_key,
                     state_ref=first_ref,

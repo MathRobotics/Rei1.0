@@ -1007,6 +1007,49 @@ class TestKotsTrajectoryDynamicsMock:
         assert np.all(np.isfinite(out))
         assert model.jacobian_transpose_mul_calls > 0
 
+    def test_kots_batched_value_build_does_not_construct_motion_jacobians(self, monkeypatch) -> None:
+        """Value-only batch evaluation must not ask a sparse map for dq/dp."""
+        maps = TrajectoryMap.from_bspline_derivatives(
+            steps=3,
+            q_dim=2,
+            degree=3,
+            num_ctrl_points=5,
+            max_derivative_order=2,
+        )
+        builder = KotsTrajectoryStateBuilder(
+            _FakeKotsModel(),
+            {},
+            trajectory_map=maps[0],
+            trajectory_derivative_maps={1: maps[1], 2: maps[2]},
+        )
+        keys = [
+            make_key(
+                k=k,
+                owner_type="total_joint",
+                owner_name="robot",
+                dtype=DTYPE_COORD,
+                field="q",
+            )
+            for k in range(3)
+        ]
+        grouped = {
+            key.k: [(key, builder._dispatch[builder._route_for_key(key)])]
+            for key in keys
+        }
+
+        def fail_motion_jac(*_args, **_kwargs):
+            raise AssertionError("value-only batched state build must not compose motion Jacobians")
+
+        def fail_dense(_self):
+            raise AssertionError("value-only batched state build must not materialize A")
+
+        monkeypatch.setattr(builder, "_compose_motion_and_jac", fail_motion_jac)
+        monkeypatch.setattr(BsplineTrajectoryOperator, "to_dense", fail_dense)
+        values = builder._build_state_batched(p=np.zeros((maps[0].p_dim,)), grouped=grouped)
+
+        assert set(values) == set(keys)
+        assert all(value.shape == (2,) for value in values.values())
+
     def test_compile_trajectory_ioc_problem_kots_uses_transpose_mul_for_stationarity(self) -> None:
         model = _FakeKotsModelJacobianTransposeMulNoDenseJac()
         dsl = {

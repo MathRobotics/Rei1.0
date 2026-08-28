@@ -217,6 +217,7 @@ def test_bspline_trajectory_map_uses_block_sparse_apply_and_vjp(monkeypatch) -> 
     rhs = np.linspace(0.1, 0.9, steps * q_dim)
     expected_value = trajectory.apply(p)
     expected_vjp = trajectory.apply_transpose(rhs)
+    expected_dqdp = trajectory.dqdp_at(317)
 
     def fail_dense(self):
         raise AssertionError("sparse trajectory runtime must not materialize A")
@@ -224,6 +225,7 @@ def test_bspline_trajectory_map_uses_block_sparse_apply_and_vjp(monkeypatch) -> 
     monkeypatch.setattr(BsplineTrajectoryOperator, "to_dense", fail_dense)
     np.testing.assert_allclose(trajectory.apply(p), expected_value, rtol=0.0, atol=0.0)
     np.testing.assert_allclose(trajectory.apply_transpose(rhs), expected_vjp, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(trajectory.dqdp_at(317), expected_dqdp, rtol=0.0, atol=0.0)
 
 
 class TestReiBasic:

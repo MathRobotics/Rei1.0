@@ -231,6 +231,11 @@ class TrajectoryMap:
         return self.apply_at(p_vec, k)
 
     def dqdp_at(self, k: int) -> Array:
+        if isinstance(self.A, BsplineTrajectoryOperator):
+            # Do not index the operator here: ``__getitem__`` is deliberately
+            # a dense compatibility path.  A local q-by-p block is exactly the
+            # transpose action on the q-dimensional identity at this step.
+            return self.A.rmatvec_at(k, np.eye(self.q_dim, dtype=float)).T
         s = self._row_slice(k)
         return self.A[s, :].copy()
 
