@@ -238,7 +238,7 @@ class TrajectoryVarExpr:
                 f"{self.name}: parameter size mismatch. "
                 f"Expected {self.trajectory.p_dim}, got {p.size}."
             )
-        y_all = (self.trajectory.A @ p + self.trajectory.b).reshape(-1)
+        y_all = self.trajectory.apply(p)
 
         if self.k is None:
             return y_all
@@ -261,7 +261,7 @@ class TrajectoryVarExpr:
                 f"{self.name}: parameter size mismatch. "
                 f"Expected {self.trajectory.p_dim}, got {p.size}."
             )
-        y_all = (self.trajectory.A @ p + self.trajectory.b).reshape(-1)
+        y_all = self.trajectory.apply(p)
 
         if self.k is None:
             return y_all, [self.trajectory.A.copy()]
@@ -283,7 +283,7 @@ class TrajectoryVarExpr:
             raise ValueError(f"{self.name}: rhs for vjp must be 1D or 2D, got shape {r.shape}.")
 
         if self.k is None:
-            A = np.asarray(self.trajectory.A, dtype=float)
+            return [np.asarray(self.trajectory.apply_transpose(r), dtype=float)]
         else:
             k = int(self.k)
             steps = int(self.trajectory.steps)
@@ -292,10 +292,14 @@ class TrajectoryVarExpr:
             seg = int(self.trajectory.q_dim)
             start = int(k * seg)
             stop = int(start + seg)
-            A = np.asarray(self.trajectory.A[start:stop, :], dtype=float)
-        if int(r.shape[0]) != int(A.shape[0]):
-            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {A.shape[0]}, got {r.shape[0]}.")
-        return [np.asarray(A.T @ r, dtype=float)]
+            if int(r.shape[0]) != int(self.trajectory.q_dim):
+                raise ValueError(
+                    f"{self.name}: rhs size mismatch for vjp. Expected {self.trajectory.q_dim}, got {r.shape[0]}."
+                )
+            return [np.asarray(self.trajectory.apply_transpose_at(k, r), dtype=float)]
+        if int(r.shape[0]) != int(self.trajectory.A.shape[0]):
+            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {self.trajectory.A.shape[0]}, got {r.shape[0]}.")
+        return [np.asarray(self.trajectory.apply_transpose(r), dtype=float)]
 
 
 @dataclass
@@ -349,12 +353,12 @@ class TrajectoryVarDerivativesExpr:
             stop = int(start + q_dim)
             y_parts = []
             for traj in self.trajectories:
-                y_all = (traj.A @ p + traj.b).reshape(-1)
+                y_all = traj.apply(p)
                 y_parts.append(y_all[start:stop].copy())
             return np.concatenate(y_parts, axis=0)
 
         return np.concatenate(
-            [(traj.A @ p + traj.b).reshape(-1) for traj in self.trajectories],
+            [traj.apply(p) for traj in self.trajectories],
             axis=0,
         )
 
@@ -394,7 +398,7 @@ class TrajectoryVarDerivativesExpr:
             y_parts = []
             j_parts = []
             for traj in self.trajectories:
-                y_all = (traj.A @ p + traj.b).reshape(-1)
+                y_all = traj.apply(p)
                 y_parts.append(y_all[start:stop].copy())
                 j_parts.append(traj.A[start:stop, :].copy())
             return np.concatenate(y_parts, axis=0), [np.vstack(j_parts)]
@@ -402,7 +406,7 @@ class TrajectoryVarDerivativesExpr:
         y_parts = []
         j_parts = []
         for traj in self.trajectories:
-            y_parts.append((traj.A @ p + traj.b).reshape(-1))
+            y_parts.append(traj.apply(p))
             j_parts.append(traj.A.copy())
         return np.concatenate(y_parts, axis=0), [np.vstack(j_parts)]
 
@@ -422,14 +426,26 @@ class TrajectoryVarDerivativesExpr:
                 raise ValueError(f"{self.name}: requested k={k}, but time steps are 0..{steps - 1}.")
             start = int(k * q_dim)
             stop = int(start + q_dim)
-            blocks = [np.asarray(traj.A[start:stop, :], dtype=float) for traj in self.trajectories]
+            if int(r.shape[0]) != int(len(self.trajectories) * q_dim):
+                raise ValueError(
+                    f"{self.name}: rhs size mismatch for vjp. Expected {len(self.trajectories) * q_dim}, got {r.shape[0]}."
+                )
+            out = np.zeros((self.trajectories[0].p_dim,) if r.ndim == 1 else (self.trajectories[0].p_dim, r.shape[1]))
+            for index, traj in enumerate(self.trajectories):
+                segment = r[index * q_dim : (index + 1) * q_dim]
+                out += traj.apply_transpose_at(k, segment)
+            return [out]
         else:
-            blocks = [np.asarray(traj.A, dtype=float) for traj in self.trajectories]
-
-        A = np.vstack(blocks)
-        if int(r.shape[0]) != int(A.shape[0]):
-            raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {A.shape[0]}, got {r.shape[0]}.")
-        return [np.asarray(A.T @ r, dtype=float)]
+            expected = int(sum(traj.steps * traj.q_dim for traj in self.trajectories))
+            if int(r.shape[0]) != expected:
+                raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {expected}, got {r.shape[0]}.")
+            out = np.zeros((self.trajectories[0].p_dim,) if r.ndim == 1 else (self.trajectories[0].p_dim, r.shape[1]))
+            offset = 0
+            for traj in self.trajectories:
+                size = int(traj.steps * traj.q_dim)
+                out += traj.apply_transpose(r[offset : offset + size])
+                offset += size
+            return [out]
 
 
 @dataclass

@@ -396,6 +396,17 @@ Built-in costs propagate their residual weighting in reverse before Rei calls
 the expression VJP.  Custom costs used with this operator must implement
 `residual_vjp(r, rhs)` alongside `apply(r, blocks)`.
 
+### Sparse B-spline trajectory maps
+
+B-spline `TrajectoryMap` instances retain a block-sparse operator instead of
+materializing `kron(basis, I)` in normal runtime paths.  Use
+`apply(p)`, `apply_at(k, p)`, `apply_transpose(rhs)`, and
+`apply_transpose_at(k, rhs)` for coefficient-to-trajectory and adjoint
+trajectory-to-coefficient operations.  q through higher derivative maps use
+the same representation.  `TrajectoryMap.A` and `dqdp_at()` remain available
+for compatibility, but requesting a dense Jacobian intentionally materializes
+the corresponding rows.
+
 `solve()` accepts these solver names:
 
 - `"gauss_newton"`: built-in Gauss-Newton solver

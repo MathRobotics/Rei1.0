@@ -10,7 +10,7 @@ import types
 import numpy as np
 
 from rei.core.state_schema import DTYPE_DYNAMICS, DTYPE_COORD, DTYPE_KINEMATICS, make_jac_key, make_key
-from rei.core.trajectory import TrajectoryMap
+from rei.core.trajectory import BsplineTrajectoryOperator, TrajectoryMap
 from rei.optimize.reductions import build_nullspace_equality_reduction
 from rei.optimize.solvers import solve
 
@@ -973,6 +973,38 @@ class TestKotsTrajectoryDynamicsMock:
         Jp = np.asarray(builder.build_state(p, required=[jac_key])[jac_key], dtype=float)
 
         assert np.allclose(out, Jp.T @ rhs)
+        assert model.jacobian_transpose_mul_calls > 0
+
+    def test_kots_bspline_vjp_does_not_materialize_trajectory_map(self, monkeypatch) -> None:
+        model = _FakeKotsModelJacobianTransposeMul()
+        maps = TrajectoryMap.from_bspline_derivatives(
+            steps=2,
+            q_dim=2,
+            degree=3,
+            num_ctrl_points=5,
+            max_derivative_order=2,
+        )
+        assert isinstance(maps[0].A, BsplineTrajectoryOperator)
+        builder = KotsTrajectoryStateBuilder(
+            model,
+            {},
+            trajectory_map=maps[0],
+            trajectory_derivative_maps={1: maps[1], 2: maps[2]},
+        )
+        key = make_key(
+            k=0,
+            owner_type="total_joint",
+            owner_name="robot",
+            dtype=DTYPE_DYNAMICS,
+            field="torque",
+        )
+
+        def fail_dense(self):
+            raise AssertionError("Kots VJP must use TrajectoryMap.apply_transpose_at")
+
+        monkeypatch.setattr(BsplineTrajectoryOperator, "to_dense", fail_dense)
+        out = builder.param_jacobian_transpose_mul(np.zeros((10,)), key, np.array([1.0, -2.0]))
+        assert np.all(np.isfinite(out))
         assert model.jacobian_transpose_mul_calls > 0
 
     def test_compile_trajectory_ioc_problem_kots_uses_transpose_mul_for_stationarity(self) -> None:

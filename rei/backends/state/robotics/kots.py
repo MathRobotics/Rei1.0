@@ -785,8 +785,6 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         key: StateKey,
         state_ref: Any,
         rhs: Array,
-        dqdp_k: Array,
-        dmotiondp_k: Array,
     ) -> Array:
         rhs_local = self.adapter.rotate_link_kinematics_rhs_to_local(
             rhs=np.asarray(rhs, dtype=float),
@@ -794,26 +792,28 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             state_ref=state_ref,
         )
         motion_grad = np.asarray(self.adapter.transpose_matvec_from_state_ref(state_ref, rhs_local), dtype=float)
-
-        if motion_grad.ndim == 1:
-            for cols in self._motion_jacobian_chain_candidates(dqdp_k=dqdp_k, dmotiondp_k=dmotiondp_k, key=key):
-                if int(cols.shape[0]) == int(motion_grad.size):
-                    return np.asarray(cols.T @ motion_grad.reshape(-1), dtype=float).reshape(-1)
-        elif motion_grad.ndim == 2:
-            for cols in self._motion_jacobian_chain_candidates(dqdp_k=dqdp_k, dmotiondp_k=dmotiondp_k, key=key):
-                if int(cols.shape[0]) == int(motion_grad.shape[0]):
-                    return np.asarray(cols.T @ motion_grad, dtype=float)
-        else:
-            raise ValueError(
-                "KotsTrajectoryStateBuilder: jacobian_transpose_mul output must be 1D or 2D, "
-                f"got shape {motion_grad.shape}."
-            )
-
+        mapped = self._trajectory_motion_gradient_transpose_at(k=int(key.k), motion_grad=motion_grad)
+        if mapped is not None:
+            return mapped
         raise ValueError(
             "KotsTrajectoryStateBuilder: transpose Jacobian chain mismatch. "
-            f"transpose output has shape {motion_grad.shape}, dqdp has shape {dqdp_k.shape}, "
-            f"dmotiondp has shape {dmotiondp_k.shape}."
+            f"transpose output has shape {motion_grad.shape}."
         )
+
+    def _trajectory_motion_gradient_transpose_at(self, *, k: int, motion_grad: Array) -> Array | None:
+        """Map an interleaved motion cotangent without building ``dmotiondp``."""
+        grad = np.asarray(motion_grad, dtype=float)
+        dof = self._model_dof()
+        if dof <= 0 or grad.ndim not in (1, 2) or int(grad.shape[0]) % dof != 0:
+            return None
+        used_order = int(grad.shape[0] // dof)
+        result_shape = (self.trajectory_map.p_dim,) if grad.ndim == 1 else (self.trajectory_map.p_dim, grad.shape[1])
+        result = np.zeros(result_shape, dtype=float)
+        for derivative_order in range(used_order):
+            trajectory = self.trajectory_derivative_maps.get(derivative_order, None)
+            if trajectory is not None:
+                result += trajectory.apply_transpose_at(k, grad[derivative_order::used_order])
+        return result
 
     def param_jacobian_transpose_mul(
         self,
@@ -846,8 +846,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             )
 
         k = int(key.k)
-        dqdp_k = self.trajectory_map.dqdp_at(k)
-        motion_k, dmotiondp_k = self._compose_motion_and_jac(p, k=k)
+        motion_k = self._compose_motion(p, k=k)
         if update_kinematics:
             self._update_kinematics(motion_k)
         state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
@@ -855,8 +854,6 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             key=key,
             state_ref=state_ref,
             rhs=rhs,
-            dqdp_k=dqdp_k,
-            dmotiondp_k=dmotiondp_k,
         )
 
     def param_jacobian_transpose_mul_many(
@@ -917,14 +914,14 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             and len(grouped_items) >= 2
             and self._batched_multi_vjp_contract != "fused"
         )
-        group_motions: list[list[tuple[Array, Array]]] = []
+        group_motions: list[list[Array]] = []
         if use_multi_vjp:
             for group in grouped_items:
                 if len(group) < 2:
                     use_multi_vjp = False
                     break
                 ks = [int(key.k) for _index, key, _rhs, _state_ref in group]
-                group_motions.append([self._compose_motion_and_jac(p, k=k) for k in ks])
+                group_motions.append([self._compose_motion(p, k=k) for k in ks])
             if use_multi_vjp:
                 first_ks = [int(key.k) for _index, key, _rhs, _state_ref in grouped_items[0]]
                 if any(
@@ -935,7 +932,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
 
         if use_multi_vjp:
             self._update_batched_dynamics(
-                np.stack([motion for motion, _jac in group_motions[0]], axis=0),
+                np.stack(group_motions[0], axis=0),
                 p=p,
                 time=time,
             )
@@ -962,7 +959,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 if len(grouped_motion_grads) != len(grouped_items):
                     self._batched_multi_vjp_contract = "fused"
                     raise ValueError("RoboKots multi-VJP must return one result for each input request.")
-                for group, motions_and_jacs, motion_grads in zip(
+                for group, motions, motion_grads in zip(
                     grouped_items,
                     group_motions,
                     grouped_motion_grads,
@@ -971,7 +968,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                     self._chain_batched_param_vjp_group(
                         out=out,
                         group=group,
-                        motions_and_jacs=motions_and_jacs,
+                        motions=motions,
                         motion_grads=motion_grads,
                     )
                 self._batched_multi_vjp_contract = "per_input"
@@ -988,9 +985,9 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             if len(group) < 2:
                 raise AttributeError("batched RoboKots VJP group has fewer than two requests")
             ks = [int(key.k) for _index, key, _rhs, _state_ref in group]
-            motions_and_jacs = [self._compose_motion_and_jac(p, k=k) for k in ks]
+            motions = [self._compose_motion(p, k=k) for k in ks]
             self._update_batched_dynamics(
-                np.stack([motion for motion, _jac in motions_and_jacs], axis=0),
+                np.stack(motions, axis=0),
                 p=p,
                 time=time,
             )
@@ -1002,7 +999,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             self._chain_batched_param_vjp_group(
                 out=out,
                 group=group,
-                motions_and_jacs=motions_and_jacs,
+                motions=motions,
                 motion_grads=motion_grads,
             )
         return [np.asarray(value, dtype=float) for value in out]
@@ -1012,7 +1009,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         *,
         out: list[Array | None],
         group: Sequence[tuple[int, StateKey, Array, Any]],
-        motions_and_jacs: Sequence[tuple[Array, Array]],
+        motions: Sequence[Array],
         motion_grads: Array,
     ) -> None:
         """Map one RoboKots batched VJP result back to trajectory parameters."""
@@ -1023,17 +1020,10 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             )
         for batch_index, (index, key, _rhs, _state_ref) in enumerate(group):
             motion_grad = np.asarray(grads[batch_index], dtype=float)
-            _motion, dmotiondp = motions_and_jacs[batch_index]
-            for cols in self._motion_jacobian_chain_candidates(
-                dqdp_k=self.trajectory_map.dqdp_at(int(key.k)),
-                dmotiondp_k=dmotiondp,
-                key=key,
-            ):
-                if int(cols.shape[0]) == int(motion_grad.shape[0]):
-                    out[index] = np.asarray(cols.T @ motion_grad, dtype=float)
-                    break
-            if out[index] is None:
+            mapped = self._trajectory_motion_gradient_transpose_at(k=int(key.k), motion_grad=motion_grad)
+            if mapped is None:
                 raise ValueError("Batched RoboKots VJP motion dimension does not match trajectory chain.")
+            out[index] = mapped
 
     def _evaluate_trajectory_entry(
         self,

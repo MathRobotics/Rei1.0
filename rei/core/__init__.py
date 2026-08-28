@@ -6,7 +6,7 @@ from . import expr
 from .outcome import SolveOutcome, SolveStats
 from .timing import Profiler, TimingReport, TimingSpan, ensure_profiler
 from .time_grid import TimeGrid
-from .trajectory import TrajectoryMap
+from .trajectory import BsplineTrajectoryOperator, TrajectoryMap
 
 __all__ = [
     "OwnerKey",
@@ -14,6 +14,7 @@ __all__ = [
     "StateCache",
     "TimeGrid",
     "TrajectoryMap",
+    "BsplineTrajectoryOperator",
     "SolveStats",
     "SolveOutcome",
     "TimingSpan",

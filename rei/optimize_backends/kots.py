@@ -56,13 +56,22 @@ class KotsTrajectoryProblemTemplate:
     @staticmethod
     def _immutable_map(source: TrajectoryMap) -> TrajectoryMap:
         """Defensively copy a window map; neither caller nor template mutates it."""
+        source_a = source.A
+        if hasattr(source_a, "basis") and hasattr(source_a, "q_dim"):
+            source_a = type(source_a)(
+                basis=np.array(source_a.basis, dtype=float, copy=True),
+                q_dim=int(source_a.q_dim),
+            )
+        else:
+            source_a = np.array(source_a, dtype=float, copy=True)
         result = TrajectoryMap(
-            A=np.array(source.A, dtype=float, copy=True),
+            A=source_a,
             b=np.array(source.b, dtype=float, copy=True),
             steps=int(source.steps),
             q_dim=int(source.q_dim),
         )
-        result.A.setflags(write=False)
+        if isinstance(result.A, np.ndarray):
+            result.A.setflags(write=False)
         result.b.setflags(write=False)
         return result
 
@@ -140,7 +149,7 @@ class KotsTrajectoryProblemTemplate:
                     traj.steps == old.steps
                     and traj.q_dim == old.q_dim
                     and traj.A.shape == old.A.shape
-                    and np.array_equal(traj.A, old.A)
+                    and np.array_equal(np.asarray(traj.A), np.asarray(old.A))
                     and np.array_equal(traj.b, old.b)
                 ):
                     return order

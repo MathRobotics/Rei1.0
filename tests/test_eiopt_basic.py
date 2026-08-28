@@ -12,7 +12,7 @@ from rei.core.bspline import (
 from rei.core.state_cache import OwnerKey, StateCache, StateKey
 from rei.core.state_schema import DTYPE_DYNAMICS, DTYPE_KINEMATICS, DYNAMICS_FIELDS, canonical_field_name, jac_field
 from rei.core.time_grid import TimeGrid
-from rei.core.trajectory import TrajectoryMap
+from rei.core.trajectory import BsplineTrajectoryOperator, TrajectoryMap
 from rei.optimize.dsl import (
     build_trajectory_map,
     build_trajectory_map_with_derivative,
@@ -198,6 +198,32 @@ def test_weighted_residual_vjp_uses_expression_operators_without_dense_jacobian(
     )
     operator_problem = NLSRuntimeLinearProblem(runtime=runtime, weighted=True)
     np.testing.assert_allclose(operator_problem.vjp(rhs), expected, rtol=0.0, atol=0.0)
+
+
+def test_bspline_trajectory_map_uses_block_sparse_apply_and_vjp(monkeypatch) -> None:
+    steps, q_dim, degree, controls = 509, 69, 5, 30
+    trajectory = TrajectoryMap.from_bspline_derivatives(
+        steps=steps,
+        q_dim=q_dim,
+        degree=degree,
+        num_ctrl_points=controls,
+        max_derivative_order=3,
+    )[0]
+    assert isinstance(trajectory.A, BsplineTrajectoryOperator)
+    assert trajectory.A.basis.shape == (steps, controls)
+    assert trajectory.A.basis.nbytes < (steps * q_dim * controls * q_dim * 8) // 100
+
+    p = np.linspace(-0.2, 0.4, trajectory.p_dim)
+    rhs = np.linspace(0.1, 0.9, steps * q_dim)
+    expected_value = trajectory.apply(p)
+    expected_vjp = trajectory.apply_transpose(rhs)
+
+    def fail_dense(self):
+        raise AssertionError("sparse trajectory runtime must not materialize A")
+
+    monkeypatch.setattr(BsplineTrajectoryOperator, "to_dense", fail_dense)
+    np.testing.assert_allclose(trajectory.apply(p), expected_value, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(trajectory.apply_transpose(rhs), expected_vjp, rtol=0.0, atol=0.0)
 
 
 class TestReiBasic:

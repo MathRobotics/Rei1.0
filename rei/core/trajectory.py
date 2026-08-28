@@ -10,6 +10,142 @@ from .bspline import bspline_basis_derivative_matrices, default_clamped_uniform_
 Array = np.ndarray
 
 
+@dataclass(frozen=True)
+class BsplineTrajectoryOperator:
+    """Block-sparse ``kron(basis, I_q)`` trajectory linear operator.
+
+    The basis has shape ``(steps, num_ctrl_points)``.  Unlike its equivalent
+    Kronecker matrix, this representation stores only the scalar B-spline
+    basis and applies it directly to control-point blocks.
+    """
+
+    basis: Array
+    q_dim: int
+
+    def __post_init__(self) -> None:
+        basis = np.asarray(self.basis, dtype=float)
+        if basis.ndim != 2:
+            raise ValueError(f"BsplineTrajectoryOperator: basis must be 2D, got {basis.shape}.")
+        if int(self.q_dim) <= 0:
+            raise ValueError("BsplineTrajectoryOperator: q_dim must be positive.")
+        object.__setattr__(self, "basis", basis)
+        object.__setattr__(self, "q_dim", int(self.q_dim))
+
+    @property
+    def steps(self) -> int:
+        return int(self.basis.shape[0])
+
+    @property
+    def num_ctrl_points(self) -> int:
+        return int(self.basis.shape[1])
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return (int(self.steps * self.q_dim), int(self.num_ctrl_points * self.q_dim))
+
+    @property
+    def ndim(self) -> int:
+        return 2
+
+    @property
+    def T(self) -> "BsplineTrajectoryTransposeOperator":
+        return BsplineTrajectoryTransposeOperator(self)
+
+    def matvec(self, p: Array) -> Array:
+        p_vec = np.asarray(p, dtype=float).reshape(-1)
+        if p_vec.size != self.shape[1]:
+            raise ValueError(f"BsplineTrajectoryOperator: p size mismatch. Expected {self.shape[1]}, got {p_vec.size}.")
+        controls = p_vec.reshape(self.num_ctrl_points, self.q_dim)
+        return np.asarray(self.basis @ controls, dtype=float).reshape(-1)
+
+    def matvec_at(self, p: Array, k: int) -> Array:
+        k_i = int(k)
+        if k_i < 0 or k_i >= self.steps:
+            raise ValueError(f"BsplineTrajectoryOperator: k must be in 0..{self.steps - 1}, got {k_i}.")
+        p_vec = np.asarray(p, dtype=float).reshape(-1)
+        if p_vec.size != self.shape[1]:
+            raise ValueError(f"BsplineTrajectoryOperator: p size mismatch. Expected {self.shape[1]}, got {p_vec.size}.")
+        return np.asarray(self.basis[k_i] @ p_vec.reshape(self.num_ctrl_points, self.q_dim), dtype=float).reshape(-1)
+
+    def rmatvec(self, rhs: Array) -> Array:
+        r = np.asarray(rhs, dtype=float)
+        if r.ndim == 1:
+            if r.size != self.shape[0]:
+                raise ValueError(f"BsplineTrajectoryOperator: rhs size mismatch. Expected {self.shape[0]}, got {r.size}.")
+            return np.asarray(self.basis.T @ r.reshape(self.steps, self.q_dim), dtype=float).reshape(-1)
+        if r.ndim == 2:
+            if r.shape[0] != self.shape[0]:
+                raise ValueError(f"BsplineTrajectoryOperator: rhs row mismatch. Expected {self.shape[0]}, got {r.shape[0]}.")
+            values = r.reshape(self.steps, self.q_dim, r.shape[1])
+            return np.einsum("tc,tqk->cqk", self.basis, values, optimize=True).reshape(self.shape[1], r.shape[1])
+        raise ValueError(f"BsplineTrajectoryOperator: rhs must be 1D or 2D, got {r.shape}.")
+
+    def rmatvec_at(self, k: int, rhs: Array) -> Array:
+        k_i = int(k)
+        r = np.asarray(rhs, dtype=float)
+        if k_i < 0 or k_i >= self.steps:
+            raise ValueError(f"BsplineTrajectoryOperator: k must be in 0..{self.steps - 1}, got {k_i}.")
+        if r.ndim == 1:
+            if r.size != self.q_dim:
+                raise ValueError(f"BsplineTrajectoryOperator: rhs size mismatch. Expected {self.q_dim}, got {r.size}.")
+            return np.outer(self.basis[k_i], r).reshape(-1)
+        if r.ndim == 2:
+            if r.shape[0] != self.q_dim:
+                raise ValueError(f"BsplineTrajectoryOperator: rhs row mismatch. Expected {self.q_dim}, got {r.shape[0]}.")
+            return np.einsum("c,qk->cqk", self.basis[k_i], r, optimize=True).reshape(self.shape[1], r.shape[1])
+        raise ValueError(f"BsplineTrajectoryOperator: rhs must be 1D or 2D, got {r.shape}.")
+
+    def to_dense(self) -> Array:
+        return np.kron(self.basis, np.eye(self.q_dim, dtype=float))
+
+    def __array__(self, dtype=None, copy=None) -> Array:
+        out = self.to_dense()
+        if dtype is not None:
+            out = out.astype(dtype, copy=False)
+        return out.copy() if copy else out
+
+    def __matmul__(self, other: Array) -> Array:
+        values = np.asarray(other, dtype=float)
+        if values.ndim == 1:
+            return self.matvec(values)
+        if values.ndim == 2:
+            if values.shape[0] != self.shape[1]:
+                raise ValueError(f"BsplineTrajectoryOperator: RHS shape mismatch {values.shape}.")
+            controls = values.reshape(self.num_ctrl_points, self.q_dim, values.shape[1])
+            return np.einsum("tc,cqk->tqk", self.basis, controls, optimize=True).reshape(self.shape[0], values.shape[1])
+        return NotImplemented
+
+    def __getitem__(self, key):
+        # Compatibility path for callers that explicitly request dense rows.
+        return self.to_dense()[key]
+
+    def __mul__(self, scalar: float) -> Array:
+        return self.to_dense() * scalar
+
+    def __rmul__(self, scalar: float) -> Array:
+        return scalar * self.to_dense()
+
+    def copy(self) -> Array:
+        """Return a dense compatibility copy; use matvec/rmatvec in runtime paths."""
+        return self.to_dense().copy()
+
+
+@dataclass(frozen=True)
+class BsplineTrajectoryTransposeOperator:
+    source: BsplineTrajectoryOperator
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self.source.shape[::-1]
+
+    @property
+    def ndim(self) -> int:
+        return 2
+
+    def __matmul__(self, rhs: Array) -> Array:
+        return self.source.rmatvec(rhs)
+
+
 @dataclass
 class TrajectoryMap:
     """Affine map from trajectory parameters `p` to stacked generalized coordinates.
@@ -21,13 +157,14 @@ class TrajectoryMap:
     where `q_traj` stacks q(k) for k=0..steps-1.
     """
 
-    A: Array
+    A: Array | BsplineTrajectoryOperator
     b: Array
     steps: int
     q_dim: int
 
     def __post_init__(self) -> None:
-        self.A = np.asarray(self.A, dtype=float)
+        if not isinstance(self.A, BsplineTrajectoryOperator):
+            self.A = np.asarray(self.A, dtype=float)
         self.b = np.asarray(self.b, dtype=float).reshape(-1)
         self.steps = int(self.steps)
         self.q_dim = int(self.q_dim)
@@ -55,6 +192,30 @@ class TrajectoryMap:
     def p_dim(self) -> int:
         return int(self.A.shape[1])
 
+    @property
+    def is_sparse_operator(self) -> bool:
+        return isinstance(self.A, BsplineTrajectoryOperator)
+
+    def apply(self, p: Array) -> Array:
+        return np.asarray(self.A @ np.asarray(p, dtype=float).reshape(-1), dtype=float).reshape(-1) + self.b
+
+    def apply_transpose(self, rhs: Array) -> Array:
+        if isinstance(self.A, BsplineTrajectoryOperator):
+            return self.A.rmatvec(rhs)
+        return np.asarray(self.A.T @ np.asarray(rhs, dtype=float), dtype=float)
+
+    def apply_at(self, p: Array, k: int) -> Array:
+        if isinstance(self.A, BsplineTrajectoryOperator):
+            return self.A.matvec_at(p, k) + self.b[self._row_slice(k)]
+        s = self._row_slice(k)
+        return np.asarray(self.A[s, :] @ np.asarray(p, dtype=float).reshape(-1) + self.b[s], dtype=float).reshape(-1)
+
+    def apply_transpose_at(self, k: int, rhs: Array) -> Array:
+        if isinstance(self.A, BsplineTrajectoryOperator):
+            return self.A.rmatvec_at(k, rhs)
+        s = self._row_slice(k)
+        return np.asarray(self.A[s, :].T @ np.asarray(rhs, dtype=float), dtype=float)
+
     def _row_slice(self, k: int) -> slice:
         k = int(k)
         if k < 0 or k >= self.steps:
@@ -67,7 +228,7 @@ class TrajectoryMap:
         if p_vec.size != self.p_dim:
             raise ValueError(f"TrajectoryMap: p size mismatch. Expected {self.p_dim}, got {p_vec.size}.")
         s = self._row_slice(k)
-        return (self.A[s, :] @ p_vec + self.b[s]).reshape(-1)
+        return self.apply_at(p_vec, k)
 
     def dqdp_at(self, k: int) -> Array:
         s = self._row_slice(k)
@@ -303,7 +464,7 @@ class TrajectoryMap:
         eye = np.eye(q_dim, dtype=float)
         for order in range(max_derivative_order + 1):
             scale = float(parameter_scale) ** order
-            A = np.kron(scale * basis_all[order, :, :], eye)
+            A = BsplineTrajectoryOperator(scale * basis_all[order, :, :], q_dim=q_dim)
             b = np.zeros((steps * q_dim,), dtype=float)
             maps.append(cls(A=A, b=b, steps=steps, q_dim=q_dim))
         return maps
