@@ -49,6 +49,7 @@ from rei.core.expr.nodes import (
     HingeExpr,
     JointPowerExpr,
     JointPowerSquaredExpr,
+    StackExpr,
     SubExpr,
     TimeDiffExpr,
     TrajectoryVarDerivativesExpr,
@@ -198,6 +199,90 @@ def test_weighted_residual_vjp_uses_expression_operators_without_dense_jacobian(
     )
     operator_problem = NLSRuntimeLinearProblem(runtime=runtime, weighted=True)
     np.testing.assert_allclose(operator_problem.vjp(rhs), expected, rtol=0.0, atol=0.0)
+
+
+def test_residual_vjp_fuses_weighted_dynamics_terms_and_preserves_term_rhs() -> None:
+    """Cross-term dynamics VJPs are one request batch, not a summed RHS."""
+    p = Variable(name="p", x=np.array([0.1, -0.3], dtype=float))
+    pack = VariablePack([p])
+    owner = OwnerKey("total_joint", "robot")
+    values: dict[StateKey, np.ndarray] = {}
+    jacobians: dict[tuple[StateKey, StateKey], np.ndarray] = {}
+
+    def stack_for(field: str, matrices: list[np.ndarray]) -> StackExpr:
+        parts = []
+        for k, matrix in enumerate(matrices):
+            value_key = StateKey(k=k, owner=owner, dtype=DTYPE_DYNAMICS, field=field)
+            jac_key = StateKey(k=k, owner=owner, dtype=DTYPE_DYNAMICS, field=f"{field}_J_p")
+            values[value_key] = np.array([1.0 + k, -2.0 - k], dtype=float)
+            jacobians[value_key, jac_key] = matrix
+            parts.append(GetStateExpr(name=f"{field}_{k}", vars=[p], key_value=value_key, key_jacs=[jac_key]))
+        return StackExpr(name=f"{field}_stack", parts=parts)
+
+    torque = stack_for(
+        "torque",
+        [np.array([[1.0, 2.0], [3.0, -1.0]]), np.array([[0.5, -2.0], [4.0, 1.5]])],
+    )
+    torque_d1 = stack_for(
+        "torque_d1",
+        [np.array([[2.0, 0.0], [-1.0, 3.0]]), np.array([[1.5, -0.5], [2.5, 4.0]])],
+    )
+
+    class RecordingState:
+        def __init__(self) -> None:
+            self.calls: list[list[tuple[StateKey, StateKey, np.ndarray]]] = []
+
+        def update_if_needed(self, _pack, *, time=None, required=None) -> None:
+            del time, required
+
+        def get(self, key: StateKey) -> np.ndarray:
+            return values[key]
+
+        def jacobian_transpose_mul_many(self, requests):
+            request_list = list(requests)
+            self.calls.append(request_list)
+            return [jacobians[value_key, jac_key].T @ np.asarray(rhs, dtype=float) for value_key, jac_key, rhs in request_list]
+
+    state = RecordingState()
+    runtime = NLSRuntime(
+        problem=NLSProblem(
+            variables=pack,
+            terms=[
+                (torque, DiagonalWeightCost(np.array([4.0, 9.0, 16.0, 25.0]))),
+                (torque_d1, ScalarWeightCost(4.0)),
+            ],
+        ),
+        ctx=RuntimeContext(pack=pack, state=state),
+        required=[],
+    )
+    rhs = np.array([0.5, -1.0, 2.0, -3.0, 4.0, -2.0, 1.5, 3.0], dtype=float)
+
+    expected = np.zeros((2,), dtype=float)
+    weighted_rhs = [
+        np.array([2.0, 3.0, 4.0, 5.0]) * rhs[:4],
+        2.0 * rhs[4:],
+    ]
+    for matrices, local_rhs in zip(
+        (
+            [jacobians[part.key_value, part.key_jacs[0]] for part in torque.parts],
+            [jacobians[part.key_value, part.key_jacs[0]] for part in torque_d1.parts],
+        ),
+        weighted_rhs,
+        strict=True,
+    ):
+        for k, matrix in enumerate(matrices):
+            expected += matrix.T @ local_rhs[2 * k : 2 * k + 2]
+
+    np.testing.assert_allclose(runtime.weighted_residual_vjp(rhs), expected, rtol=0.0, atol=0.0)
+    assert len(state.calls) == 1
+    requests = state.calls[0]
+    assert [request[0].field for request in requests] == ["torque", "torque", "torque_d1", "torque_d1"]
+    np.testing.assert_allclose(
+        np.concatenate([np.asarray(request[2], dtype=float) for request in requests]),
+        np.concatenate(weighted_rhs),
+        rtol=0.0,
+        atol=0.0,
+    )
 
 
 def test_bspline_trajectory_map_uses_block_sparse_apply_and_vjp(monkeypatch) -> None:

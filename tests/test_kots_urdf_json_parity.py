@@ -459,3 +459,24 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
     assert grouped_probe.single_calls == 2
     assert multi_probe.many_calls == 1
     assert multi_probe.single_calls == 0
+
+    def residual_vjp(*, expose_many: bool) -> tuple[np.ndarray, _VjpProbe]:
+        probe = _VjpProbe(Kots.from_json_file(str(model_path), order=5), expose_many=expose_many)
+        compiled = compile_trajectory_ioc_problem(
+            dsl,
+            backend="kots",
+            model=probe,
+            data=probe.state_dict_,
+            kots_backend="rust",
+            batch_trajectory=True,
+        )
+        residual = compiled.runtime.eval()
+        rhs = np.linspace(-0.4, 0.6, residual.size)
+        return np.asarray(compiled.runtime.weighted_residual_vjp(rhs), dtype=float), probe
+
+    grouped_vjp, grouped_vjp_probe = residual_vjp(expose_many=False)
+    multi_vjp, multi_vjp_probe = residual_vjp(expose_many=True)
+    np.testing.assert_allclose(multi_vjp, grouped_vjp, rtol=0.0, atol=1e-10)
+    assert grouped_vjp_probe.single_calls == 2
+    assert multi_vjp_probe.many_calls == 1
+    assert multi_vjp_probe.single_calls == 0

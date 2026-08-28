@@ -213,7 +213,7 @@ class NLSRuntime:
                 f"Expected {(residual_size,)}, got {rhs_vec.shape}."
             )
 
-        out = np.zeros((int(self.pack.n_total),), dtype=float)
+        raw_rhs_by_index: dict[int, Array] = {}
         offset = 0
         for idx, expr, cost, term_name, r_raw, use_size in terms:
             rhs_use = rhs_vec[offset : offset + use_size]
@@ -232,6 +232,24 @@ class NLSRuntime:
                         "residual_vjp: cost residual_vjp output size mismatch for term "
                         f"[{idx}] {term_name!r}. Expected {r_raw.size}, got {rhs_raw.size}."
                     )
+            raw_rhs_by_index[idx] = rhs_raw
+
+        # Collect all compatible dynamics cotangents before evaluating any
+        # expression VJP.  This lets the Kots backend fuse torque, torque_d1,
+        # torque_d2, ... from the same outward trajectory state while retaining
+        # a distinct gradient contribution for every term and time step.
+        batched_gradients = self._batched_dynamics_residual_vjp(
+            terms=terms,
+            raw_rhs_by_index=raw_rhs_by_index,
+        )
+
+        out = np.zeros((int(self.pack.n_total),), dtype=float)
+        for idx, expr, _cost, term_name, _r_raw, _use_size in terms:
+            gradient = batched_gradients.get(idx)
+            if gradient is not None:
+                out += gradient
+                continue
+            rhs_raw = raw_rhs_by_index[idx]
             gradients = expr.vjp(self.ctx, rhs_raw)
             out += self._assemble_global_gradient(
                 term_name=term_name,
@@ -239,6 +257,106 @@ class NLSRuntime:
                 gradients=gradients,
             )
         return out
+
+    def _batched_dynamics_residual_vjp(
+        self,
+        *,
+        terms: Iterable[tuple[int, Any, Any, str, Array, int]],
+        raw_rhs_by_index: dict[int, Array],
+    ) -> dict[int, Array]:
+        """Fuse compatible stacked dynamics VJPs for ``residual_vjp``.
+
+        The state-cache operation is deliberately given every term/time
+        request at once.  Kots can then use one heterogeneous RoboKots VJP
+        call for fields such as torque and torque_d1.  Its input-preserving
+        result is scattered back to the originating residual term here;
+        combining cotangents across terms would be incorrect for IOC.
+        """
+        batch_vjp = getattr(self.state, "jacobian_transpose_mul_many", None) if self.state is not None else None
+        if not callable(batch_vjp):
+            return {}
+
+        candidates: list[dict[str, Any]] = []
+        reference_vars: list[Any] | None = None
+        for idx, expr, _cost, _term_name, _r_raw, _use_size in terms:
+            if not isinstance(expr, StackExpr) or len(expr.parts) < 2:
+                continue
+            if not all(isinstance(part, GetStateExpr) for part in expr.parts):
+                continue
+            parts = list(expr.parts)
+            if not all(getattr(part.key_value, "dtype", None) == "dynamics" for part in parts):
+                continue
+
+            vars_list = list(expr.vars)
+            if len(vars_list) == 0 or any(
+                len(part.vars) != len(vars_list)
+                or len(part.key_jacs) != len(vars_list)
+                or any(var is not ref for var, ref in zip(part.vars, vars_list, strict=True))
+                for part in parts
+            ):
+                continue
+            if reference_vars is None:
+                reference_vars = vars_list
+            elif len(reference_vars) != len(vars_list) or any(
+                var is not ref for var, ref in zip(vars_list, reference_vars, strict=True)
+            ):
+                continue
+            candidates.append({"idx": idx, "parts": parts, "vars": vars_list})
+
+        # A single StackExpr already has its own batch path.  This helper is
+        # specifically for heterogeneous terms, which require cross-term
+        # request collection to expose one RoboKots multi-VJP call.
+        if len(candidates) < 2 or reference_vars is None:
+            return {}
+
+        try:
+            requests_by_var: list[list[tuple[StateKey, StateKey, Array]]] = [[] for _ in reference_vars]
+            request_owners: list[list[tuple[dict[str, Any], int]]] = [[] for _ in reference_vars]
+            for candidate in candidates:
+                idx = int(candidate["idx"])
+                rhs_raw = np.asarray(raw_rhs_by_index[idx], dtype=float).reshape(-1)
+                offset = 0
+                rhs_parts: list[Array] = []
+                for part in candidate["parts"]:
+                    value = np.asarray(part.eval_value(self.ctx), dtype=float).reshape(-1)
+                    stop = offset + int(value.size)
+                    rhs_part = rhs_raw[offset:stop]
+                    if rhs_part.size != value.size:
+                        raise ValueError("batched residual VJP RHS partition size mismatch")
+                    rhs_parts.append(rhs_part)
+                    offset = stop
+                if offset != rhs_raw.size:
+                    raise ValueError("batched residual VJP RHS size does not match stacked state values")
+
+                candidate["grads"] = [np.zeros((var.dim(),), dtype=float) for var in reference_vars]
+                for var_index, _var in enumerate(reference_vars):
+                    for part, rhs_part in zip(candidate["parts"], rhs_parts, strict=True):
+                        requests_by_var[var_index].append((part.key_value, part.key_jacs[var_index], rhs_part))
+                        request_owners[var_index].append((candidate, var_index))
+
+            for var_index, requests in enumerate(requests_by_var):
+                contributions = [np.asarray(value, dtype=float) for value in batch_vjp(requests)]
+                if len(contributions) != len(requests):
+                    raise ValueError("batched residual VJP returned an unexpected number of contributions")
+                for contribution, (candidate, owner_var_index) in zip(
+                    contributions,
+                    request_owners[var_index],
+                    strict=True,
+                ):
+                    candidate["grads"][owner_var_index] += np.asarray(contribution, dtype=float).reshape(-1)
+
+            return {
+                int(candidate["idx"]): self._assemble_global_gradient(
+                    term_name=self._term_display_name(int(candidate["idx"])),
+                    expr_vars=candidate["vars"],
+                    gradients=candidate["grads"],
+                )
+                for candidate in candidates
+            }
+        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
+            # Preserve the established per-expression VJP implementation for
+            # unsupported state families and older backend contracts.
+            return {}
 
     def weighted_residual_vjp(
         self,
