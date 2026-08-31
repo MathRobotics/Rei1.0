@@ -236,15 +236,17 @@ class NLSRuntime:
 
         # Collect all compatible dynamics cotangents before evaluating any
         # expression VJP.  This lets the Kots backend fuse torque, torque_d1,
-        # torque_d2, ... from the same outward trajectory state while retaining
-        # a distinct gradient contribution for every term and time step.
-        batched_gradients = self._batched_dynamics_residual_vjp(
+        # torque_d2, ... from the same outward trajectory state.
+        batched_gradients, fused_gradient, fused_indices = self._batched_dynamics_residual_vjp(
             terms=terms,
             raw_rhs_by_index=raw_rhs_by_index,
         )
 
         out = np.zeros((int(self.pack.n_total),), dtype=float)
+        out += fused_gradient
         for idx, expr, _cost, term_name, _r_raw, _use_size in terms:
+            if idx in fused_indices:
+                continue
             gradient = batched_gradients.get(idx)
             if gradient is not None:
                 out += gradient
@@ -263,18 +265,20 @@ class NLSRuntime:
         *,
         terms: Iterable[tuple[int, Any, Any, str, Array, int]],
         raw_rhs_by_index: dict[int, Array],
-    ) -> dict[int, Array]:
+    ) -> tuple[dict[int, Array], Array, set[int]]:
         """Fuse compatible stacked dynamics VJPs for ``residual_vjp``.
 
         The state-cache operation is deliberately given every term/time
         request at once.  Kots can then use one heterogeneous RoboKots VJP
-        call for fields such as torque and torque_d1.  Its input-preserving
-        result is scattered back to the originating residual term here;
-        combining cotangents across terms would be incorrect for IOC.
+        call for fields such as torque and torque_d1.  RoboKots returns their
+        summed VJP, which is exactly the result needed by ``residual_vjp``.
+        The legacy per-request route remains for backends with that contract.
         """
         batch_vjp = getattr(self.state, "jacobian_transpose_mul_many", None) if self.state is not None else None
-        if not callable(batch_vjp):
-            return {}
+        fused_vjp = getattr(self.state, "jacobian_transpose_mul_many_fused", None) if self.state is not None else None
+        zero = np.zeros((int(self.pack.n_total),), dtype=float)
+        if not callable(batch_vjp) and not callable(fused_vjp):
+            return {}, zero, set()
 
         candidates: list[dict[str, Any]] = []
         reference_vars: list[Any] | None = None
@@ -307,7 +311,7 @@ class NLSRuntime:
         # specifically for heterogeneous terms, which require cross-term
         # request collection to expose one RoboKots multi-VJP call.
         if len(candidates) < 2 or reference_vars is None:
-            return {}
+            return {}, zero, set()
 
         try:
             requests_by_var: list[list[tuple[StateKey, StateKey, Array]]] = [[] for _ in reference_vars]
@@ -334,6 +338,24 @@ class NLSRuntime:
                         requests_by_var[var_index].append((part.key_value, part.key_jacs[var_index], rhs_part))
                         request_owners[var_index].append((candidate, var_index))
 
+            if callable(fused_vjp):
+                fused_grads = [
+                    np.asarray(fused_vjp(requests), dtype=float).reshape(-1)
+                    for requests in requests_by_var
+                ]
+                return (
+                    {},
+                    self._assemble_global_gradient(
+                        term_name="fused_dynamics_residual_vjp",
+                        expr_vars=reference_vars,
+                        gradients=fused_grads,
+                    ),
+                    {int(candidate["idx"]) for candidate in candidates},
+                )
+
+            if not callable(batch_vjp):
+                return {}, zero, set()
+
             for var_index, requests in enumerate(requests_by_var):
                 contributions = [np.asarray(value, dtype=float) for value in batch_vjp(requests)]
                 if len(contributions) != len(requests):
@@ -352,11 +374,11 @@ class NLSRuntime:
                     gradients=candidate["grads"],
                 )
                 for candidate in candidates
-            }
+            }, zero, set()
         except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
             # Preserve the established per-expression VJP implementation for
             # unsupported state families and older backend contracts.
-            return {}
+            return {}, zero, set()
 
     def weighted_residual_vjp(
         self,

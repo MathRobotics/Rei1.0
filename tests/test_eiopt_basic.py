@@ -231,6 +231,7 @@ def test_residual_vjp_fuses_weighted_dynamics_terms_and_preserves_term_rhs() -> 
     class RecordingState:
         def __init__(self) -> None:
             self.calls: list[list[tuple[StateKey, StateKey, np.ndarray]]] = []
+            self.fused_calls: list[list[tuple[StateKey, StateKey, np.ndarray]]] = []
 
         def update_if_needed(self, _pack, *, time=None, required=None) -> None:
             del time, required
@@ -242,6 +243,14 @@ def test_residual_vjp_fuses_weighted_dynamics_terms_and_preserves_term_rhs() -> 
             request_list = list(requests)
             self.calls.append(request_list)
             return [jacobians[value_key, jac_key].T @ np.asarray(rhs, dtype=float) for value_key, jac_key, rhs in request_list]
+
+        def jacobian_transpose_mul_many_fused(self, requests):
+            request_list = list(requests)
+            self.fused_calls.append(request_list)
+            return sum(
+                (jacobians[value_key, jac_key].T @ np.asarray(rhs, dtype=float) for value_key, jac_key, rhs in request_list),
+                np.zeros((2,), dtype=float),
+            )
 
     state = RecordingState()
     runtime = NLSRuntime(
@@ -274,8 +283,9 @@ def test_residual_vjp_fuses_weighted_dynamics_terms_and_preserves_term_rhs() -> 
             expected += matrix.T @ local_rhs[2 * k : 2 * k + 2]
 
     np.testing.assert_allclose(runtime.weighted_residual_vjp(rhs), expected, rtol=0.0, atol=0.0)
-    assert len(state.calls) == 1
-    requests = state.calls[0]
+    assert state.calls == []
+    assert len(state.fused_calls) == 1
+    requests = state.fused_calls[0]
     assert [request[0].field for request in requests] == ["torque", "torque", "torque_d1", "torque_d1"]
     np.testing.assert_allclose(
         np.concatenate([np.asarray(request[2], dtype=float) for request in requests]),

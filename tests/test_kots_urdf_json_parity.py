@@ -406,9 +406,9 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
             if not self.expose_many:
                 raise AttributeError("jacobian_transpose_mul_many")
             self.many_calls += 1
-            # Emulate RoboKots' input-preserving contract introduced for Rei:
-            # one batched VJP result for each (state_ref, rhs) input pair.
-            return [self._model.jacobian_transpose_mul(state_ref, rhs) for state_ref, rhs in requests]
+            # RoboKots fuses the input state references and returns their
+            # summed motion VJP from one reverse dynamics recurrence.
+            return self._model.jacobian_transpose_mul_many(requests)
 
     root = Path(__file__).resolve().parents[1]
     model_path = root / "examples" / "models" / "planar2.json"
@@ -416,7 +416,7 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
     dsl["variables"][0]["init"] = [0.1, -0.2, 0.3, 0.4]
     template = dsl["terms"][2]["expr"]
     dsl["terms"] = []
-    for field in ("torque", "torque_d1"):
+    for field in ("torque", "torque_d1", "torque_d2"):
         parts = []
         for k in (0, 1):
             part = copy.deepcopy(template)
@@ -456,9 +456,11 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
         atol=1e-10,
     )
     assert multi["stationarity"]["active_indices"] == grouped["stationarity"]["active_indices"]
-    assert grouped_probe.single_calls == 2
+    assert grouped_probe.single_calls == 3
     assert multi_probe.many_calls == 1
-    assert multi_probe.single_calls == 0
+    # IOC term-gradient columns must remain separate, so this path falls back
+    # to field-local VJPs after detecting RoboKots' fused-return contract.
+    assert multi_probe.single_calls == 3
 
     def residual_vjp(*, expose_many: bool) -> tuple[np.ndarray, _VjpProbe]:
         probe = _VjpProbe(Kots.from_json_file(str(model_path), order=5), expose_many=expose_many)
@@ -477,6 +479,6 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
     grouped_vjp, grouped_vjp_probe = residual_vjp(expose_many=False)
     multi_vjp, multi_vjp_probe = residual_vjp(expose_many=True)
     np.testing.assert_allclose(multi_vjp, grouped_vjp, rtol=0.0, atol=1e-10)
-    assert grouped_vjp_probe.single_calls == 2
+    assert grouped_vjp_probe.single_calls == 3
     assert multi_vjp_probe.many_calls == 1
     assert multi_vjp_probe.single_calls == 0

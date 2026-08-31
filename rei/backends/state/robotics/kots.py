@@ -1019,6 +1019,92 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             )
         return [np.asarray(value, dtype=float) for value in out]
 
+    def param_jacobian_transpose_mul_many_fused(
+        self,
+        x_all: Array,
+        requests: Sequence[tuple[StateKey, Array]],
+        *,
+        pack: Any = None,
+        time: Any = None,
+    ) -> Array:
+        """Return the summed parameter VJP for compatible dynamics requests.
+
+        RoboKots' ``jacobian_transpose_mul_many`` fuses its input pairs into
+        one reverse dynamics pass and returns their *sum*.  That contract is
+        ideal for a complete residual VJP, but cannot represent individual
+        IOC-term columns; those continue to use
+        :meth:`param_jacobian_transpose_mul_many` above.
+        """
+        if len(requests) < 2 or not self.batch_trajectory:
+            raise AttributeError("fused batched trajectory VJP requires at least two requests")
+        multi_vjp = getattr(self.model, "jacobian_transpose_mul_many", None)
+        if not callable(multi_vjp):
+            raise AttributeError("RoboKots model does not expose jacobian_transpose_mul_many")
+
+        p = self._extract_q(np.asarray(x_all, dtype=float).reshape(-1), pack=pack)
+        self._validate_trajectory_parameter_size(p)
+        steps = self._expected_steps(time=time)
+        prepared: list[tuple[StateKey, Array, Any, Any]] = []
+        for key, rhs in requests:
+            if not self._accept_required_key_for_traj(key, steps=steps):
+                raise ValueError(f"KotsTrajectoryStateBuilder: invalid fused batched VJP key: {key!r}")
+            if getattr(key, "dtype", None) != DTYPE_DYNAMICS:
+                raise AttributeError("fused RoboKots VJP currently supports dynamics states only")
+            route = self._route_for_key(key)
+            entry = None if route is None else self._dispatch.get(route)
+            if entry is None:
+                raise AttributeError("fused RoboKots VJP requires a dynamics state handler")
+            prepared.append((key, np.asarray(rhs, dtype=float), entry, self._state_ref(key, state_ref_field=entry.state_ref_field)))
+
+        groups: dict[tuple[Any, ...], list[tuple[StateKey, Array, Any]]] = {}
+        for key, rhs, entry, state_ref in prepared:
+            signature = (
+                entry.state_ref_field,
+                getattr(getattr(key, "owner", None), "owner_type", None),
+                getattr(getattr(key, "owner", None), "owner_name", None),
+                getattr(key, "frame", None),
+                rhs.shape[1:] if rhs.ndim >= 1 else (),
+            )
+            groups.setdefault(signature, []).append((key, rhs, state_ref))
+        # A residual may contain more than one term for the same state field
+        # and time.  RoboKots returns a sum, so combine those cotangents before
+        # constructing its one request per state field.
+        grouped_items: list[list[tuple[StateKey, Array, Any]]] = []
+        for group in groups.values():
+            by_k: dict[int, tuple[StateKey, Array, Any]] = {}
+            for key, rhs, state_ref in group:
+                k = int(key.k)
+                if k in by_k:
+                    prior_key, prior_rhs, prior_ref = by_k[k]
+                    by_k[k] = (prior_key, np.asarray(prior_rhs + rhs, dtype=float), prior_ref)
+                else:
+                    by_k[k] = (key, np.asarray(rhs, dtype=float).copy(), state_ref)
+            grouped_items.append([by_k[k] for k in sorted(by_k)])
+        group_ks = [[int(key.k) for key, _rhs, _state_ref in group] for group in grouped_items]
+        if not group_ks or any(ks != group_ks[0] for ks in group_ks[1:]):
+            raise AttributeError("fused RoboKots VJP requires identical time grids for all state fields")
+
+        motions = [self._compose_motion(p, k=k) for k in group_ks[0]]
+        self._update_batched_dynamics(np.stack(motions, axis=0), p=p, time=time)
+        backend_requests = []
+        for group in grouped_items:
+            first_ref = group[0][2]
+            total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(first_ref)
+            refs: Any = first_ref if total_joint_ref is None else list(total_joint_ref.refs)
+            rhs_batch = np.stack([rhs for _key, rhs, _state_ref in group], axis=0)
+            backend_requests.append((refs, rhs_batch))
+
+        motion_grads = np.asarray(multi_vjp(backend_requests), dtype=float)
+        if motion_grads.ndim < 2 or int(motion_grads.shape[0]) != len(motions):
+            raise ValueError("RoboKots fused multi-VJP output must have one leading result per time step.")
+        out = np.zeros((self.trajectory_map.p_dim,), dtype=float)
+        for k, motion_grad in zip(group_ks[0], motion_grads, strict=True):
+            mapped = self._trajectory_motion_gradient_transpose_at(k=k, motion_grad=np.asarray(motion_grad, dtype=float))
+            if mapped is None:
+                raise ValueError("RoboKots fused multi-VJP motion dimension does not match trajectory chain.")
+            out += mapped
+        return out
+
     def _chain_batched_param_vjp_group(
         self,
         *,

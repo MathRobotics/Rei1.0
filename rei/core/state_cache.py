@@ -262,3 +262,41 @@ class StateCache:
                     pass
 
         return [self.jacobian_transpose_mul(value_key, jac_key, rhs) for value_key, jac_key, rhs in items]
+
+    def jacobian_transpose_mul_many_fused(
+        self,
+        requests: Iterable[tuple[StateKey, StateKey, Array | Any]],
+    ) -> Array:
+        """Return one summed VJP when the backend exposes a fused API.
+
+        Unlike :meth:`jacobian_transpose_mul_many`, this deliberately has no
+        per-request fallback: callers use it only when the summed VJP is the
+        desired mathematical result.
+        """
+        items = list(requests)
+        if len(items) < 2:
+            raise AttributeError("fused state VJP requires at least two requests")
+        parsed = [str(jac_key.field).partition("_J_") for _value_key, jac_key, _rhs in items]
+        if not all(sep and base and jac_var for base, sep, jac_var in parsed):
+            raise AttributeError("fused state VJP requires Jacobian StateKeys")
+        builder = getattr(self.build_state, "__self__", None)
+        pack = self._pack_last
+        p_var = getattr(builder, "p_var", None)
+        fused_vjp = getattr(builder, "param_jacobian_transpose_mul_many_fused", None)
+        if (
+            builder is None
+            or pack is None
+            or not callable(fused_vjp)
+            or not isinstance(p_var, str)
+            or not all(jac_var == p_var for _base, _sep, jac_var in parsed)
+        ):
+            raise AttributeError("StateCache: backend does not expose a compatible fused parameter VJP.")
+        return np.asarray(
+            fused_vjp(
+                np.asarray(pack.get(), dtype=float).reshape(-1),
+                [(value_key, rhs) for value_key, _jac_key, rhs in items],
+                pack=pack,
+                time=self._time_last,
+            ),
+            dtype=float,
+        )
