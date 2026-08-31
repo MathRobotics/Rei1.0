@@ -1024,6 +1024,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         x_all: Array,
         requests: Sequence[tuple[StateKey, Array]],
         *,
+        squared_power_requests: Sequence[tuple[StateKey, Array]] = (),
         pack: Any = None,
         time: Any = None,
     ) -> Array:
@@ -1035,11 +1036,14 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         IOC-term columns; those continue to use
         :meth:`param_jacobian_transpose_mul_many` above.
         """
-        if len(requests) < 2 or not self.batch_trajectory:
+        if len(requests) + len(squared_power_requests) < 2 or not self.batch_trajectory:
             raise AttributeError("fused batched trajectory VJP requires at least two requests")
         multi_vjp = getattr(self.model, "jacobian_transpose_mul_many", None)
         if not callable(multi_vjp):
             raise AttributeError("RoboKots model does not expose jacobian_transpose_mul_many")
+        power_vjp_terms = getattr(self.model, "squared_power_torque_vjp_terms", None)
+        if squared_power_requests and not callable(power_vjp_terms):
+            raise AttributeError("RoboKots model does not expose squared_power_torque_vjp_terms")
 
         p = self._extract_q(np.asarray(x_all, dtype=float).reshape(-1), pack=pack)
         self._validate_trajectory_parameter_size(p)
@@ -1055,6 +1059,27 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             if entry is None:
                 raise AttributeError("fused RoboKots VJP requires a dynamics state handler")
             prepared.append((key, np.asarray(rhs, dtype=float), entry, self._state_ref(key, state_ref_field=entry.state_ref_field)))
+
+        prepared_power: list[tuple[StateKey, Array, Any, Any]] = []
+        for key, rhs in squared_power_requests:
+            if not self._accept_required_key_for_traj(key, steps=steps):
+                raise ValueError(f"KotsTrajectoryStateBuilder: invalid squared-power torque key: {key!r}")
+            if (
+                getattr(key, "dtype", None) != DTYPE_DYNAMICS
+                or canonical_field_name(str(getattr(key, "field", ""))) != "torque"
+                or getattr(getattr(key, "owner", None), "owner_type", None) != self.dynamics_owner_type
+            ):
+                raise AttributeError("squared-power fused VJP requires a total_joint torque state")
+            rhs_vec = np.asarray(rhs, dtype=float).reshape(-1)
+            if rhs_vec.size != 1:
+                raise ValueError(f"squared-power cotangent must be scalar at each time step, got {rhs_vec.shape}")
+            route = self._route_for_key(key)
+            entry = None if route is None else self._dispatch.get(route)
+            if entry is None:
+                raise AttributeError("squared-power fused VJP requires a torque state handler")
+            prepared_power.append(
+                (key, rhs_vec, entry, self._state_ref(key, state_ref_field=entry.state_ref_field))
+            )
 
         groups: dict[tuple[Any, ...], list[tuple[StateKey, Array, Any]]] = {}
         for key, rhs, entry, state_ref in prepared:
@@ -1081,6 +1106,30 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                     by_k[k] = (key, np.asarray(rhs, dtype=float).copy(), state_ref)
             grouped_items.append([by_k[k] for k in sorted(by_k)])
         group_ks = [[int(key.k) for key, _rhs, _state_ref in group] for group in grouped_items]
+
+        power_by_k: dict[int, tuple[StateKey, Array, Any]] = {}
+        power_signature: tuple[Any, ...] | None = None
+        for key, rhs, entry, state_ref in prepared_power:
+            signature = (
+                entry.state_ref_field,
+                getattr(getattr(key, "owner", None), "owner_type", None),
+                getattr(getattr(key, "owner", None), "owner_name", None),
+                getattr(key, "frame", None),
+            )
+            if power_signature is None:
+                power_signature = signature
+            elif signature != power_signature:
+                raise AttributeError("squared-power fused VJP requires one total_joint torque state family")
+            k = int(key.k)
+            if k in power_by_k:
+                prior_key, prior_rhs, prior_ref = power_by_k[k]
+                power_by_k[k] = (prior_key, np.asarray(prior_rhs + rhs, dtype=float), prior_ref)
+            else:
+                power_by_k[k] = (key, rhs.copy(), state_ref)
+        power_group = [power_by_k[k] for k in sorted(power_by_k)]
+        if power_group:
+            group_ks.append([int(key.k) for key, _rhs, _state_ref in power_group])
+
         if not group_ks or any(ks != group_ks[0] for ks in group_ks[1:]):
             raise AttributeError("fused RoboKots VJP requires identical time grids for all state fields")
 
@@ -1094,9 +1143,37 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             rhs_batch = np.stack([rhs for _key, rhs, _state_ref in group], axis=0)
             backend_requests.append((refs, rhs_batch))
 
+        direct_power_motion_vjp: Array | None = None
+        if power_group:
+            # The helper intentionally accepts RoboKots' canonical aggregate
+            # StateType, not Rei's expanded per-joint compatibility wrapper.
+            power_torque_ref = self.adapter.make_state_type(
+                owner_type="total_joint",
+                owner_name="total_joint",
+                state_field="torque",
+                frame_name=None,
+            )
+            power_rhs_batch = np.stack([rhs for _key, rhs, _state_ref in power_group], axis=0)
+            power_terms = power_vjp_terms(power_torque_ref, power_rhs_batch)
+            backend_requests.append(power_terms["torque_request"])
+            direct_power_motion_vjp = np.asarray(power_terms["motion_vjp_order2"], dtype=float)
+
         motion_grads = np.asarray(multi_vjp(backend_requests), dtype=float)
         if motion_grads.ndim < 2 or int(motion_grads.shape[0]) != len(motions):
             raise ValueError("RoboKots fused multi-VJP output must have one leading result per time step.")
+        if direct_power_motion_vjp is not None:
+            dof = self._model_dof()
+            if dof <= 0 or motion_grads.shape[-1] % dof != 0:
+                raise ValueError("RoboKots fused multi-VJP motion dimension is not divisible by model DoF.")
+            used_order = int(motion_grads.shape[-1] // dof)
+            expected_direct = (len(motions), dof * 2)
+            if direct_power_motion_vjp.shape != expected_direct or used_order < 2:
+                raise ValueError(
+                    "RoboKots squared-power direct motion VJP shape mismatch. "
+                    f"Expected {expected_direct}, got {direct_power_motion_vjp.shape}."
+                )
+            motion_blocks = motion_grads.reshape(len(motions), dof, used_order)
+            motion_blocks[:, :, :2] += direct_power_motion_vjp.reshape(len(motions), dof, 2)
         out = np.zeros((self.trajectory_map.p_dim,), dtype=float)
         for k, motion_grad in zip(group_ks[0], motion_grads, strict=True):
             mapped = self._trajectory_motion_gradient_transpose_at(k=k, motion_grad=np.asarray(motion_grad, dtype=float))

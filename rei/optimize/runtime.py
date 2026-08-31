@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..core.expr.types import RuntimeContext, VariablePack
-from ..core.expr.nodes import GetStateExpr, StackExpr
+from ..core.expr.nodes import GetStateExpr, JointPowerSquaredExpr, StackExpr, TrajectoryVarExpr
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import canonical_dtype_name, canonical_field_name
 from ..problem import NLSProblem
@@ -35,6 +35,31 @@ def _dedupe_required(keys: Iterable[StateKey]) -> list[StateKey]:
         out.append(k)
         seen.add(k)
     return out
+
+
+def _same_trajectory_map(left: Any, right: Any) -> bool:
+    """Compare trajectory maps without densifying B-spline operators."""
+    if left is right:
+        return True
+    if any(not hasattr(value, attr) for value in (left, right) for attr in ("A", "b", "steps", "q_dim", "p_dim")):
+        return False
+    if (
+        int(left.steps) != int(right.steps)
+        or int(left.q_dim) != int(right.q_dim)
+        or int(left.p_dim) != int(right.p_dim)
+        or not np.array_equal(np.asarray(left.b), np.asarray(right.b))
+    ):
+        return False
+    left_basis = getattr(left.A, "basis", None)
+    right_basis = getattr(right.A, "basis", None)
+    if left_basis is not None or right_basis is not None:
+        return (
+            left_basis is not None
+            and right_basis is not None
+            and int(getattr(left.A, "q_dim", -1)) == int(getattr(right.A, "q_dim", -2))
+            and np.array_equal(np.asarray(left_basis), np.asarray(right_basis))
+        )
+    return np.array_equal(np.asarray(left.A), np.asarray(right.A))
 
 
 def collect_required(problem: NLSProblem) -> list[StateKey]:
@@ -281,9 +306,49 @@ class NLSRuntime:
             return {}, zero, set()
 
         candidates: list[dict[str, Any]] = []
+        power_candidates: list[dict[str, Any]] = []
         reference_vars: list[Any] | None = None
+        state_builder = getattr(getattr(self.state, "build_state", None), "__self__", None)
+        derivative_maps = getattr(state_builder, "trajectory_derivative_maps", None)
+        expected_qdot_map = derivative_maps.get(1) if isinstance(derivative_maps, dict) else None
         for idx, expr, _cost, _term_name, _r_raw, _use_size in terms:
             if not isinstance(expr, StackExpr) or len(expr.parts) < 2:
+                continue
+            if all(isinstance(part, JointPowerSquaredExpr) for part in expr.parts):
+                parts = list(expr.parts)
+                vars_list = list(expr.vars)
+                compatible_power = expected_qdot_map is not None and len(vars_list) > 0
+                for part in parts:
+                    torque = part.torque
+                    velocity = part.velocity
+                    if not isinstance(torque, GetStateExpr) or not isinstance(velocity, TrajectoryVarExpr):
+                        compatible_power = False
+                        break
+                    key = torque.key_value
+                    if (
+                        getattr(key, "dtype", None) != "dynamics"
+                        or canonical_field_name(str(getattr(key, "field", ""))) != "torque"
+                        or getattr(getattr(key, "owner", None), "owner_type", None) != "total_joint"
+                        or velocity.k is None
+                        or int(velocity.k) != int(key.k)
+                        or not _same_trajectory_map(velocity.trajectory, expected_qdot_map)
+                        or len(torque.vars) != len(vars_list)
+                        or len(torque.key_jacs) != len(vars_list)
+                        or len(velocity.vars) != len(vars_list)
+                        or any(var is not ref for var, ref in zip(torque.vars, vars_list, strict=True))
+                        or any(var is not ref for var, ref in zip(velocity.vars, vars_list, strict=True))
+                    ):
+                        compatible_power = False
+                        break
+                if compatible_power:
+                    if reference_vars is None:
+                        reference_vars = vars_list
+                    elif len(reference_vars) != len(vars_list) or any(
+                        var is not ref for var, ref in zip(vars_list, reference_vars, strict=True)
+                    ):
+                        compatible_power = False
+                if compatible_power:
+                    power_candidates.append({"idx": idx, "parts": parts, "vars": vars_list})
                 continue
             if not all(isinstance(part, GetStateExpr) for part in expr.parts):
                 continue
@@ -310,11 +375,14 @@ class NLSRuntime:
         # A single StackExpr already has its own batch path.  This helper is
         # specifically for heterogeneous terms, which require cross-term
         # request collection to expose one RoboKots multi-VJP call.
-        if len(candidates) < 2 or reference_vars is None:
+        if (len(candidates) < 2 and len(power_candidates) == 0) or reference_vars is None:
             return {}, zero, set()
 
         try:
             requests_by_var: list[list[tuple[StateKey, StateKey, Array]]] = [[] for _ in reference_vars]
+            power_requests_by_var: list[list[tuple[StateKey, StateKey, Array]]] = [
+                [] for _ in reference_vars
+            ]
             request_owners: list[list[tuple[dict[str, Any], int]]] = [[] for _ in reference_vars]
             for candidate in candidates:
                 idx = int(candidate["idx"])
@@ -338,11 +406,37 @@ class NLSRuntime:
                         requests_by_var[var_index].append((part.key_value, part.key_jacs[var_index], rhs_part))
                         request_owners[var_index].append((candidate, var_index))
 
+            for candidate in power_candidates:
+                idx = int(candidate["idx"])
+                rhs_raw = np.asarray(raw_rhs_by_index[idx], dtype=float).reshape(-1)
+                if rhs_raw.size != len(candidate["parts"]):
+                    raise ValueError("squared-power residual VJP RHS size does not match its time steps")
+                for var_index, _var in enumerate(reference_vars):
+                    for part, power_rhs in zip(candidate["parts"], rhs_raw, strict=True):
+                        torque = part.torque
+                        power_requests_by_var[var_index].append(
+                            (
+                                torque.key_value,
+                                torque.key_jacs[var_index],
+                                np.asarray([power_rhs], dtype=float),
+                            )
+                        )
+
             if callable(fused_vjp):
-                fused_grads = [
-                    np.asarray(fused_vjp(requests), dtype=float).reshape(-1)
-                    for requests in requests_by_var
-                ]
+                fused_grads = []
+                for requests, power_requests in zip(
+                    requests_by_var,
+                    power_requests_by_var,
+                    strict=True,
+                ):
+                    if power_requests:
+                        value = fused_vjp(
+                            requests,
+                            squared_power_requests=power_requests,
+                        )
+                    else:
+                        value = fused_vjp(requests)
+                    fused_grads.append(np.asarray(value, dtype=float).reshape(-1))
                 return (
                     {},
                     self._assemble_global_gradient(
@@ -350,7 +444,10 @@ class NLSRuntime:
                         expr_vars=reference_vars,
                         gradients=fused_grads,
                     ),
-                    {int(candidate["idx"]) for candidate in candidates},
+                    {
+                        int(candidate["idx"])
+                        for candidate in [*candidates, *power_candidates]
+                    },
                 )
 
             if not callable(batch_vjp):

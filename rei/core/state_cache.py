@@ -266,6 +266,8 @@ class StateCache:
     def jacobian_transpose_mul_many_fused(
         self,
         requests: Iterable[tuple[StateKey, StateKey, Array | Any]],
+        *,
+        squared_power_requests: Iterable[tuple[StateKey, StateKey, Array | Any]] = (),
     ) -> Array:
         """Return one summed VJP when the backend exposes a fused API.
 
@@ -274,9 +276,13 @@ class StateCache:
         desired mathematical result.
         """
         items = list(requests)
-        if len(items) < 2:
+        power_items = list(squared_power_requests)
+        if len(items) + len(power_items) < 2:
             raise AttributeError("fused state VJP requires at least two requests")
-        parsed = [str(jac_key.field).partition("_J_") for _value_key, jac_key, _rhs in items]
+        parsed = [
+            str(jac_key.field).partition("_J_")
+            for _value_key, jac_key, _rhs in [*items, *power_items]
+        ]
         if not all(sep and base and jac_var for base, sep, jac_var in parsed):
             raise AttributeError("fused state VJP requires Jacobian StateKeys")
         builder = getattr(self.build_state, "__self__", None)
@@ -295,6 +301,9 @@ class StateCache:
             fused_vjp(
                 np.asarray(pack.get(), dtype=float).reshape(-1),
                 [(value_key, rhs) for value_key, _jac_key, rhs in items],
+                squared_power_requests=[
+                    (value_key, rhs) for value_key, _jac_key, rhs in power_items
+                ],
                 pack=pack,
                 time=self._time_last,
             ),

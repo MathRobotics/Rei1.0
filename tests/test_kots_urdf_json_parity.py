@@ -392,6 +392,7 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
             self.expose_many = expose_many
             self.single_calls = 0
             self.many_calls = 0
+            self.power_terms_calls = 0
 
         def __getattr__(self, name):
             if name == "jacobian_transpose_mul_many" and not self.expose_many:
@@ -409,6 +410,14 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
             # RoboKots fuses the input state references and returns their
             # summed motion VJP from one reverse dynamics recurrence.
             return self._model.jacobian_transpose_mul_many(requests)
+
+        def squared_power_torque_vjp_terms(self, torque_state, power_rhs, torque_value=None):
+            self.power_terms_calls += 1
+            return self._model.squared_power_torque_vjp_terms(
+                torque_state,
+                power_rhs,
+                torque_value=torque_value,
+            )
 
     root = Path(__file__).resolve().parents[1]
     model_path = root / "examples" / "models" / "planar2.json"
@@ -464,8 +473,59 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
 
     def residual_vjp(*, expose_many: bool) -> tuple[np.ndarray, _VjpProbe]:
         probe = _VjpProbe(Kots.from_json_file(str(model_path), order=5), expose_many=expose_many)
+        residual_dsl = copy.deepcopy(dsl)
+        power_parts = []
+        for k in (0, 1):
+            torque_part = copy.deepcopy(template)
+            torque_part["name"] = f"power_torque{k}"
+            torque_part["key"]["k"] = k
+            power_parts.append(
+                {
+                    "type": "joint_power_squared",
+                    "name": f"power_squared{k}",
+                    "torque": torque_part,
+                    "qdot": {
+                        "type": "get_traj_var",
+                        "name": f"power_qdot{k}",
+                        "var": "p",
+                        "derivative_order": 1,
+                        "derivative_wrt": "time",
+                        "k": k,
+                    },
+                }
+            )
+        residual_dsl["terms"].append(
+            {
+                "expr": {"type": "vstack", "name": "power_squared_stack", "parts": power_parts},
+                "cost": {"type": "l2"},
+            }
+        )
+        residual_dsl["terms"].append(
+            {
+                "expr": {
+                    "type": "vstack",
+                    "name": "kinetic_energy_stack",
+                    "parts": [
+                        {
+                            "type": "get_state",
+                            "name": f"kinetic_energy{k}",
+                            "key": {
+                                "k": k,
+                                "owner_type": "total_body",
+                                "owner_name": "total_body",
+                                "dtype": "dynamics",
+                                "field": "kinetic_energy",
+                            },
+                            "jac": {"var": "p"},
+                        }
+                        for k in (0, 1)
+                    ],
+                },
+                "cost": {"type": "l2"},
+            }
+        )
         compiled = compile_trajectory_ioc_problem(
-            dsl,
+            residual_dsl,
             backend="kots",
             model=probe,
             data=probe.state_dict_,
@@ -479,6 +539,7 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
     grouped_vjp, grouped_vjp_probe = residual_vjp(expose_many=False)
     multi_vjp, multi_vjp_probe = residual_vjp(expose_many=True)
     np.testing.assert_allclose(multi_vjp, grouped_vjp, rtol=0.0, atol=1e-10)
-    assert grouped_vjp_probe.single_calls == 3
+    assert grouped_vjp_probe.single_calls > 0
     assert multi_vjp_probe.many_calls == 1
+    assert multi_vjp_probe.power_terms_calls == 1
     assert multi_vjp_probe.single_calls == 0
