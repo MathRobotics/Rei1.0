@@ -495,6 +495,8 @@ def build_get_traj_var(ctx, dsl):
             )
 
     resolve_traj = getattr(ctx, "resolve_trajectory_map", None)
+    resolve_traj_derivative = getattr(ctx, "resolve_trajectory_map_with_derivative", None)
+    resolve_traj_derivatives = getattr(ctx, "resolve_trajectory_maps_with_derivatives", None)
 
     if max_deriv_order is not None:
         if deriv_order != 0:
@@ -502,7 +504,14 @@ def build_get_traj_var(ctx, dsl):
                 "get_traj_var: derivative_order and max_derivative_order cannot be used together. "
                 "Use either derivative_order=<r> or max_derivative_order=<N>."
             )
-        if max_deriv_order == 0 and callable(resolve_traj):
+        if callable(resolve_traj_derivatives):
+            trajectories = resolve_traj_derivatives(
+                traj_dsl,
+                max_derivative_order=max_deriv_order,
+                derivative_wrt=deriv_wrt,
+                default_q_dim=default_q_dim,
+            )
+        elif max_deriv_order == 0 and callable(resolve_traj):
             trajectories = [resolve_traj(traj_dsl, default_q_dim=default_q_dim)]
         else:
             trajectories = build_trajectory_maps_with_derivatives(
@@ -526,6 +535,13 @@ def build_get_traj_var(ctx, dsl):
             traj = build_trajectory_map(
                 traj_dsl,
                 default_steps=default_steps_from_time(getattr(ctx, "time", None)),
+                default_q_dim=default_q_dim,
+            )
+        elif callable(resolve_traj_derivative):
+            traj = resolve_traj_derivative(
+                traj_dsl,
+                derivative_order=deriv_order,
+                derivative_wrt=deriv_wrt,
                 default_q_dim=default_q_dim,
             )
         else:
