@@ -16,3 +16,4 @@ uv.lock
 *.stl
 *.dae
 *.obj
+._*
