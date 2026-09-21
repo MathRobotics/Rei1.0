@@ -17,6 +17,8 @@ Array = np.ndarray
 
 def _project_to_simplex(v: Array) -> Array:
     x = np.asarray(v, dtype=float).reshape(-1)
+    if not np.all(np.isfinite(x)):
+        raise ValueError("simplex projection: point must contain only finite values.")
     n = int(x.size)
     if n == 0:
         return np.zeros((0,), dtype=float)
@@ -49,6 +51,8 @@ def _linearize_checked(
     r_raw, J_raw = problem.linearize(required=required)
     r = np.asarray(r_raw, dtype=float).reshape(-1)
     J = np.asarray(J_raw, dtype=float)
+    if not np.all(np.isfinite(r)) or not np.all(np.isfinite(J)):
+        raise ValueError("solve_projected_linearized_min_norm: residual and jacobian must be finite.")
     if J.ndim != 2:
         raise ValueError(
             f"solve_projected_linearized_min_norm: jacobian must be 2D, got shape {J.shape}."
@@ -75,6 +79,8 @@ class SimplexMinNormProblem:
 
     def __post_init__(self) -> None:
         A_mat = np.asarray(self.A, dtype=float)
+        if not np.all(np.isfinite(A_mat)):
+            raise ValueError("SimplexMinNormProblem: A must contain only finite values.")
         if A_mat.ndim != 2:
             raise ValueError(f"SimplexMinNormProblem: A must be 2D, got shape {A_mat.shape}.")
         _m, n = A_mat.shape
@@ -272,48 +278,50 @@ def _solve_simplex_min_norm_qr_nullspace(
     converged = False
     iterations = 0
 
-    for it in range(min(max_iters_i, n_i + 1)):
+    for it in range(max_iters_i):
         iterations = it + 1
         k = int(active.size)
-        if k <= 0:
-            break
-        if k == 1:
-            w = np.zeros((n_i,), dtype=float)
-            w[int(active[0])] = 1.0
-            converged = True
-            break
-
         A_act = np.asarray(A_mat[:, active], dtype=float)
         ones = np.ones((k,), dtype=float)
-        # w = w0 + N z, where N spans null(ones^T) and w0 satisfies ones^T w0 = 1.
+        # Minimize on the current face, preserving the sum-to-one constraint.
         Q, _R = np.linalg.qr(ones.reshape(-1, 1), mode="complete")
         N = np.asarray(Q[:, 1:], dtype=float)
         w0 = ones / float(k)
-
         B = A_act @ N
         b = A_act @ w0
-        if B.shape[1] == 0:
-            z = np.zeros((0,), dtype=float)
-        else:
-            z, *_ = np.linalg.lstsq(B, -b, rcond=None)
-            z = np.asarray(z, dtype=float).reshape(-1)
+        z, *_ = np.linalg.lstsq(B, -b, rcond=None)
         w_act = np.asarray(w0 + N @ z, dtype=float).reshape(-1)
 
-        i_min = int(np.argmin(w_act))
-        if float(w_act[i_min]) >= -tol_f:
-            w_act = np.maximum(w_act, 0.0)
-            s = float(w_act.sum())
-            if s <= 0.0:
-                w_act = ones / float(k)
-            else:
-                w_act = w_act / s
-            w = np.zeros((n_i,), dtype=float)
-            w[active] = w_act
-            converged = True
-            break
+        negative = np.flatnonzero(w_act < -tol_f)
+        if negative.size:
+            # Move only as far as the first blocking bound.  Dropping a
+            # negative coefficient outright can discard a needed variable.
+            current = w[active]
+            ratios = current[negative] / (current[negative] - w_act[negative])
+            blocker = int(negative[np.argmin(ratios)])
+            alpha = float(np.min(ratios))
+            w[active] = np.maximum(current + alpha * (w_act - current), 0.0)
+            w[int(active[blocker])] = 0.0
+            w /= w.sum()
+            active = np.delete(active, blocker)
+            continue
 
-        drop = int(active[i_min])
-        active = active[active != drop]
+        w.fill(0.0)
+        w[active] = np.maximum(w_act, 0.0)
+        w /= w.sum()
+        gradient = A_mat.T @ (A_mat @ w)
+        multiplier = float(w @ gradient)
+        reduced_gradient = gradient - multiplier
+        inactive = np.setdiff1d(np.arange(n_i), active)
+        if inactive.size:
+            entering = int(inactive[np.argmin(reduced_gradient[inactive])])
+            if reduced_gradient[entering] < -tol_f:
+                active = np.sort(np.append(active, entering))
+                continue
+        # A feasible face minimizer is optimal only when excluded variables
+        # cannot improve the objective either.
+        converged = bool(np.max(np.abs(reduced_gradient[active])) <= tol_f)
+        break
 
     w = _project_to_simplex(w)
     r = A_mat @ w
@@ -344,6 +352,8 @@ def solve_simplex_min_norm(
 
     prof = ensure_profiler(profiler)
     A_mat = np.asarray(A, dtype=float)
+    if not np.all(np.isfinite(A_mat)):
+        raise ValueError("solve_simplex_min_norm: A must contain only finite values.")
     if A_mat.ndim != 2:
         raise ValueError(f"solve_simplex_min_norm: A must be 2D, got shape {A_mat.shape}.")
     _m, n = A_mat.shape

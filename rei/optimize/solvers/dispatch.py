@@ -32,6 +32,7 @@ _SOLVER_REI_OPTION_KEYS: dict[str, frozenset[str]] = {
             "max_iters",
             "tol_r",
             "tol_dx",
+            "tol_grad",
             "damping",
             "line_search",
             "ls_beta",
@@ -1001,7 +1002,7 @@ def solve(
     `x0` may be passed directly or as `options["x0"]` (but not both).
 
     gauss_newton:
-      max_iters, tol_r, tol_dx, damping, line_search, ls_beta, ls_min_step, ls_max_iters
+      max_iters, tol_r, tol_dx, tol_grad, damping, line_search, ls_beta, ls_min_step, ls_max_iters
 
     scipy_minimize:
       method, max_iters, tol, bounds, backend_options
@@ -1051,6 +1052,7 @@ def solve(
             max_iters=int(opts.get("max_iters", 200)),
             tol_r=float(opts.get("tol_r", 1e-10)),
             tol_dx=float(opts.get("tol_dx", 1e-12)),
+            tol_grad=float(opts.get("tol_grad", 1e-10)),
             damping=float(opts.get("damping", 1e-8)),
             line_search=bool(opts.get("line_search", True)),
             ls_beta=float(opts.get("ls_beta", 0.5)),

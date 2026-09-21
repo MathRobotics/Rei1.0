@@ -52,6 +52,21 @@ class VariablePack:
     def get(self) -> Array:
         return pack(self.vars)
 
+    def set(self, x: Array) -> None:
+        """Assign an absolute point without cancellation through a delta."""
+        x = np.asarray(x, dtype=float).reshape(-1)
+        if x.size != self.n_total:
+            raise ValueError(f"set: expected {self.n_total}, got {x.size}")
+        if np.array_equal(self.get(), x):
+            return
+        values = [
+            x[s:e].copy()
+            for s, e in (self.slices[v.name] for v in self.vars)
+        ]
+        for var, value in zip(self.vars, values, strict=True):
+            var.x = value
+        self.revision += 1
+
     def apply_dx(self, dx: Array) -> None:
         dx = np.asarray(dx, dtype=float).reshape(-1)
         if dx.size != self.n_total:

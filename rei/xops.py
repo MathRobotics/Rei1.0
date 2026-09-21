@@ -18,10 +18,7 @@ def as_vec(x: Array | Any, *, expected_size: int, name: str) -> Array:
 
 def set_pack_x(pack: VariablePack, x: Array | Any, *, name: str = "x") -> None:
     x_new = as_vec(x, expected_size=int(pack.n_total), name=name)
-    x_cur = np.asarray(pack.get(), dtype=float).reshape(-1)
-    if np.array_equal(x_cur, x_new):
-        return
-    pack.apply_dx(x_new - x_cur)
+    pack.set(x_new)
 
 
 def set_runtime_x(runtime: Any, x: Array | Any, *, name: str = "x") -> None:

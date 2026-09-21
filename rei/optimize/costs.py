@@ -41,9 +41,9 @@ class DiagonalWeightCost:
 
     def set_weight(self, w: Array) -> None:
         w_arr = np.asarray(w, dtype=float).reshape(-1)
-        if np.any(w_arr < 0):
-            raise ValueError("DiagonalWeightCost: w must be >= 0.")
-        self.w = w_arr
+        if not np.all(np.isfinite(w_arr)) or np.any(w_arr < 0):
+            raise ValueError("DiagonalWeightCost: w must be finite and >= 0.")
+        self.w = w_arr.copy()
 
     def apply(self, r: Array, blocks: Sequence[Array]) -> Tuple[Array, Sequence[Array]]:
         r = np.asarray(r, dtype=float).reshape(-1)
@@ -77,8 +77,8 @@ class ScalarWeightCost:
 
     def set_weight(self, w: float) -> None:
         w_f = float(w)
-        if w_f < 0:
-            raise ValueError("ScalarWeightCost: w must be >= 0.")
+        if not np.isfinite(w_f) or w_f < 0:
+            raise ValueError("ScalarWeightCost: w must be finite and >= 0.")
         self.w = w_f
 
     def apply(self, r: Array, blocks: Sequence[Array]) -> Tuple[Array, Sequence[Array]]:
@@ -95,28 +95,47 @@ class ScalarWeightCost:
 
 @dataclass
 class HuberCost:
+    """Radial Huber loss represented by an exactly differentiated residual.
+
+    Its squared norm is n**2 for n <= delta and 2*delta*n-delta**2
+    otherwise, where n is the norm of the entire term's raw residual.
+    """
     delta: float
     name: str = "huber"
 
     def __post_init__(self) -> None:
-        if self.delta <= 0:
+        if not np.isfinite(self.delta) or self.delta <= 0:
             raise ValueError("HuberCost: delta must be > 0.")
 
     def apply(self, r: Array, blocks: Sequence[Array]) -> Tuple[Array, Sequence[Array]]:
         r = np.asarray(r, dtype=float).reshape(-1)
         sw = self._scale(r)
         r2 = sw * r
-        blocks2 = [sw * np.asarray(B, dtype=float) for B in blocks]
+        blocks2 = [self.residual_vjp(r, B) for B in blocks]
         return r2, blocks2
 
     def _scale(self, r: Array) -> float:
-        nr = float(np.linalg.norm(np.asarray(r, dtype=float).reshape(-1))) + 1e-12
-        return float(np.sqrt(1.0 if nr <= self.delta else (self.delta / nr)))
+        nr = float(np.linalg.norm(np.asarray(r, dtype=float).reshape(-1)))
+        if nr <= self.delta:
+            return 1.0
+        ratio = self.delta / nr
+        return float(np.sqrt(ratio * (2.0 - ratio)))
 
     def residual_vjp(self, r: Array, rhs: Array) -> Array:
-        # Match apply(): this is the IRLS/Gauss-Newton weighting used by Rei,
-        # not the derivative of the scale itself.
-        return self._scale(r) * np.asarray(rhs, dtype=float)
+        r = np.asarray(r, dtype=float).reshape(-1)
+        R = np.asarray(rhs, dtype=float)
+        if R.ndim not in (1, 2) or R.shape[0] != r.size:
+            raise ValueError("HuberCost.residual_vjp: rhs must match the raw residual rows.")
+        nr = float(np.linalg.norm(r))
+        if nr <= self.delta:
+            return R.copy()
+        scale = self._scale(r)
+        unit = r / nr
+        radial = self.delta / (nr * scale) - scale
+        projected = unit * (unit @ R) if R.ndim == 1 else unit[:, None] * (unit @ R)
+        # The residual transformation has a symmetric Jacobian, so this
+        # also applies its derivative to forward Jacobian blocks in apply().
+        return scale * R + radial * projected
 
 __all__ = [
     "Array",

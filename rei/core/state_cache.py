@@ -23,7 +23,7 @@ def _format_missing_state_keys(keys: Iterable["StateKey"], *, max_groups: int = 
             )
         ].add(int(getattr(key, "k", 0)))
 
-    items = sorted(grouped.items(), key=lambda item: item[0])
+    items = sorted(grouped.items(), key=lambda item: tuple("" if v is None else v for v in item[0]))
     lines: list[str] = []
     for idx, (sig, ks) in enumerate(items):
         if idx >= int(max_groups):
@@ -79,6 +79,7 @@ class StateCache:
     """
 
     build_state: Callable[..., dict]
+    revision: int = field(default=0, init=False)
 
     state: dict[StateKey, Any] = field(default_factory=dict)
 
@@ -92,12 +93,15 @@ class StateCache:
     _time_last: Any = None
 
     def invalidate(self) -> None:
+        self.revision += 1
         self._rev_last = -1
         self._time_rev_last = -1
         self._required_cached.clear()
         self._all_valid = False
         self._memo.clear()
         self.state.clear()
+        self._pack_last = None
+        self._time_last = None
 
     def update_if_needed(
         self,
@@ -109,13 +113,21 @@ class StateCache:
         rev = int(getattr(pack, "revision", 0))
         time_rev = int(getattr(time, "revision", 0)) if time is not None else 0
 
-        if rev != self._rev_last or time_rev != self._time_rev_last:
+        if (
+            pack is not self._pack_last
+            or time is not self._time_last
+            or rev != self._rev_last
+            or time_rev != self._time_rev_last
+        ):
+            self.revision += 1
             self._rev_last = rev
             self._time_rev_last = time_rev
             self._required_cached.clear()
             self._all_valid = False
             self._memo.clear()
             self.state.clear()
+        self._pack_last = pack
+        self._time_last = time
 
         missing: set[StateKey] | None = None
 
@@ -131,15 +143,13 @@ class StateCache:
                 return
 
         x_all = np.asarray(pack.get(), dtype=float).reshape(-1)
-        self._pack_last = pack
-        self._time_last = time
         st = self.build_state(x_all, pack=pack, time=time, required=missing if required is not None else None)
 
         if not isinstance(st, dict):
             raise TypeError("StateCache.build_state must return a dict.")
 
         if required is None:
-            self.state = st
+            self.state = dict(st)
             self._required_cached = set(st.keys())
             self._all_valid = True
         else:
@@ -158,6 +168,7 @@ class StateCache:
             self._required_cached |= set(st.keys())
 
         self._memo.clear()
+        self.revision += 1
 
     def get(self, key: StateKey) -> Any:
         if key in self._memo:

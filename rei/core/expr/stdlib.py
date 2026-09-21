@@ -621,7 +621,7 @@ def build_stack(ctx, dsl):
     for k in range(k0, k1 + 1, stride):
         inner_k = dict(inner)
         inner_k["k"] = k
-        inner_k.setdefault("key", dict(inner.get("key", {})))
+        inner_k["key"] = dict(inner.get("key", {}))
         inner_k["key"]["k"] = k
         parts.append(ctx.build_expr(inner_k))
     return StackExpr(name=dsl.get("name", "stack"), parts=parts)

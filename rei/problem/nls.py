@@ -24,6 +24,9 @@ class NLSProblem:
     _last_req_sig: int = 0
     _last_r: Optional[Array] = None
     _last_J: Optional[Array] = None
+    _last_state: Any = field(default=None, init=False, repr=False)
+    _last_state_rev: int = field(default=-1, init=False, repr=False)
+    _last_time: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if len(self.term_attrs) == 0:
@@ -52,6 +55,9 @@ class NLSProblem:
         return dict(self.term_attrs[i])
 
     def invalidate_cache(self) -> None:
+        self._last_state = None
+        self._last_state_rev = -1
+        self._last_time = None
         self._last_rev = -1
         self._last_time_rev = -1
         self._last_req_sig = 0
@@ -67,6 +73,8 @@ class NLSProblem:
         rev = int(getattr(self.variables, "revision", 0))
         time_rev = int(getattr(time, "revision", 0)) if time is not None else 0
         req_sig = self._required_sig(required)
+        state = getattr(ctx, "state", None)
+        state_rev = int(getattr(state, "revision", 0))
 
         if (
             self._last_r is not None
@@ -74,6 +82,9 @@ class NLSProblem:
             and rev == self._last_rev
             and time_rev == self._last_time_rev
             and req_sig == self._last_req_sig
+            and state is self._last_state
+            and state_rev == self._last_state_rev
+            and time is self._last_time
         ):
             return self._last_r, self._last_J
 
@@ -135,6 +146,9 @@ class NLSProblem:
         self._last_rev = rev
         self._last_time_rev = time_rev
         self._last_req_sig = req_sig
+        self._last_state = state
+        self._last_state_rev = state_rev
+        self._last_time = time
         self._last_r = r_all
         self._last_J = J_all
 

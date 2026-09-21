@@ -63,6 +63,45 @@ def _inequality_sign_to_standardized(sense: str) -> tuple[str, float]:
     )
 
 
+def _nonnegative_least_squares(A: Array, b: Array) -> Array:
+    """Active-set NNLS for inequality multipliers, using only NumPy."""
+    n = int(A.shape[1])
+    x = np.zeros(n, dtype=float)
+    if n == 0:
+        return x
+    passive = np.zeros(n, dtype=bool)
+    tol = 10 * np.finfo(float).eps * max(A.shape) * np.linalg.norm(A) * np.linalg.norm(b)
+    max_steps = max(30 * n, 1)
+    steps = 0
+    while steps < max_steps:
+        dual = A.T @ (b - A @ x)
+        candidates = np.flatnonzero(~passive & (dual > tol))
+        if candidates.size == 0:
+            return x
+        passive[int(candidates[np.argmax(dual[candidates])])] = True
+        while steps < max_steps:
+            steps += 1
+            trial = np.zeros(n, dtype=float)
+            trial[passive] = np.linalg.lstsq(A[:, passive], b, rcond=None)[0]
+            blocked = passive & (trial <= 0)
+            if not np.any(blocked):
+                x = trial
+                break
+            indices = np.flatnonzero(blocked)
+            denominators = x[indices] - trial[indices]
+            ratios = np.divide(
+                x[indices], denominators,
+                out=np.zeros(indices.size), where=denominators > 0,
+            )
+            blocker = int(indices[np.argmin(ratios)])
+            x += float(np.min(ratios)) * (trial - x)
+            x[blocker] = 0.0
+            leaving = passive & (x <= 0)
+            x[leaving] = 0.0
+            passive[leaving] = False
+    raise RuntimeError("KKT multiplier NNLS did not converge within its iteration limit.")
+
+
 def check_kkt_residuals(
     *,
     grad_objective: Array,
@@ -91,6 +130,13 @@ def check_kkt_residuals(
     ineq_tol_f = float(ineq_tol)
     complementarity_tol_f = float(complementarity_tol)
     dual_tol_f = float(dual_tol)
+    for name, value in (
+        ("active_tol", active_tol_f), ("stationarity_tol", stationarity_tol_f),
+        ("eq_tol", eq_tol_f), ("ineq_tol", ineq_tol_f),
+        ("complementarity_tol", complementarity_tol_f), ("dual_tol", dual_tol_f),
+    ):
+        if not np.isfinite(value):
+            raise ValueError(f"check_kkt_residuals: {name} must be finite.")
     if active_tol_f < 0.0:
         raise ValueError(f"check_kkt_residuals: active_tol must be >= 0, got {active_tol_f}.")
     if stationarity_tol_f < 0.0:
@@ -143,6 +189,13 @@ def check_kkt_residuals(
             f"Expected {(ineq_rows, n_vars)}, got {J_in.shape}."
         )
 
+    for name, values in (
+        ("grad_objective", grad_obj), ("eq_residual", r_eq),
+        ("ineq_residual", g_in), ("eq_jacobian", J_eq), ("ineq_jacobian", J_in),
+    ):
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"check_kkt_residuals: {name} must contain only finite values.")
+
     active_mask = np.asarray(g_in >= -active_tol_f, dtype=bool) if ineq_rows > 0 else np.zeros((0,), dtype=bool)
     active_idxs = np.flatnonzero(active_mask)
 
@@ -156,20 +209,21 @@ def check_kkt_residuals(
     lambda_eq = np.zeros((eq_rows,), dtype=float)
     mu_in = np.zeros((ineq_rows,), dtype=float)
 
-    if eq_rows > 0 or active_idxs.size > 0:
-        A_total = np.hstack([A_eq_t, A_act_t])
-        if A_total.shape[1] > 0:
-            nu_raw, *_ = np.linalg.lstsq(A_total, -grad_obj, rcond=None)
-            nu_raw = np.asarray(nu_raw, dtype=float).reshape(-1)
-            if eq_rows > 0:
-                lambda_eq = nu_raw[:eq_rows]
-            if active_idxs.size > 0:
-                mu_act = np.maximum(nu_raw[eq_rows : eq_rows + int(active_idxs.size)], 0.0)
-                if eq_rows > 0:
-                    rhs = -(grad_obj + A_act_t @ mu_act)
-                    lambda_eq, *_ = np.linalg.lstsq(A_eq_t, rhs, rcond=None)
-                    lambda_eq = np.asarray(lambda_eq, dtype=float).reshape(-1)
-                mu_in[active_idxs] = mu_act
+    # Eliminate unrestricted equality multipliers before solving for the
+    # nonnegative inequality multipliers. Clipping an unconstrained solution
+    # does not solve this problem when active constraints are dependent.
+    projected_A = A_act_t
+    projected_b = -grad_obj
+    if eq_rows > 0:
+        targets = np.column_stack([A_act_t, -grad_obj])
+        coefficients = np.linalg.lstsq(A_eq_t, targets, rcond=None)[0]
+        projected = targets - A_eq_t @ coefficients
+        projected_A, projected_b = projected[:, :-1], projected[:, -1]
+    if active_idxs.size > 0:
+        mu_in[active_idxs] = _nonnegative_least_squares(projected_A, projected_b)
+    if eq_rows > 0:
+        rhs = -(grad_obj + J_in.T @ mu_in)
+        lambda_eq = np.linalg.lstsq(A_eq_t, rhs, rcond=None)[0]
 
     stationarity = np.asarray(
         grad_obj + A_eq_t @ lambda_eq + J_in.T @ mu_in,

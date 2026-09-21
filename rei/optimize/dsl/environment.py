@@ -20,7 +20,7 @@ from .trajectory import (
 
 
 TrajectorySpecFingerprint = bytes
-TrajectoryCacheKey = tuple[int, int | None, int | None]
+TrajectoryCacheKey = tuple[TrajectorySpecFingerprint, int | None, int | None]
 TrajectoryDerivativeCacheKey = tuple[
     TrajectorySpecFingerprint,
     int,
@@ -108,7 +108,7 @@ class DslBuildEnv:
         default_q_dim: int | None = None,
     ) -> TrajectoryMap:
         default_steps = default_steps_from_time(self.time)
-        key = (id(traj_dsl), default_steps, default_q_dim)
+        key = (_trajectory_spec_fingerprint(traj_dsl), default_steps, default_q_dim)
         cached = self.trajectory_cache.get(key, None)
         if cached is not None:
             return cached
@@ -203,7 +203,7 @@ class DslBuildEnv:
             default_q_dim=default_q_dim,
             default_dt=default_dt,
         )
-        base_key = (id(traj_dsl), default_steps, default_q_dim)
+        base_key = (fingerprint, default_steps, default_q_dim)
         self.trajectory_cache[base_key] = trajectories[0]
         for key, trajectory in zip(keys, trajectories, strict=True):
             self.trajectory_derivative_cache[key] = trajectory

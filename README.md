@@ -430,6 +430,12 @@ print(out.stats)
 print(out.timing)
 ```
 
+The built-in Gauss-Newton solver and `nls()` check stationarity before treating
+a small step as convergence. `tol_grad` (default `1e-10`) bounds
+`max(abs(J.T @ r))`. A small step with neither a sufficiently small residual
+nor gradient is reported as `stalled`. Gauss-Newton also restores the last
+accepted point if evaluating a line-search trial raises an exception.
+
 For `scipy_minimize`, `cyipopt`, and `liteopt`, unknown top-level option keys are
 forwarded to the backend. Options that belong to another solver are rejected.
 

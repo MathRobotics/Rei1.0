@@ -10,6 +10,35 @@ from ..trajectory import TrajectoryMap
 from .types import Expr, RuntimeContext, Variable
 
 
+def _merged_vars(*expressions: Expr) -> list[Variable]:
+    """Keep first-occurrence ordering while identifying blocks by variable name."""
+    variables: dict[str, Variable] = {}
+    for expr in expressions:
+        for var in expr.vars:
+            previous = variables.setdefault(var.name, var)
+            if previous is not var:
+                raise ValueError(f"Conflicting Variable objects for name {var.name!r}.")
+    return list(variables.values())
+
+
+def _add_variable_blocks(
+    targets: dict[str, np.ndarray],
+    variables: Sequence[Variable],
+    blocks: Sequence[np.ndarray],
+    *,
+    scale: float = 1.0,
+) -> None:
+    for var, block in zip(variables, blocks, strict=True):
+        block = np.asarray(block, dtype=float)
+        target = targets[var.name]
+        if block.shape != target.shape:
+            raise ValueError(
+                f"Block shape mismatch for variable {var.name!r}: "
+                f"expected {target.shape}, got {block.shape}."
+            )
+        target += scale * block
+
+
 @dataclass
 class GetStateExpr:
     name: str
@@ -682,7 +711,7 @@ class SubExpr:
 
     @property
     def vars(self):
-        return self.a.vars
+        return _merged_vars(self.a, self.b)
 
     def deps(self):
         return list(self.a.deps()) + list(self.b.deps())
@@ -710,11 +739,11 @@ class SubExpr:
         rb, Jb = self.b.eval(ctx)
         if ra.shape != rb.shape:
             raise ValueError(f"{self.name}: shape mismatch {ra.shape} vs {rb.shape}")
-        if len(Ja) != len(Jb):
-            raise ValueError(f"{self.name}: block len mismatch {len(Ja)} vs {len(Jb)}")
         r = ra - rb
-        blocks = [A - B for A, B in zip(Ja, Jb)]
-        return r, blocks
+        blocks = {v.name: np.zeros((r.size, v.dim())) for v in self.vars}
+        _add_variable_blocks(blocks, self.a.vars, Ja)
+        _add_variable_blocks(blocks, self.b.vars, Jb, scale=-1.0)
+        return r, list(blocks.values())
 
     def vjp(self, ctx: RuntimeContext, rhs):
         r = np.asarray(rhs, dtype=float)
@@ -724,9 +753,10 @@ class SubExpr:
             raise AttributeError(f"{self.name}: vjp fast path is not available.")
         ga = [np.asarray(g, dtype=float) for g in vjp_a(ctx, r)]
         gb = [np.asarray(g, dtype=float) for g in vjp_b(ctx, r)]
-        if len(ga) != len(gb):
-            raise ValueError(f"{self.name}: vjp block len mismatch {len(ga)} vs {len(gb)}")
-        return [a - b for a, b in zip(ga, gb)]
+        grads = {v.name: np.zeros((v.dim(),) + r.shape[1:]) for v in self.vars}
+        _add_variable_blocks(grads, self.a.vars, ga)
+        _add_variable_blocks(grads, self.b.vars, gb, scale=-1.0)
+        return list(grads.values())
 
 
 @dataclass
@@ -861,7 +891,7 @@ class StackExpr:
 
     @property
     def vars(self):
-        return self.parts[0].vars if self.parts else []
+        return _merged_vars(*self.parts)
 
     def deps(self):
         out = []
@@ -888,18 +918,19 @@ class StackExpr:
         return np.concatenate(r_list, axis=0) if r_list else np.zeros((0,), float)
 
     def eval(self, ctx: RuntimeContext):
+        variables = self.vars
         r_list = []
-        J_list = None
-        for p in self.parts:
-            r, blocks = p.eval(ctx)
-            r_list.append(np.asarray(r, float).reshape(-1))
-            if J_list is None:
-                J_list = [[] for _ in blocks]
-            for i, B in enumerate(blocks):
-                J_list[i].append(np.asarray(B, float))
-        r_all = np.concatenate(r_list, axis=0) if r_list else np.zeros((0,), float)
-        blocks_all = [np.vstack(chunks) for chunks in (J_list or [])]
-        return r_all, blocks_all
+        chunks = {v.name: [] for v in variables}
+        for part in self.parts:
+            r, blocks = part.eval(ctx)
+            r = np.asarray(r, dtype=float).reshape(-1)
+            r_list.append(r)
+            aligned = {v.name: np.zeros((r.size, v.dim())) for v in variables}
+            _add_variable_blocks(aligned, part.vars, blocks)
+            for name, block in aligned.items():
+                chunks[name].append(block)
+        r_all = np.concatenate(r_list) if r_list else np.zeros((0,), dtype=float)
+        return r_all, [np.vstack(chunks[v.name]) for v in variables]
 
     def vjp(self, ctx: RuntimeContext, rhs):
         r = np.asarray(rhs, dtype=float)
@@ -957,7 +988,7 @@ class StackExpr:
                     # existing per-expression VJP path in that case.
                     pass
 
-        grads = None
+        grads = {v.name: np.zeros((v.dim(),) + r.shape[1:]) for v in self.vars}
         offset = 0
         for p in self.parts:
             value = getattr(p, "eval_value", None)
@@ -976,22 +1007,12 @@ class StackExpr:
                 )
 
             part_grads = [np.asarray(g, dtype=float) for g in vjp(ctx, rhs_part)]
-            if grads is None:
-                grads = [np.zeros_like(g, dtype=float) for g in part_grads]
-            if len(part_grads) != len(grads):
-                raise ValueError(f"{self.name}: vjp block len mismatch {len(part_grads)} vs {len(grads)}")
-            for i, g in enumerate(part_grads):
-                if g.shape != grads[i].shape:
-                    raise ValueError(
-                        f"{self.name}: vjp gradient shape mismatch at block {i}: "
-                        f"{g.shape} vs {grads[i].shape}."
-                    )
-                grads[i] += g
+            _add_variable_blocks(grads, p.vars, part_grads)
             offset = stop
 
         if int(r.shape[0]) != int(offset):
             raise ValueError(f"{self.name}: rhs size mismatch for vjp. Expected {offset} rows, got {r.shape[0]}.")
-        return [] if grads is None else grads
+        return list(grads.values())
 
 
 @dataclass
