@@ -153,6 +153,10 @@ kind = "eq"
 
 内部では `attrs.is_constraint = true` と `attrs.constraint_kind = "eq" | "ineq"` に正規化されます。
 
+`constraint = { kind = "eq", enabled = false }`（または `is_constraint = false`）
+は制約としての扱いを無効にします。制約抽出・等式制約による変数削減・IOCの
+制約判定から除外されますが、通常の評価項としては残ります。
+
 `attrs` は自由に使えます。よくある用途:
 
 - `group = "objective"` のような後段フィルタ用タグ

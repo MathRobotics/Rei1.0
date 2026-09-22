@@ -1,0 +1,90 @@
+{
+  "versions": {
+    "pin": "4.1.0",
+    "robokots": "0.0.1",
+    "numpy": "2.5.3"
+  },
+  "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+  "models": {
+    "planar2": {
+      "pinocchio": {
+        "load_ms": 0.13025000225752592,
+        "compile_ms": 702.7449169836473,
+        "linearize_ms": 4.704124992713332,
+        "solve_ms": 35.17049999209121,
+        "n_total": 100,
+        "rows": 1626,
+        "jacobian_shape": [
+          1626,
+          100
+        ],
+        "status": [
+          "converged"
+        ],
+        "iters": 2
+      },
+      "kots-rust": {
+        "load_ms": 0.46529198880307376,
+        "compile_ms": 939.346333994763,
+        "linearize_ms": 6.311041011940688,
+        "solve_ms": 35.68104101577774,
+        "n_total": 100,
+        "rows": 1626,
+        "jacobian_shape": [
+          1626,
+          100
+        ],
+        "status": [
+          "converged"
+        ],
+        "iters": 2
+      },
+      "correctness": {
+        "torque_max_abs": 9.094947017729282e-13,
+        "jacobian_max_abs": 1.4551915228366852e-11,
+        "directional_fd_max_abs": 1.0447995464346604e-06,
+        "rust_robot_type": "<class 'builtins.RustCompiledRobot'>"
+      }
+    },
+    "fr3v2.1_franka_hand": {
+      "pinocchio": {
+        "load_ms": 0.59908302500844,
+        "compile_ms": 670.3055839752778,
+        "linearize_ms": 36.00079199532047,
+        "solve_ms": 339.43033299874514,
+        "n_total": 350,
+        "rows": 5691,
+        "jacobian_shape": [
+          5691,
+          350
+        ],
+        "status": [
+          "converged"
+        ],
+        "iters": 2
+      },
+      "kots-rust": {
+        "load_ms": 1.9934579904656857,
+        "compile_ms": 717.0260830025654,
+        "linearize_ms": 42.71949999383651,
+        "solve_ms": 331.06587498332374,
+        "n_total": 350,
+        "rows": 5691,
+        "jacobian_shape": [
+          5691,
+          350
+        ],
+        "status": [
+          "converged"
+        ],
+        "iters": 2
+      },
+      "correctness": {
+        "torque_max_abs": 6.821210263296962e-13,
+        "jacobian_max_abs": 3.637978807091713e-11,
+        "directional_fd_max_abs": 7.495295903936494e-07,
+        "rust_robot_type": "<class 'builtins.RustCompiledRobot'>"
+      }
+    }
+  }
+}

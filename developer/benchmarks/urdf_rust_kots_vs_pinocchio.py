@@ -14,6 +14,7 @@ from rei import load_problem_spec_toml, solve
 from rei.optimize.reductions import build_nullspace_equality_reduction
 from rei.optimize_backends.kots import compile_kots_trajectory_problem
 from rei.optimize_backends.pinocchio import compile_pinocchio_trajectory_problem
+from rei.xops import set_pack_x
 
 try:
     import pinocchio as pin
@@ -50,12 +51,12 @@ def bench(fn: Callable[[], Any], *, repeat: int, warmup: int) -> list[float]:
 
 
 def set_runtime_point(runtime: Any, x: np.ndarray) -> None:
-    current = np.asarray(runtime.pack.get(), dtype=float).reshape(-1)
-    runtime.pack.apply_dx(np.asarray(x, dtype=float).reshape(-1) - current)
+    set_pack_x(runtime.pack, x)
 
 
 def build_pinocchio(urdf_path: Path) -> tuple[Any, Any]:
     model = pin.buildModelFromUrdf(str(urdf_path))
+    model.gravity.linear = np.array([0.0, 0.0, -9.81])
     return model, model.createData()
 
 
@@ -69,15 +70,22 @@ def compile_problem(backend: str, problem: dict[str, Any], urdf_path: Path, *, o
         return compile_pinocchio_trajectory_problem(problem, model=model, data=data)
     if backend == "kots-default":
         model = build_kots(urdf_path, order=order)
-        return compile_kots_trajectory_problem(problem, model=model, data=model.state_dict_, jacobian_strategy="mul")
+        return compile_kots_trajectory_problem(
+            problem,
+            model=model,
+            data=None,
+            jacobian_strategy="mul",
+            gravity=(0.0, 0.0, -9.81),
+        )
     if backend == "kots-rust":
         model = build_kots(urdf_path, order=order)
         return compile_kots_trajectory_problem(
             problem,
             model=model,
-            data=model.state_dict_,
+            data=None,
             jacobian_strategy="mul",
             kots_backend="rust",
+            gravity=(0.0, 0.0, -9.81),
         )
     raise ValueError(f"unknown backend: {backend}")
 

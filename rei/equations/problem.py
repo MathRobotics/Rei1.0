@@ -20,7 +20,7 @@ OperatorEquation = OperatorProblem
 def as_linear_equation_problem(
     problem: Any,
     *,
-    weighted: bool = True,
+    weighted: bool | None = None,
     term_indices: Sequence[int] | None = None,
 ) -> LinearizedEquation:
     """Coerce input to a linearized equation problem."""

@@ -157,12 +157,10 @@ class TestKotsUrdfJsonParity:
         compiled_json = compile_kots_trajectory_problem(
             dsl,
             model=model_json,
-            data=model_json.state_dict_,
         )
         compiled_urdf = compile_kots_trajectory_problem(
             dsl,
             model=model_urdf,
-            data=model_urdf.state_dict_,
         )
         assert compiled_json.model_order == compiled_urdf.model_order
         assert compiled_json.runtime.pack.n_total == compiled_urdf.runtime.pack.n_total
@@ -213,7 +211,7 @@ def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
         compiled = compile_kots_trajectory_problem(
             dsl,
             model=model,
-            data=model.state_dict_,
+            data=None,
             kots_backend="rust",
             batch_trajectory=batch_trajectory,
         )
@@ -257,7 +255,7 @@ def test_kots_total_body_kinetic_energy_matches_stepwise_with_torque() -> None:
         compiled = compile_kots_trajectory_problem(
             dsl,
             model=model,
-            data=model.state_dict_,
+            data=None,
             kots_backend="rust",
             batch_trajectory=batch_trajectory,
         )
@@ -337,7 +335,7 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise(
             dsl,
             backend="kots",
             model=model,
-            data=model.state_dict_,
+            data=None,
             kots_backend="rust",
             batch_trajectory=batch_trajectory,
             gravity=gravity,
@@ -443,7 +441,7 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
             dsl,
             backend="kots",
             model=probe,
-            data=probe.state_dict_,
+            data=None,
             kots_backend="rust",
             batch_trajectory=True,
         )
@@ -528,7 +526,7 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
             residual_dsl,
             backend="kots",
             model=probe,
-            data=probe.state_dict_,
+            data=None,
             kots_backend="rust",
             batch_trajectory=True,
         )
@@ -543,3 +541,65 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
     assert multi_vjp_probe.many_calls == 1
     assert multi_vjp_probe.power_terms_calls == 1
     assert multi_vjp_probe.single_calls == 0
+
+
+@pytest.mark.parametrize("backend", ["numpy", "rust"])
+@pytest.mark.parametrize("strategy", ["dense", "mul"])
+@pytest.mark.parametrize("batch_trajectory", [False, True])
+def test_current_kots_state_api_and_torque_derivatives(backend, strategy, batch_trajectory):
+    """Exercise model-owned state, nonzero higher motion orders, and JVP/VJP."""
+    if Kots is None:
+        pytest.skip("RoboKots is not installed.")
+    from rei.backends.state.robotics.kots import KotsTrajectoryStateBuilder
+    from rei.core.state_schema import make_key, make_jac_key
+    from rei.core.trajectory import TrajectoryMap
+
+    rng = np.random.default_rng(27)
+    maps = {
+        order: TrajectoryMap(
+            A=rng.normal(scale=0.1, size=(6, 4)),
+            b=rng.normal(scale=0.1, size=6),
+            steps=2,
+            q_dim=3,
+        )
+        for order in range(5)
+    }
+    model_path = Path(__file__).resolve().parents[1] / "examples/models/sample_robot.urdf"
+    fields = ("torque", "torque_d1", "torque_d2")
+    keys = [
+        make_key(k=k, owner_type="total_joint", owner_name="robot", dtype="dynamics", field=field)
+        for k in range(2) for field in fields
+    ]
+    jac_keys = [
+        make_jac_key(k=k, owner_type="total_joint", owner_name="robot", dtype="dynamics", field=field, var="p")
+        for k in range(2) for field in fields
+    ]
+
+    def builder(lib, jacobian_strategy, batch):
+        return KotsTrajectoryStateBuilder(
+            Kots.from_urdf_file(str(model_path), order=5),
+            trajectory_map=maps[0],
+            trajectory_derivative_maps={k: v for k, v in maps.items() if k},
+            dynamics_fields=fields,
+            kots_backend=lib,
+            jacobian_strategy=jacobian_strategy,
+            batch_trajectory=batch,
+            gravity=(0.0, 0.0, -9.81),
+        )
+
+    actual = builder(backend, strategy, batch_trajectory)
+    reference = builder("numpy", "dense", False)
+    p = rng.normal(size=4)
+    direction = rng.normal(size=4)
+    out = actual.build_state(p, required=keys + jac_keys)
+    expected = reference.build_state(p, required=keys + jac_keys)
+    plus = actual.build_state(p + 1e-6 * direction, required=keys)
+    minus = actual.build_state(p - 1e-6 * direction, required=keys)
+    for key, jac_key in zip(keys, jac_keys):
+        np.testing.assert_allclose(out[key], expected[key], rtol=1e-9, atol=1e-9)
+        np.testing.assert_allclose(out[jac_key], expected[jac_key], rtol=1e-9, atol=1e-9)
+        fd = (plus[key] - minus[key]) / 2e-6
+        np.testing.assert_allclose(out[jac_key] @ direction, fd, rtol=1e-5, atol=1e-7)
+        rhs = rng.normal(size=3)
+        vjp = actual.param_jacobian_transpose_mul(p, key, rhs)
+        np.testing.assert_allclose(vjp, out[jac_key].T @ rhs, rtol=1e-9, atol=1e-9)

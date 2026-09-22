@@ -41,7 +41,7 @@ robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "develo
 [dependency-groups]
 dev = [
     "matplotlib>=3.10.8",
-    "pytest>=8.0",
+    "pytest>=9.1.1",
 ]
 plotting = [
     "matplotlib>=3.10.8",
@@ -51,7 +51,7 @@ kots = [
     "robokots",
 ]
 pinocchio = [
-    "pin>=3.8.0",
+    "pin>=4.1.0",
 ]
 solver-liteopt = [
     "liteopt>=0.1.9",

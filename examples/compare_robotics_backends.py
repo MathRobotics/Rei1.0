@@ -69,7 +69,7 @@ def _load_backend_model(config: BackendConfig) -> tuple[Any, Any]:
         except ImportError as e:  # pragma: no cover
             raise RuntimeError("RoboKots is not installed. Install it with `uv sync --group kots`.") from e
         model = Kots.from_json_file(str(config.model_path), order=int(config.order))
-        return model, model.state_dict_
+        return model, None
 
     raise ValueError(f"unsupported backend: {config.backend!r}")
 

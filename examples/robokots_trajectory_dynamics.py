@@ -43,7 +43,6 @@ def main() -> None:
     compiled = compile_kots_trajectory_problem(
         problem,
         model=kots,
-        data=kots.state_dict_,
         kots_backend=_KOTS_BACKEND,
     )
     runtime = compiled.runtime

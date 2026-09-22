@@ -535,7 +535,7 @@ def compile_kots_trajectory_problem(
     dsl: Mapping[str, Any],
     *,
     model: Any,
-    data: Any,
+    data: Any = None,
     p_var: str | None = None,
     max_derivative_order: int | None = None,
     derivative_wrt: str = "time",

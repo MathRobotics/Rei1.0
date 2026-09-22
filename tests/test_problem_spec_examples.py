@@ -7,7 +7,7 @@ from rei.optimize.dsl import load_problem_spec_toml
 
 def test_problem_spec_examples_load() -> None:
     spec_dir = Path(__file__).resolve().parents[1] / "examples" / "spec"
-    paths = sorted(spec_dir.glob("*.toml"))
+    paths = sorted(path for path in spec_dir.glob("*.toml") if not path.name.startswith("._"))
 
     assert paths
     for path in paths:

@@ -97,7 +97,7 @@ def term_constraint_kind(attrs: Mapping[str, Any]) -> tuple[bool, str | None]:
     kind = None if kind_raw is None else str(kind_raw).strip().lower()
     if kind == "":
         kind = None
-    is_constraint = bool(attrs.get("is_constraint", False) or kind is not None)
+    is_constraint = bool(attrs.get("is_constraint", kind is not None))
     return is_constraint, kind
 
 

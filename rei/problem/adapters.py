@@ -20,6 +20,14 @@ class NLSRuntimeLinearProblem:
     weighted: bool = True
     term_indices: Sequence[int] | None = None
 
+    def __post_init__(self) -> None:
+        if (not self.weighted or self.term_indices is not None) and not callable(
+            getattr(self.runtime, "linearize_stacked_terms", None)
+        ):
+            raise ValueError(
+                "NLSRuntimeLinearProblem: weight/term selection requires linearize_stacked_terms."
+            )
+
     @property
     def n_total(self) -> int:
         return runtime_n_total(self.runtime, adapter_name="NLSRuntimeLinearProblem")
@@ -151,20 +159,38 @@ class NLSRuntimeConstraintProblem:
 def as_linearized_problem(
     problem: Any,
     *,
-    weighted: bool = True,
+    weighted: bool | None = None,
     term_indices: Sequence[int] | None = None,
 ) -> LinearizedProblem:
-    """Coerce input to LinearizedProblem while preserving existing runtime support."""
+    """Adapt a runtime, or override an existing runtime adapter without mutation.
 
-    if isinstance(problem, LinearizedProblem):
-        return problem
+    Omitted options preserve an existing adapter's configuration. For a raw
+    runtime, weighting defaults to True and all terms are selected.
+    """
+
+    if isinstance(problem, NLSRuntimeLinearProblem):
+        if weighted is None and term_indices is None:
+            return problem
+        return NLSRuntimeLinearProblem(
+            runtime=problem.runtime,
+            weighted=problem.weighted if weighted is None else bool(weighted),
+            term_indices=problem.term_indices if term_indices is None else tuple(term_indices),
+        )
 
     if hasattr(problem, "linearize_stacked_terms") and hasattr(problem, "pack"):
         return NLSRuntimeLinearProblem(
             runtime=problem,
-            weighted=bool(weighted),
-            term_indices=term_indices,
+            weighted=True if weighted is None else bool(weighted),
+            term_indices=None if term_indices is None else tuple(term_indices),
         )
+
+    if (weighted is not None and not bool(weighted)) or term_indices is not None:
+        raise ValueError(
+            "as_linearized_problem: weighted=False and term_indices require a runtime "
+            "with linearize_stacked_terms; a generic LinearizedProblem cannot apply them."
+        )
+    if isinstance(problem, LinearizedProblem):
+        return problem
 
     missing = []
     for name in ("n_total", "get_point", "set_point", "required_list", "linearize"):

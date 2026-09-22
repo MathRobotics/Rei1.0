@@ -195,7 +195,7 @@ def rei_benchmark(args: argparse.Namespace, *, dof: int) -> None:
         kots = make_kots(dof, int(args.order))
         builder = KotsTrajectoryStateBuilder(
             kots,
-            kots.state_dict_,
+            None,
             trajectory_map=trajectory_map,
             trajectory_derivative_maps=derivative_maps,
             dynamics_fields=[args.rei_field],
@@ -212,7 +212,7 @@ def rei_benchmark(args: argparse.Namespace, *, dof: int) -> None:
     dense_kots = make_kots(dof, int(args.order))
     dense_builder = KotsTrajectoryStateBuilder(
         dense_kots,
-        dense_kots.state_dict_,
+        None,
         trajectory_map=trajectory_map,
         trajectory_derivative_maps=derivative_maps,
         dynamics_fields=[args.rei_field],
@@ -221,7 +221,7 @@ def rei_benchmark(args: argparse.Namespace, *, dof: int) -> None:
     fast_kots = make_kots(dof, int(args.order))
     fast_builder = KotsTrajectoryStateBuilder(
         fast_kots,
-        fast_kots.state_dict_,
+        None,
         trajectory_map=trajectory_map,
         trajectory_derivative_maps=derivative_maps,
         dynamics_fields=[args.rei_field],

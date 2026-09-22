@@ -97,12 +97,15 @@ KOTS_DEFAULT_BINDINGS: dict[str, str] = {
 
 
 class KotsStateBuilder(BackendDispatchStateBuilder):
-    """RoboKots/Kots -> `build_state()` bridge with StateKey-based automatic dispatch."""
+    """RoboKots/Kots -> `build_state()` bridge with StateKey-based dispatch.
+
+    RoboKots owns its state; ``data`` is an optional legacy placeholder.
+    """
 
     def __init__(
         self,
         model: Any,
-        data: Any,
+        data: Any = None,
         *,
         q_var: str = "q",
         fields: Sequence[str] | None = None,
@@ -295,7 +298,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
     def __init__(
         self,
         model: Any,
-        data: Any,
+        data: Any = None,
         *,
         trajectory_map: TrajectoryMap,
         trajectory_derivative_maps: Mapping[int, TrajectoryMap] | None = None,

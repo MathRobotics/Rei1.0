@@ -14,6 +14,12 @@ from rei.optimize.builder import compile_nls_problem
 from rei.optimize.solvers import solve
 
 def _ensure_robokots_state_stub() -> None:
+    try:
+        importlib.import_module("robokots.core.state")
+        return
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"robokots", "robokots.core", "robokots.core.state"}:
+            raise
     robokots_mod = types.ModuleType("robokots")
     core_mod = types.ModuleType("robokots.core")
     state_mod = types.ModuleType("robokots.core.state")

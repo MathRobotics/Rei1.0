@@ -1162,11 +1162,10 @@ class NLSRuntime:
         idxs: list[int] = []
 
         for i, attrs in enumerate(self.problem.term_attrs):
-            is_constraint = bool(attrs.get("is_constraint", False))
             term_kind_raw = attrs.get("constraint_kind", None)
             term_kind = None if term_kind_raw is None else _canonical_constraint_kind(term_kind_raw)
 
-            if not is_constraint and term_kind is None:
+            if not bool(attrs.get("is_constraint", term_kind is not None)):
                 continue
             if kind_norm is not None and term_kind != kind_norm:
                 continue

@@ -27,11 +27,9 @@ def main() -> None:
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
 
     kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
-    data = kots.state_dict_
 
     builder = KotsStateBuilder(
         kots,
-        data,
         q_var="q",
         fields=("pos",),
         dynamics_fields=None,

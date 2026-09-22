@@ -69,6 +69,19 @@ def _nonnegative_least_squares(A: Array, b: Array) -> Array:
     x = np.zeros(n, dtype=float)
     if n == 0:
         return x
+    # Positive column scaling preserves the nonnegative feasible cone.
+    # Normalize before the active-set tests so a large constraint column
+    # cannot hide a valid multiplier for a small column.
+    column_scale = np.max(np.abs(A), axis=0, initial=0.0)
+    column_scale[column_scale == 0.0] = 1.0
+    A = A / column_scale
+    column_length = np.linalg.norm(A, axis=0)
+    column_length[column_length == 0.0] = 1.0
+    A = A / column_length
+    rhs_scale = float(np.max(np.abs(b), initial=0.0))
+    if rhs_scale == 0.0:
+        return x
+    b = b / rhs_scale
     passive = np.zeros(n, dtype=bool)
     tol = 10 * np.finfo(float).eps * max(A.shape) * np.linalg.norm(A) * np.linalg.norm(b)
     max_steps = max(30 * n, 1)
@@ -77,7 +90,7 @@ def _nonnegative_least_squares(A: Array, b: Array) -> Array:
         dual = A.T @ (b - A @ x)
         candidates = np.flatnonzero(~passive & (dual > tol))
         if candidates.size == 0:
-            return x
+            return (x * rhs_scale / column_length) / column_scale
         passive[int(candidates[np.argmax(dual[candidates])])] = True
         while steps < max_steps:
             steps += 1

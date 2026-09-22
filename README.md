@@ -249,6 +249,10 @@ trajectory-parameter dynamics Jacobians:
 - `jacobian_mul(list[StateType], rhs)` for `J @ rhs`
 - `jacobian_transpose_mul(list[StateType], rhs)` for `J.T @ rhs`
 
+RoboKots owns its state internally. `KotsStateBuilder`,
+`KotsTrajectoryStateBuilder`, and `compile_kots_trajectory_problem` accept
+`data=None` (the default); do not access the removed `kots.state_dict_` attribute.
+
 Dense Jacobian assembly is still available by passing
 `jacobian_strategy="dense"` to `compile_kots_trajectory_problem`; otherwise the
 default strategy is `"mul"`. The older `prefer_matvec_jacobian` option is kept
@@ -274,7 +278,7 @@ runtime structure:
 ```python
 from rei.optimize_backends.kots import compile_kots_trajectory_problem_template
 
-template = compile_kots_trajectory_problem_template(problem, model=kots, data=kots.state_dict_)
+template = compile_kots_trajectory_problem_template(problem, model=kots)
 for p_window, target_window in windows:
     template.update_window(p=p_window, constants={"window_target": target_window})
     result = estimate_ioc_weights(template)
@@ -359,7 +363,6 @@ zero-gravity default:
 compiled = compile_kots_trajectory_problem(
     problem,
     model=kots,
-    data=kots.state_dict_,
     kots_backend="rust",
     gravity=(0.0, 0.0, -9.81),
 )
@@ -435,6 +438,18 @@ a small step as convergence. `tol_grad` (default `1e-10`) bounds
 `max(abs(J.T @ r))`. A small step with neither a sufficiently small residual
 nor gradient is reported as `stalled`. Gauss-Newton also restores the last
 accepted point if evaluating a line-search trial raises an exception.
+
+When passing an existing `NLSRuntimeLinearProblem` adapter to `solve()` or
+`as_solver_problem()`, omitted `weighted` and `term_indices` settings inherit
+the adapter's configuration. Explicit overrides create a new view without
+modifying the original adapter. On raw runtimes, weighting defaults to true
+and all terms are selected. Generic linearized problems cannot apply term
+selection or disable weighting and reject those options.
+
+The projected-gradient solver checks `||x - project(x - J.T @ r)||` at the
+returned point independently of the chosen step size. Small steps that do
+not satisfy this stationarity tolerance return `stalled`; the diagnostic is
+available as `out.meta["projected_gradient_norm"]`.
 
 For `scipy_minimize`, `cyipopt`, and `liteopt`, unknown top-level option keys are
 forwarded to the backend. Options that belong to another solver are rejected.

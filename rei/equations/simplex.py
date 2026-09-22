@@ -23,15 +23,19 @@ def _project_to_simplex(v: Array) -> Array:
     if n == 0:
         return np.zeros((0,), dtype=float)
 
-    u = np.sort(x)[::-1]
+    # Projection is invariant to a common offset. Subtract the maximum
+    # before subtracting the unit mass, which would round away at 1e16.
+    # Coordinates more than one below the maximum cannot be active; clipping
+    # those differences also avoids overflow for opposite finite extremes.
+    with np.errstate(over="ignore"):
+        shifted = np.maximum(x - np.max(x), -1.0)
+    u = np.sort(shifted)[::-1]
     cssv = np.cumsum(u) - 1.0
     ind = np.arange(1, n + 1, dtype=float)
     cond = u - cssv / ind > 0.0
-    if not np.any(cond):
-        return np.full((n,), 1.0 / n, dtype=float)
     rho = int(np.nonzero(cond)[0][-1])
     theta = float(cssv[rho] / (rho + 1))
-    return np.maximum(x - theta, 0.0)
+    return np.maximum(shifted - theta, 0.0)
 
 
 def _default_step_size_from_jacobian(J: Array) -> float:
@@ -175,7 +179,7 @@ def solve_projected_linearized_min_norm(
                     f"solve_projected_linearized_min_norm: step_size must be > 0, got {step}."
                 )
 
-    converged = False
+    stalled = False
     iterations = max_iters_i
     step_norm_last = float("inf")
     for it in range(max_iters_i):
@@ -188,7 +192,7 @@ def solve_projected_linearized_min_norm(
             step_norm_last = float(np.linalg.norm(x_next - x))
         if step_norm_last <= tol_f:
             x = x_next
-            converged = True
+            stalled = True
             iterations = it + 1
             break
         x = x_next
@@ -200,21 +204,31 @@ def solve_projected_linearized_min_norm(
         objective = float(0.5 * (r_fin @ r_fin))
         residual_norm = float(np.linalg.norm(r_fin))
         grad_norm = float(np.linalg.norm(grad_fin))
+        # Use a unit-step projection to assess stationarity independently
+        # of the optimization step size. A tiny chosen step is not evidence
+        # that no feasible descent direction remains.
+        projected = as_vec(
+            projector.project(x - grad_fin), expected_size=n_total, name="project(x-gradient)"
+        )
+        projected_gradient_norm = float(np.linalg.norm(x - projected))
+        converged = projected_gradient_norm <= tol_f
 
     return SolveOutcome(
         solution=x,
         stats=SolveStats(
-            status=("converged" if converged else "max_iters"),
+            status=("converged" if converged else "stalled" if stalled else "max_iters"),
             iterations=int(iterations),
             objective=float(objective),
             residual_norm=float(residual_norm),
             step_norm=float(step_norm_last),
+            message="step is small but projected stationarity is not satisfied." if stalled and not converged else "",
         ),
         timing=prof.snapshot(),
         meta={
             "solver": "projected_linearized_min_norm",
             "step_size": float(step),
             "grad_norm": float(grad_norm),
+            "projected_gradient_norm": projected_gradient_norm,
         },
     )
 

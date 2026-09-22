@@ -22,7 +22,7 @@ class SolverProblem:
     """
 
     source: Any
-    weighted: bool = True
+    weighted: bool | None = None
     term_indices: Sequence[int] | None = None
     required: Iterable[StateKey] | None = None
     linear_problem: LinearizedProblem = field(init=False)
@@ -31,7 +31,7 @@ class SolverProblem:
     def __post_init__(self) -> None:
         self.linear_problem = as_linearized_problem(
             self.source,
-            weighted=bool(self.weighted),
+            weighted=self.weighted,
             term_indices=self.term_indices,
         )
         self.x0 = np.asarray(self.linear_problem.get_point(), dtype=float).reshape(-1).copy()
@@ -79,13 +79,13 @@ class SolverProblem:
 def as_solver_problem(
     source: Any,
     *,
-    weighted: bool = True,
+    weighted: bool | None = None,
     term_indices: Sequence[int] | None = None,
     required: Iterable[StateKey] | None = None,
 ) -> SolverProblem:
     return SolverProblem(
         source=source,
-        weighted=bool(weighted),
+        weighted=weighted,
         term_indices=term_indices,
         required=required,
     )

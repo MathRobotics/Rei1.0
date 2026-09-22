@@ -240,7 +240,7 @@ def solve_scipy_minimize(
     *,
     x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
-    weighted: bool = True,
+    weighted: bool | None = None,
     term_indices: Iterable[int] | None = None,
     method: str = "L-BFGS-B",
     max_iters: int | None = 200,
@@ -263,7 +263,7 @@ def solve_scipy_minimize(
     with prof.span("solve.setup"):
         linear_problem = as_linearized_problem(
             problem,
-            weighted=bool(weighted),
+            weighted=weighted,
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
         x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
@@ -349,7 +349,7 @@ def solve_cyipopt_minimize(
     *,
     x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
-    weighted: bool = True,
+    weighted: bool | None = None,
     term_indices: Iterable[int] | None = None,
     max_iters: int | None = 200,
     tol: float | None = None,
@@ -371,7 +371,7 @@ def solve_cyipopt_minimize(
     with prof.span("solve.setup"):
         linear_problem = as_linearized_problem(
             problem,
-            weighted=bool(weighted),
+            weighted=weighted,
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
         x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
@@ -578,7 +578,7 @@ def solve_liteopt_gd(
     *,
     x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
-    weighted: bool = True,
+    weighted: bool | None = None,
     term_indices: Iterable[int] | None = None,
     method: str = "gd",
     verbose: bool | None = None,
@@ -618,7 +618,7 @@ def solve_liteopt_gd(
     with prof.span("solve.setup"):
         linear_problem = as_linearized_problem(
             problem,
-            weighted=bool(weighted),
+            weighted=weighted,
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
         x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
@@ -1038,7 +1038,7 @@ def solve(
     if x0 is not None and "x0" in opts:
         raise ValueError("solve: pass x0 either as keyword argument or options['x0'], not both.")
     x0_override = opts.get("x0", x0)
-    weighted = bool(opts.get("weighted", True))
+    weighted = None if opts.get("weighted") is None else bool(opts["weighted"])
     term_indices = _normalize_term_indices_option(opts.get("term_indices", None))
     backend_options = _normalize_backend_options_for_solver(opts, solver_key=key)
 

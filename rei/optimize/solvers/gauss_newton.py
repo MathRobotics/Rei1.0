@@ -19,7 +19,7 @@ def solve_gauss_newton(
     *,
     x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
-    weighted: bool = True,
+    weighted: bool | None = None,
     term_indices: Iterable[int] | None = None,
     tol_r: float = 1e-10,
     tol_dx: float = 1e-12,
@@ -44,7 +44,7 @@ def solve_gauss_newton(
     with prof.span("solve.setup"):
         linear_problem: LinearizedProblem = as_linearized_problem(
             problem,
-            weighted=bool(weighted),
+            weighted=weighted,
             term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
         )
         n_total = int(linear_problem.n_total)
