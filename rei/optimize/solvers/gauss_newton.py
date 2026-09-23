@@ -39,8 +39,21 @@ def solve_gauss_newton(
     """
 
     prof = ensure_profiler(profiler)
-    if not np.isfinite(tol_grad) or tol_grad < 0:
-        raise ValueError("solve_gauss_newton: tol_grad must be finite and >= 0.")
+    # Validate before evaluating the model or changing x0. Invalid options must
+    # not silently succeed just because the initial residual already vanishes.
+    for name, value in (("tol_r", tol_r), ("tol_dx", tol_dx),
+                        ("tol_grad", tol_grad), ("damping", damping)):
+        if not np.isfinite(value) or value < 0:
+            raise ValueError(f"solve_gauss_newton: {name} must be finite and >= 0.")
+    if not np.isfinite(max_iters) or int(max_iters) != max_iters or max_iters < 0:
+        raise ValueError("solve_gauss_newton: max_iters must be a nonnegative integer.")
+    if line_search:
+        if not np.isfinite(ls_beta) or not 0 < ls_beta < 1:
+            raise ValueError("solve_gauss_newton: ls_beta must be finite and in (0, 1).")
+        if not np.isfinite(ls_min_step) or ls_min_step <= 0:
+            raise ValueError("solve_gauss_newton: ls_min_step must be finite and > 0.")
+        if not np.isfinite(ls_max_iters) or int(ls_max_iters) != ls_max_iters or ls_max_iters <= 0:
+            raise ValueError("solve_gauss_newton: ls_max_iters must be a positive integer.")
     with prof.span("solve.setup"):
         linear_problem: LinearizedProblem = as_linearized_problem(
             problem,
@@ -124,8 +137,6 @@ def solve_gauss_newton(
         cost_cur = float(r_all @ r_all)
         with prof.span("solve.iter.step"):
             damp = float(damping)
-            if damp < 0.0:
-                raise ValueError(f"solve_gauss_newton: damping must be >= 0, got {damp}.")
             # Solve the residual system directly to avoid squaring its
             # condition number. Damping is an augmented least-squares term.
             lhs = np.asarray(J_all, dtype=float)
@@ -160,14 +171,8 @@ def solve_gauss_newton(
             continue
 
         beta = float(ls_beta)
-        if not (0.0 < beta < 1.0):
-            raise ValueError(f"solve_gauss_newton: ls_beta must be in (0,1), got {beta}.")
         min_step = float(ls_min_step)
-        if min_step <= 0.0:
-            raise ValueError(f"solve_gauss_newton: ls_min_step must be > 0, got {min_step}.")
         max_ls = int(ls_max_iters)
-        if max_ls <= 0:
-            raise ValueError(f"solve_gauss_newton: ls_max_iters must be > 0, got {max_ls}.")
 
         x_cur = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
         best_x = x_cur.copy()

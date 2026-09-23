@@ -1049,7 +1049,7 @@ def solve(
             required=required,
             weighted=weighted,
             term_indices=term_indices,
-            max_iters=int(opts.get("max_iters", 200)),
+            max_iters=opts.get("max_iters", 200),
             tol_r=float(opts.get("tol_r", 1e-10)),
             tol_dx=float(opts.get("tol_dx", 1e-12)),
             tol_grad=float(opts.get("tol_grad", 1e-10)),
@@ -1057,7 +1057,7 @@ def solve(
             line_search=bool(opts.get("line_search", True)),
             ls_beta=float(opts.get("ls_beta", 0.5)),
             ls_min_step=float(opts.get("ls_min_step", 1e-8)),
-            ls_max_iters=int(opts.get("ls_max_iters", 12)),
+            ls_max_iters=opts.get("ls_max_iters", 12),
             on_iter=on_iter,
             profiler=profiler,
         )

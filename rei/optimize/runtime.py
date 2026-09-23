@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..core.expr.types import RuntimeContext, VariablePack
-from ..core.expr.nodes import GetStateExpr, JointPowerSquaredExpr, StackExpr, TrajectoryVarExpr
+from ..core.expr.nodes import GetStateExpr, HingeExpr, JointPowerSquaredExpr, StackExpr, TrajectoryVarExpr
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import canonical_dtype_name, canonical_field_name
 from ..problem import NLSProblem
@@ -1039,6 +1039,56 @@ class NLSRuntime:
                 )
             )
         return out
+
+    def linearize_inequality_constraints(
+        self,
+        *,
+        required: Iterable[StateKey] | None = None,
+        term_indices: Iterable[int] | None = None,
+        ineq_sense: str = "<=",
+    ) -> tuple[Array, Array]:
+        """Return signed inequality margins/Jacobians standardized to ``g <= 0``.
+
+        Bounds and top-level Hinge penalties retain their base expressions;
+        evaluate those bases, including inside stacks, without mutating the
+        objective expression. Other expressions are already signed margins.
+        A Hinge penalty intrinsically describes a <= constraint, so requesting
+        >= for one is ambiguous and rejected. Costs are never applied here.
+        """
+        sense = str(ineq_sense).strip()
+        if sense not in ("<=", ">="):
+            raise ValueError("ineq_sense must be '<=' or '>='.")
+
+        def margin(expr):
+            if isinstance(expr, HingeExpr):
+                if sense != "<=":
+                    raise ValueError("Hinge/bounds constraints require ineq_sense='<='.")
+                return expr.base
+            if isinstance(expr, StackExpr):
+                return StackExpr(name=expr.name, parts=[margin(part) for part in expr.parts])
+            return expr
+
+        indices = self.find_constraint_term_indices(kind="ineq") if term_indices is None else term_indices
+        indices = self._normalize_term_indices(indices)
+        expressions = [margin(self.problem.terms[i][0]) for i in indices]
+        req = self.required_list(required)
+        for expr in expressions:
+            req.extend(collect_expr_required(expr))
+        self.update_state_if_needed(required=_dedupe_required(req))
+        residuals, jacobians = [], []
+        for index, expr in zip(indices, expressions, strict=True):
+            value, blocks = expr.eval(self.ctx)
+            value = np.asarray(value, dtype=float).reshape(-1)
+            jacobian = self._assemble_global_jacobian(
+                term_name=self._term_display_name(index), expr_vars=expr.vars,
+                residual=value, blocks=blocks,
+            )
+            residuals.append(value)
+            jacobians.append(jacobian)
+        sign = 1.0 if sense == "<=" else -1.0
+        if not residuals:
+            return np.zeros(0), np.zeros((0, self.pack.n_total))
+        return sign * np.concatenate(residuals), sign * np.vstack(jacobians)
 
     def linearize_constraint_terms(
         self,

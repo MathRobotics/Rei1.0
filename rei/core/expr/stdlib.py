@@ -252,7 +252,7 @@ def build_const(ctx, dsl):
     var_name = None
     v = None
     if "var" in dsl:
-        var_name = str(dsl.get("var", _default_var_name(ctx)))
+        var_name = str(dsl["var"])
         v = next((x for x in ctx.pack.vars if x.name == var_name), None)
         if v is None:
             raise ValueError(f"const: unknown variable: {var_name!r}")
@@ -324,7 +324,7 @@ def build_const_repeat(ctx, dsl):
             value = _validate_vector_dim(value, dim=seg_dim, where="const_repeat")
 
     if "var" in dsl:
-        var_name = str(dsl.get("var", _default_var_name(ctx)))
+        var_name = str(dsl["var"])
         v = next((x for x in ctx.pack.vars if x.name == var_name), None)
         if v is None:
             raise ValueError(f"const_repeat: unknown variable: {var_name!r}")

@@ -6,6 +6,8 @@ from typing import Any
 
 import numpy as np
 
+from ._ioc_diagnostics import diagnose_ioc_fit
+
 from ..equations import (
     RuntimeStationaritySource,
     build_reference_simplex_init,
@@ -99,6 +101,8 @@ def _scale_columns(
     mode: str,
     eps: float,
 ) -> tuple[Array, Array]:
+    if not np.isfinite(eps) or eps <= 0:
+        raise ValueError("stationarity_scale_eps must be finite and positive.")
     mode_name = str(mode).strip().lower()
     if mode_name == "none":
         scales = np.ones((A.shape[1],), dtype=float)
@@ -160,6 +164,14 @@ def estimate_ioc_weights(
     simplex_max_iters: int = 2000,
     simplex_tol: float = 1e-10,
 ) -> dict[str, Any]:
+    """Estimate normalized coefficients of the original, unweighted objectives.
+
+    ``scaled_weights`` contains the simplex coefficients used internally after
+    column scaling. ``weights`` converts those coefficients back to the original
+    objective scale. For noisy data, the selected scaling still determines the
+    fitting objective. Constraint terms are not KKT multipliers; see the returned
+    ``validation`` diagnostics before interpreting a constrained demonstration.
+    """
     backend, compiled_obj, diagnostics = _as_compiled_ioc(compiled)
     runtime = compiled_obj.runtime
     source = RuntimeStationaritySource(runtime)
@@ -188,12 +200,16 @@ def estimate_ioc_weights(
     )
 
     weights = np.zeros((len(contributions),), dtype=float)
+    scaled_weights = np.zeros_like(weights)
     simplex_out = None
     ikkt_residual = np.zeros((A.shape[0],), dtype=float)
     ikkt_residual_scaled = np.zeros((A.shape[0],), dtype=float)
     if len(active_idx) > 0:
         active = np.asarray(active_idx, dtype=int)
         x0 = build_reference_simplex_init(contributions, active_idx)
+        if x0 is not None:
+            x0 = x0 / scales[active]
+            x0 = x0 / x0.sum()
         simplex_out = solve_simplex_min_norm(
             A_scaled[:, active],
             x0=x0,
@@ -201,9 +217,23 @@ def estimate_ioc_weights(
             max_iters=int(simplex_max_iters),
             tol=float(simplex_tol),
         )
-        weights[active] = np.asarray(simplex_out.solution, dtype=float).reshape(-1)
+        scaled_weights[active] = np.asarray(simplex_out.solution, dtype=float).reshape(-1)
+        # A_scaled @ z = A @ (scales * z). Report coefficients of A,
+        # normalized to unit sum, rather than the coefficients of A_scaled.
+        active_scales = scales[active]
+        original = scaled_weights[active] * (active_scales / active_scales.max())
+        weights[active] = original / original.sum()
         ikkt_residual = A @ weights
-        ikkt_residual_scaled = A_scaled @ weights
+        ikkt_residual_scaled = A_scaled @ scaled_weights
+
+    fit_diagnostics = diagnose_ioc_fit(
+        contributions_all=contributions_all,
+        contributions=contributions,
+        active_idx=active_idx,
+        A_scaled=A_scaled,
+        ikkt_residual_scaled=ikkt_residual_scaled,
+        simplex_tol=simplex_tol,
+    )
 
     return {
         "backend": str(backend),
@@ -255,6 +285,8 @@ def estimate_ioc_weights(
             "meta": dict(simplex_out.meta),
         },
         "weights": [float(w) for w in weights],
+        "scaled_weights": [float(w) for w in scaled_weights],
+        **fit_diagnostics,
     }
 
 

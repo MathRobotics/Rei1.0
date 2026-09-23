@@ -5,10 +5,11 @@ import sys
 import types
 
 import numpy as np
+import pytest
 
 from rei.core.state_schema import DTYPE_COORD
 
-def _ensure_pinocchio_stub() -> None:
+def _make_pinocchio_stub():
     pin = types.ModuleType("pinocchio")
 
     class _ReferenceFrame:
@@ -56,9 +57,23 @@ def _ensure_pinocchio_stub() -> None:
     pin.rnea = rnea
     pin.computeRNEADerivatives = computeRNEADerivatives
 
-    sys.modules["pinocchio"] = pin
+    return pin
 
-_ensure_pinocchio_stub()
+try:
+    _pin_module = importlib.import_module("pinocchio")
+except ModuleNotFoundError as exc:
+    if exc.name != "pinocchio":
+        raise
+    _pin_module = _make_pinocchio_stub()
+    sys.modules["pinocchio"] = _pin_module
+
+
+@pytest.fixture(autouse=True)
+def _isolated_pinocchio_mock(monkeypatch):
+    stub = _make_pinocchio_stub()
+    adapter = importlib.import_module("rei.backends.state.robotics.pinocchio_adapter")
+    monkeypatch.setattr(adapter, "pin", stub)
+
 _pin_opt_mod = importlib.import_module("rei.optimize_backends.pinocchio")
 compile_pinocchio_trajectory_problem = _pin_opt_mod.compile_pinocchio_trajectory_problem
 from rei.optimize_backends.trajectory_diagnostics import inspect_trajectory_problem_backend

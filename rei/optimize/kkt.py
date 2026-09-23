@@ -314,7 +314,7 @@ def check_kkt_conditions(
 ) -> KKTCheckResult:
     """Check first-order KKT residuals at current `runtime.pack` iterate."""
 
-    _sense_norm, ineq_scale = _inequality_sign_to_standardized(ineq_sense)
+    sense_norm, _ = _inequality_sign_to_standardized(ineq_sense)
 
     n_terms = int(len(runtime.problem.terms))
     eq_auto = tuple(runtime.find_constraint_term_indices(kind="eq"))
@@ -366,18 +366,16 @@ def check_kkt_conditions(
         weighted=False,
         term_indices=eq_idxs,
     )
-    r_in_raw, J_in_raw = runtime.linearize_stacked_terms(
+    g_in, J_in = runtime.linearize_inequality_constraints(
         required=req,
-        weighted=False,
         term_indices=ineq_idxs,
+        ineq_sense=sense_norm,
     )
 
     r_obj = np.asarray(r_obj, dtype=float).reshape(-1)
     J_obj = np.asarray(J_obj, dtype=float)
     r_eq = np.asarray(r_eq, dtype=float).reshape(-1)
     J_eq = np.asarray(J_eq, dtype=float)
-    g_in = np.asarray(ineq_scale * np.asarray(r_in_raw, dtype=float).reshape(-1), dtype=float).reshape(-1)
-    J_in = np.asarray(ineq_scale * np.asarray(J_in_raw, dtype=float), dtype=float)
     grad_obj = np.asarray(J_obj.T @ r_obj, dtype=float).reshape(-1)
 
     return check_kkt_residuals(

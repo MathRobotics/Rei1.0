@@ -8,6 +8,9 @@ converted to Rei's lower-level DSL before compilation. Backend code connects
 through a single `build_state()` function, so the optimization layer can stay
 independent from robotics, vision, or other state providers.
 
+Development priorities and acceptance criteria are recorded in the
+[improvement plan](docs/improvement-plan.md) (Japanese).
+
 ## Requirements
 
 - Python `>=3.11`
@@ -241,6 +244,16 @@ Each helper returns a compile result whose main entry point is
 `compiled.runtime`. Some helpers also return backend-specific metadata such as
 trajectory maps or prepared DSL data.
 
+### IOC weight interpretation
+
+`estimate_ioc_weights()` returns `weights` in the original, unweighted
+objective scale, normalized to sum to one when active terms exist.
+`scaled_weights` contains the internal coefficients after column scaling.
+Check `validation` and `identifiability`: fitting objective stationarity does
+not account for constraint KKT multipliers, and inactive or dependent terms
+can prevent weight identification. See the [IOC validation report](docs/ioc-validation.md)
+for known-answer tests, migration details, and remaining limitations.
+
 ### RoboKots Jacobian Strategy
 
 The Kots trajectory backend uses RoboKots multiply APIs by default for
@@ -450,6 +463,17 @@ The projected-gradient solver checks `||x - project(x - J.T @ r)||` at the
 returned point independently of the chosen step size. Small steps that do
 not satisfy this stationarity tolerance return `stalled`; the diagnostic is
 available as `out.meta["projected_gradient_norm"]`.
+
+`as_constraint_problem(existing_adapter)` similarly preserves omitted settings;
+explicit `kind` or `weighted` overrides create a new view. Its `linearize()`
+evaluates the constraints once and returns a consistent residual/Jacobian pair.
+This adapter retains the penalty residual representation; signed inequality
+margins for KKT are available through `runtime.linearize_inequality_constraints()`.
+
+Gauss–Newton validates tolerances, damping, and iteration settings before
+changing the initial point. Negative/nonfinite settings and fractional iteration
+counts raise `ValueError`, even if the initial residual is already zero.
+`max_iters=0` remains available for evaluation without taking a step.
 
 For `scipy_minimize`, `cyipopt`, and `liteopt`, unknown top-level option keys are
 forwarded to the backend. Options that belong to another solver are rejected.

@@ -138,22 +138,22 @@ class NLSRuntimeConstraintProblem:
         )
 
     def constraint(self, *, required: Iterable[StateKey] | None = None) -> Array:
-        terms = self._linearized_terms(required=required)
-        if len(terms) == 0:
-            return np.zeros((0,), dtype=float)
-        return np.concatenate([np.asarray(t.residual, dtype=float).reshape(-1) for t in terms], axis=0)
+        return self.linearize(required=required)[0]
 
     def jacobian_constraint(self, *, required: Iterable[StateKey] | None = None) -> Array:
-        terms = self._linearized_terms(required=required)
-        if len(terms) == 0:
-            return np.zeros((0, int(self.n_total)), dtype=float)
-        return np.vstack([np.asarray(t.jacobian, dtype=float) for t in terms])
+        return self.linearize(required=required)[1]
 
     def eval(self, *, required: Iterable[StateKey] | None = None) -> Array:
         return self.constraint(required=required)
 
     def linearize(self, *, required: Iterable[StateKey] | None = None) -> tuple[Array, Array]:
-        return self.constraint(required=required), self.jacobian_constraint(required=required)
+        terms = self._linearized_terms(required=required)
+        if not terms:
+            return np.zeros(0), np.zeros((0, int(self.n_total)))
+        return (
+            np.concatenate([np.asarray(t.residual, dtype=float).reshape(-1) for t in terms]),
+            np.vstack([np.asarray(t.jacobian, dtype=float) for t in terms]),
+        )
 
 
 def as_linearized_problem(

@@ -42,19 +42,39 @@ def as_constraint_problem(
     problem: Any,
     *,
     kind: str | None = None,
-    weighted: bool = False,
+    weighted: bool | None = None,
 ) -> ConstraintProblem:
-    """Coerce input to an explicit constraint capability."""
+    """Adapt constraint residuals, preserving omitted settings on an adapter.
 
-    if isinstance(problem, ConstraintProblem):
-        return problem
+    Raw runtimes default to all constraint kinds without cost weighting.
+    Explicit overrides create a new view; generic capabilities cannot apply
+    runtime-specific filters. This retains residual semantics, not signed KKT
+    margins; use runtime.linearize_inequality_constraints() for those.
+    """
+
+    if isinstance(problem, NLSRuntimeConstraintProblem):
+        if kind is None and weighted is None:
+            return problem
+        return NLSRuntimeConstraintProblem(
+            runtime=problem.runtime,
+            kind=problem.kind if kind is None else kind,
+            weighted=problem.weighted if weighted is None else bool(weighted),
+        )
 
     if hasattr(problem, "linearize_constraint_terms") and hasattr(problem, "pack"):
         return NLSRuntimeConstraintProblem(
             runtime=problem,
             kind=kind,
-            weighted=bool(weighted),
+            weighted=False if weighted is None else bool(weighted),
         )
+
+    if kind is not None or weighted is True:
+        raise ValueError(
+            "as_constraint_problem: kind and weighting overrides require a runtime "
+            "with linearize_constraint_terms."
+        )
+    if isinstance(problem, ConstraintProblem):
+        return problem
 
     missing: list[str] = []
     for name in ("n_total", "get_point", "set_point", "required_list", "constraint", "jacobian_constraint"):
