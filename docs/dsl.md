@@ -1,9 +1,83 @@
 # Rei DSL ガイド
 
-`rei` の DSL は Python `dict` と TOML で同じ構造です。  
-このドキュメントでは見やすさのため TOML で説明します。
+`rei` の設定は TOML または同じ構造の Python `dict` で書けます。
+通常は簡潔な Problem Spec を使います。後半では、その変換先となる低レベル DSL を説明します。
 
-## 最小例
+## Problem Spec の書き方
+
+最適化変数ごとにテーブルを作り、初期値を指定します。
+
+```toml
+[opt_vals.joint_angles]
+init = [0.0, 0.0]
+
+[[terms]]
+name = "q_target"
+var = "joint_angles"
+target = [0.5, -1.2]
+```
+
+`compile_nls_problem_spec_toml()` で読み込めます。
+`init` が配列なら次元はその長さから決まり、全成分を同じ値にする場合は
+`init = { fill = 0.0 }` を使います。この場合、次元を `dim` または軌道設定から決めます。
+
+軌道問題では次の設定を使い、バックエンドの trajectory compile helper に渡します。
+
+```toml
+[time]
+N = 200
+dt = 0.01
+
+[trajectory]
+type = "bspline"
+degree = 5
+num_ctrl_points = 50
+
+[opt_vals.trajectory_params]
+init = { fill = 0.0 }
+```
+
+`N` は区間数、評価点数は `N + 1`、`dt` は秒単位です。
+標準の軌道変数では `[trajectory].var` は省略できます。
+
+各 `[[terms]]` は「名前 → 評価する量 → 時刻 → 目標・上下限 → 制約・重み → 表示」
+の順に書くと読みやすくなります。
+
+```toml
+[[terms]]
+name = "q_boundary"
+quantity = "joint_angles"
+at = [
+  { time = "first", target = { fill = 1.57 } },
+  { time = "last", target = { fill = -1.57 } },
+]
+kind = "eq"
+enforce = "nullspace"
+weight = 100.0
+plot = "joint_q"
+```
+
+時間指定は次のように使い分けます。数値は秒ではなく時刻インデックスです。
+
+| 書き方 | 意味 |
+| --- | --- |
+| `at = "first"` / `at = "last"` | 開始点 / 終端点 |
+| `at = ["first", 50, "last"]` | 指定した点だけを評価（外側の target は不可） |
+| `at = [{ time = "first", target = ... }, ...]` | 各点の目標値を指定 |
+| `over = "all"` | 全評価点を対象にする |
+
+`at` と `over` は併用できません。軌道 quantity は両方省略しても全評価点が対象ですが、
+サンプルでは `over = "all"` を明記しています。`stride`／`every` は使いません。
+単一点では term 直下に `target` を書けます。複数点の目標は同じ値でも各 `at` 要素に書きます。
+
+`target` のない quantity 項は、その量自体を残差として小さくします。
+`weight` は二乗和に掛かる係数で、省略時は 1 です。時間積分や時間平均には自動変換されません。
+`plot = "名前"` は表示系列を指定します。表示点を選ぶ場合は
+`plot = { name = "名前", at = ["first", 50, "last"] }` と書きます。
+
+実行可能な設定は [examples/spec](../examples/spec) を参照してください。
+
+## 低レベル DSL の最小例
 
 ```toml
 [[variables]]
@@ -31,7 +105,7 @@ type = "l2"
 
 これは `q - [0.5, -1.2]` を最小化する一番小さい形です。
 
-## 全体構造
+## 低レベル DSL の全体構造
 
 ```toml
 [time]          # 任意
@@ -169,7 +243,7 @@ state key は式から推論されます。
 name = "q_init"
 kind = "eq"
 quantity = "joint_angles"
-at = 0
+at = "first"
 target = { fill = 1.57 }
 plot = "joint_q"
 ```
@@ -181,8 +255,39 @@ backend が計算する関節トルクも quantity として書けます。
 name = "torque_traj_regularization"
 weight = 1e-10
 quantity = "joint_torques"
-stride = 50
-plot = { name = "joint_torque", stride = 50 }
+over = "all"
+plot = { name = "joint_torque" }
+```
+
+`over = "all"` は全時刻で評価することを明示します。`over` を省略した場合も全時刻です。
+
+トルクの時間微分は `field` で指定します。
+
+```toml
+[[terms]]
+name = "torque_d1_regularization"
+quantity = { name = "joint_torques", field = "torque_d1" }
+over = "all"
+weight = 1e-3
+```
+
+離散的な複数時刻だけを評価する場合は `at` にリストを書きます。
+
+```toml
+at = ["first", 50, 100, "last"]
+```
+
+`at` は単一時刻と複数時刻の両方を選べます。`over` と同時には指定できません。
+
+複数時刻に目標値を設定する場合は、時刻と目標を同じ `at` 要素に書きます。
+選んだ各時刻で同じ目標値でも、各要素に `target` を明記してください。
+`at` 配列と外側の `target`／`equals` の併用はエラーになります。
+
+```toml
+at = [
+  { time = "first", target = { fill = 1.57 } },
+  { time = "last", target = { fill = -1.57 } },
+]
 ```
 
 等式制約を nullspace reduction で厳密に消す対象にしたい場合は、
@@ -194,7 +299,7 @@ name = "qdot_init"
 kind = "eq"
 enforce = "nullspace"
 quantity = "joint_velocities"
-at = 0
+at = "first"
 target = { fill = 0.0 }
 ```
 
@@ -336,9 +441,7 @@ var = "q"
 type = "stack"
 
 [terms.expr.range]
-k0 = 0
-k1 = "last"
-stride = 10
+at = [0, 10, 20, "last"]
 
 [terms.expr.inner]
 type = "get_state"
@@ -353,7 +456,8 @@ field = "torque"
 var = "p"
 ```
 
-`stride` は任意です。未指定なら 1 で、全ステップを評価します。
+`at` は単一時刻または複数時刻を指定できます。全時刻を評価する場合は
+`k0 = 0`, `k1 = "last"` を指定します。
 
 ### 6. `vstack`
 

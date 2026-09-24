@@ -108,7 +108,7 @@ name = "qdot_init"
 kind = "eq"
 weight = 100.0
 quantity = "joint_velocities"
-at = 0
+at = "first"
 target = { fill = 0.0 }
 ```
 

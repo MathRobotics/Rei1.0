@@ -60,6 +60,10 @@ python examples/compare_robotics_backends.py --backend robokots
 
 ## Problem Spec / モデルファイル
 
+TOML spec の書き方は [DSL ガイド](../docs/dsl.md#problem-spec-の書き方) を参照してください。
+軌道の例は、境界条件・全時刻の関節角制限・全時刻の正則化の順に並べています。
+両バックエンドの spec は同じ条件で、`at` が指定点、`over = "all"` が全評価点を表します。
+
 - `spec/basic.toml`: 標準 TOML spec の最小問題
 - `spec/ik_pos.toml`: IK 用 TOML spec
 - `spec/pinocchio_traj_dynamics.toml`: Pinocchio 軌道 + dynamics 用 TOML spec
