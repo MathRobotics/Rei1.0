@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Iterable
 
 import numpy as np
@@ -29,7 +30,7 @@ def solve_gauss_newton(
     ls_beta: float = 0.5,
     ls_min_step: float = 1e-8,
     ls_max_iters: int = 12,
-    on_iter: Callable[[int, float, float], None] | None = None,
+    on_iter: Callable[..., None] | None = None,
     profiler: Profiler | None = None,
 ) -> SolveOutcome:
     """Minimal Gauss-Newton loop for a linearized residual problem.
@@ -71,6 +72,24 @@ def solve_gauss_newton(
 
     rnorm = float("inf")
     dxnorm = float("inf")
+
+    def _on_iter_accepts_jt_r(callback: Callable[..., None]) -> bool:
+        """Keep the established three-argument callback contract compatible."""
+        try:
+            inspect.signature(callback).bind(0, 0.0, 0.0, np.zeros((0,), dtype=float))
+        except (TypeError, ValueError):
+            return False
+        return True
+
+    callback_accepts_jt_r = on_iter is not None and _on_iter_accepts_jt_r(on_iter)
+
+    def _emit_iteration(k: int, residual_norm: float, step_norm: float, jt_r: Array) -> None:
+        if on_iter is None:
+            return
+        if callback_accepts_jt_r:
+            on_iter(int(k), float(residual_norm), float(step_norm), np.asarray(jt_r, dtype=float).reshape(-1).copy())
+            return
+        on_iter(int(k), float(residual_norm), float(step_norm))
 
     def _outcome(
         *,
@@ -120,11 +139,10 @@ def solve_gauss_newton(
         with prof.span("solve.iter.linearize"):
             r_all, J_all = linear_problem.linearize(required=req)
         rnorm = float(np.linalg.norm(r_all))
-
-        if on_iter is not None:
-            on_iter(k, rnorm, 0.0)
+        jt_r = np.asarray(J_all.T @ r_all, dtype=float).reshape(-1)
 
         if rnorm < tol_r:
+            _emit_iteration(k, rnorm, 0.0, jt_r)
             cost = float(r_all @ r_all)
             return _outcome(
                 status="converged",
@@ -150,7 +168,8 @@ def solve_gauss_newton(
 
         # A small computed step also needs a small gradient; otherwise apply
         # the step before checking convergence. Rejected trials are stalled.
-        if dxnorm < tol_dx and float(np.max(np.abs(J_all.T @ r_all), initial=0.0)) <= tol_grad:
+        if dxnorm < tol_dx and float(np.max(np.abs(jt_r), initial=0.0)) <= tol_grad:
+            _emit_iteration(k, rnorm, dxnorm, jt_r)
             return _outcome(
                 status="converged",
                 iters=k,
@@ -160,8 +179,7 @@ def solve_gauss_newton(
             )
 
         if not bool(line_search):
-            if on_iter is not None:
-                on_iter(k, rnorm, dxnorm)
+            _emit_iteration(k, rnorm, dxnorm, jt_r)
 
             with prof.span("solve.iter.update"):
                 x_cur = np.asarray(linear_problem.get_point(), dtype=float).reshape(-1)
@@ -205,8 +223,7 @@ def solve_gauss_newton(
         dxnorm_eff = float(np.linalg.norm(dx_eff))
         dxnorm = dxnorm_eff
 
-        if on_iter is not None:
-            on_iter(k, rnorm, dxnorm_eff)
+        _emit_iteration(k, rnorm, dxnorm_eff, jt_r)
 
         if not accepted:
             return _outcome(

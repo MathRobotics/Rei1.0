@@ -4,6 +4,7 @@ from datetime import datetime
 
 import numpy as np
 
+from rei import compile_nls_problem_spec, solve
 from rei.core.outcome import SolveOutcome, SolveStats
 from rei.core.timing import TimingReport, TimingSpan
 from rei.optimize.textlog import (
@@ -35,7 +36,7 @@ def _build_dummy_outcome() -> SolveOutcome:
     )
 
 
-def test_build_solver_iter_logger_and_compress_rows() -> None:
+def test_build_solver_iter_logger_and_compress_rows(capsys) -> None:
     opts, on_iter, history = build_solver_iter_logger(
         "gauss_newton",
         {
@@ -54,6 +55,34 @@ def test_build_solver_iter_logger_and_compress_rows() -> None:
 
     rows = compress_iter_history(history)
     assert rows == [(0, 0.9, 0.2), (1, 0.5, 0.1)]
+
+    _, verbose_on_iter, _ = build_solver_iter_logger(
+        "gauss_newton",
+        {"verbose": True},
+        print_prefix="forward",
+    )
+    verbose_on_iter(0, 1.0, 0.2, np.array([-2.0, 0.5]))
+    assert "Jᵀr=[-2. ,  0.5]" in capsys.readouterr().out
+
+
+def test_gauss_newton_callback_receives_current_jt_r() -> None:
+    runtime = compile_nls_problem_spec(
+        {
+            "opt_vals": {"x": {"init": [0.0]}},
+            "terms": [{"name": "target", "var": "x", "target": [1.0]}],
+        },
+        build_state=lambda *_args, **_kwargs: {},
+    )
+    received: list[np.ndarray] = []
+
+    solve(
+        runtime,
+        options={"max_iters": 1, "line_search": False},
+        on_iter=lambda _k, _rnorm, _dxnorm, jt_r: received.append(np.asarray(jt_r)),
+    )
+
+    assert len(received) == 1
+    np.testing.assert_allclose(received[0], [-1.0])
 
 
 def test_format_solver_text_log_includes_sections() -> None:

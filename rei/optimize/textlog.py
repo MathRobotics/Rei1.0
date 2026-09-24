@@ -12,7 +12,9 @@ from ..core.outcome import SolveOutcome
 from .report import format_timing_report
 
 IterRow = tuple[int, float, float]
-IterCallback = Callable[[int, float, float], None]
+# The fourth argument is optional so existing three-argument callbacks remain
+# usable.  Gauss-Newton supplies the current least-squares gradient ``Jᵀr``.
+IterCallback = Callable[..., None]
 
 
 def build_solver_iter_logger(
@@ -29,7 +31,8 @@ def build_solver_iter_logger(
 
     Returns:
       - options_local: options dict with local verbose keys removed when configured
-      - on_iter: callback compatible with `solve(..., on_iter=...)`
+      - on_iter: callback compatible with `solve(..., on_iter=...)`; its
+        optional fourth argument is the current `Jᵀr` vector
       - history: mutable list of `(iter, rnorm, dxnorm)` tuples
     """
 
@@ -58,7 +61,12 @@ def build_solver_iter_logger(
             prefix = solver_key if print_prefix is None else str(print_prefix)
             print(f"[{prefix}] {solver_key} verbose enabled (every={every_i})")
 
-    def _on_iter(k: int, rnorm: float, dxnorm: float) -> None:
+    def _on_iter(
+        k: int,
+        rnorm: float,
+        dxnorm: float,
+        jt_r: np.ndarray | Sequence[float] | None = None,
+    ) -> None:
         k_i = int(k)
         r_f = float(rnorm)
         dx_f = float(dxnorm)
@@ -66,7 +74,10 @@ def build_solver_iter_logger(
 
         if solver_key == verbose_solver_key and verbose_enabled and k_i % every_i == 0:
             prefix = solver_key if print_prefix is None else str(print_prefix)
-            print(f"[{prefix}:{solver_key}] iter={k_i:04d} rnorm={r_f:.3e} dxnorm={dx_f:.3e}")
+            message = f"[{prefix}:{solver_key}] iter={k_i:04d} rnorm={r_f:.3e} dxnorm={dx_f:.3e}"
+            if jt_r is not None:
+                message += f" Jᵀr={format_numeric_array(jt_r)}"
+            print(message)
 
     return opts, _on_iter, history
 
