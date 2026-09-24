@@ -4,6 +4,5 @@ init = [0.0, 0.0]
 
 [[terms]]
 name = "q_minus_target"
-weight = 1.0
 var = "joint_angles"
 target = [0.5, -1.2]

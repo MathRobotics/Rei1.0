@@ -177,9 +177,7 @@ class TestPlotTermAttrs:
                                 "owner_name": "robot",
                                 "dtype": "coord",
                                 "field": "q",
-                                "k0": 0,
-                                "k1": "last",
-                                "stride": 2,
+                                "at": [0, "last"],
                             },
                         ]
                     },

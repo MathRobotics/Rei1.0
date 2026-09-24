@@ -350,8 +350,8 @@ def test_problem_spec_converts_joint_torque_quantity() -> None:
             {
                 "name": "torque_traj_regularization",
                 "quantity": "joint_torques",
-                "stride": 5,
-                "plot": {"name": "joint_torque", "stride": 5},
+                "at": [0, 5, "last"],
+                "plot": {"name": "joint_torque"},
                 "weight": 1e-10,
             },
         ],
@@ -359,24 +359,137 @@ def test_problem_spec_converts_joint_torque_quantity() -> None:
 
     dsl = problem_spec_to_dsl(spec)
 
-    assert dsl["terms"][0]["attrs"] == {"plot": {"name": "joint_torque", "stride": 5}}
+    assert dsl["terms"][0]["attrs"] == {"plot": {"name": "joint_torque"}}
     assert dsl["terms"][0]["expr"] == {
-        "type": "stack",
+        "type": "vstack",
         "name": "torque_traj_regularization",
-        "range": {"k0": 0, "k1": "last", "stride": 5},
-        "inner": {
-            "type": "get_state",
-            "name": "torque_traj_regularization_k",
-            "key": {
-                "k": 0,
-                "owner_type": "total_joint",
-                "owner_name": "robot",
-                "dtype": "dynamics",
-                "field": "torque",
+        "parts": [
+            {
+                "type": "get_state",
+                "name": "torque_traj_regularization_at_0",
+                "key": {
+                    "k": 0,
+                    "owner_type": "total_joint",
+                    "owner_name": "robot",
+                    "dtype": "dynamics",
+                    "field": "torque",
+                },
+                "jac": {"var": "p"},
             },
-            "jac": {"var": "p"},
-        },
+            {
+                "type": "get_state",
+                "name": "torque_traj_regularization_at_1",
+                "key": {
+                    "k": 5,
+                    "owner_type": "total_joint",
+                    "owner_name": "robot",
+                    "dtype": "dynamics",
+                    "field": "torque",
+                },
+                "jac": {"var": "p"},
+            },
+            {
+                "type": "get_state",
+                "name": "torque_traj_regularization_at_2",
+                "key": {
+                    "k": "last",
+                    "owner_type": "total_joint",
+                    "owner_name": "robot",
+                    "dtype": "dynamics",
+                    "field": "torque",
+                },
+                "jac": {"var": "p"},
+            },
+        ],
     }
+
+
+def test_problem_spec_rejects_removed_quantity_sampling_options() -> None:
+    spec = {
+        "time": {"N": 2, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [{"quantity": "joint_torques", "every": 2}],
+    }
+
+    with pytest.raises(ValueError, match="unsupported key"):
+        problem_spec_to_dsl(spec)
+
+
+def test_problem_spec_explicitly_selects_all_times_with_over() -> None:
+    spec = {
+        "time": {"N": 2, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [{"quantity": {"name": "joint_torques", "field": "torque_d1"}, "over": "all"}],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+    assert dsl["terms"][0]["expr"]["range"] == {"k0": 0, "k1": "last"}
+
+
+def test_problem_spec_supports_all_and_multiple_time_selection_for_trajectory_quantities() -> None:
+    spec = {
+        "time": {"N": 2, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [
+            {"name": "qdot_all", "quantity": "joint_velocities", "over": "all"},
+            {"name": "qdot_ends", "quantity": "joint_velocities", "at": ["first", "last"]},
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+    assert dsl["terms"][0]["expr"]["type"] == "get_traj_var"
+    assert dsl["terms"][1]["expr"]["type"] == "vstack"
+    assert [part["k"] for part in dsl["terms"][1]["expr"]["parts"]] == ["first", "last"]
+
+
+@pytest.mark.parametrize("target_key", ["target", "equals"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_problem_spec_rejects_shared_target_for_at_list(target_key, nested) -> None:
+    term = {"quantity": "joint_angles", "at": ["first", "last"], target_key: {"fill": 0.0}}
+    if nested:
+        term["quantity"] = {"name": "joint_angles", "at": term.pop("at")}
+    with pytest.raises(ValueError, match="an at list cannot use an outer target or equals"):
+        problem_spec_to_dsl({"terms": [term]})
+
+
+@pytest.mark.parametrize("last_target", [1.57, -1.57])
+def test_problem_spec_pairs_per_time_targets_with_at_entries(last_target) -> None:
+    spec = {
+        "time": {"N": 2, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [
+            {
+                "name": "q_boundary",
+                "quantity": "joint_angles",
+                "at": [
+                    {"time": "first", "target": {"fill": 1.57}},
+                    {"time": "last", "target": {"fill": last_target}},
+                ],
+            }
+        ],
+    }
+
+    dsl = problem_spec_to_dsl(spec)
+    expr = dsl["terms"][0]["expr"]
+    assert expr["type"] == "vstack"
+    assert [part["a"]["k"] for part in expr["parts"]] == ["first", "last"]
+    assert [part["b"]["value"] for part in expr["parts"]] == [{"fill": 1.57}, {"fill": last_target}]
+
+
+def test_problem_spec_rejects_mixed_time_scope_syntax() -> None:
+    spec = {
+        "time": {"N": 2, "dt": 0.1},
+        "trajectory": {"type": "bspline", "var": "p", "degree": 2, "num_ctrl_points": 3},
+        "opt_vals": {"trajectory_params": {"init": {"fill": 0.0}}},
+        "terms": [{"quantity": "joint_torques", "over": "all", "at": 0}],
+    }
+
+    with pytest.raises(ValueError, match="cannot combine over"):
+        problem_spec_to_dsl(spec)
 
 
 def test_problem_spec_rejects_unknown_quantity() -> None:

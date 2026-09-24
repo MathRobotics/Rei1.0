@@ -609,16 +609,29 @@ def build_joint_power_squared(ctx, dsl):
 
 def build_stack(ctx, dsl):
     r = dsl["range"]
-    k0 = int(_resolve_time_index(r["k0"], ctx=ctx, where="stack.range.k0"))
-    k1 = int(_resolve_time_index(r["k1"], ctx=ctx, where="stack.range.k1"))
-    if k1 < k0:
-        raise ValueError(f"stack.range: expected k0 <= k1, got k0={k0}, k1={k1}.")
-    stride = int(r.get("stride", 1))
-    if stride <= 0:
-        raise ValueError(f"stack.range.stride must be > 0, got {stride}.")
+    if "stride" in r:
+        raise ValueError("stack.range.stride is no longer supported. Use range.at = [time_index, ...].")
+    if "at" in r:
+        if "k0" in r or "k1" in r:
+            raise ValueError("stack.range.at cannot be combined with k0 or k1.")
+        raw_at = r["at"]
+        if not isinstance(raw_at, (list, tuple)):
+            raw_at = [raw_at]
+        if len(raw_at) == 0:
+            raise ValueError("stack.range.at must not be empty.")
+        ks = [
+            int(_resolve_time_index(k, ctx=ctx, where=f"stack.range.at[{i}]"))
+            for i, k in enumerate(raw_at)
+        ]
+    else:
+        k0 = int(_resolve_time_index(r["k0"], ctx=ctx, where="stack.range.k0"))
+        k1 = int(_resolve_time_index(r["k1"], ctx=ctx, where="stack.range.k1"))
+        if k1 < k0:
+            raise ValueError(f"stack.range: expected k0 <= k1, got k0={k0}, k1={k1}.")
+        ks = list(range(k0, k1 + 1))
     inner = dsl["inner"]
     parts = []
-    for k in range(k0, k1 + 1, stride):
+    for k in ks:
         inner_k = dict(inner)
         inner_k["k"] = k
         inner_k["key"] = dict(inner.get("key", {}))

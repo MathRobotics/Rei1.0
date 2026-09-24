@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -146,12 +146,34 @@ def _resolve_trajectory_quantity(
     derivative_wrt = merged_overrides.pop("derivative_wrt", alias.derivative_wrt)
     if derivative_wrt is not None:
         traj["derivative_wrt"] = str(derivative_wrt)
-    for src in ("at", "k"):
-        if src in merged_overrides:
-            traj[src] = deepcopy(merged_overrides.pop(src))
+    over = merged_overrides.pop("over", None)
+    at = merged_overrides.pop("at", merged_overrides.pop("k", None))
+    if over is not None and at is not None:
+        raise ValueError(f"quantity {name!r} cannot combine over with at.")
+    for removed_key in ("every", "stride"):
+        if removed_key in merged_overrides:
+            raise ValueError(
+                f"quantity {name!r} no longer supports {removed_key!r}. "
+                "Use at = [time_index, ...] to select multiple times."
+            )
+    if over is not None and over != "all":
+        raise ValueError(f"quantity {name!r}.over must be 'all'.")
+    if at is not None and not (
+        isinstance(at, Sequence) and not isinstance(at, (str, bytes, bytearray))
+    ):
+        traj["at"] = deepcopy(at)
     if merged_overrides:
         keys = ", ".join(sorted(str(k) for k in merged_overrides))
         raise ValueError(f"quantity {name!r} has unsupported override key(s): {keys}.")
+    if isinstance(at, Sequence) and not isinstance(at, (str, bytes, bytearray)):
+        if len(at) == 0:
+            raise ValueError(f"quantity {name!r}.at must not be empty.")
+        parts = []
+        for i, k in enumerate(at):
+            traj_at = deepcopy(traj)
+            traj_at["at"] = deepcopy(k)
+            parts.append({"traj": traj_at, "name": f"{name}_at_{i}"})
+        return {"op": "vstack", "name": name, "parts": parts}
     return {"traj": traj}
 
 
@@ -178,25 +200,68 @@ def _resolve_state_traj_quantity(
         keys = ", ".join(missing)
         raise ValueError(f"quantity {name!r} is missing state key field(s): {keys}.")
 
-    range_dsl: dict[str, Any] = {
-        "k0": deepcopy(merged_overrides.pop("k0", 0)),
-        "k1": deepcopy(merged_overrides.pop("k1", "last")),
-    }
-    if "stride" in merged_overrides:
-        range_dsl["stride"] = deepcopy(merged_overrides.pop("stride"))
-    if "at" in merged_overrides or "k" in merged_overrides:
-        k = deepcopy(merged_overrides.pop("at", merged_overrides.pop("k", None)))
-        range_dsl = {"k0": k, "k1": k}
+    over = merged_overrides.pop("over", None)
+    at = merged_overrides.pop("at", merged_overrides.pop("k", None))
+    range_keys = ("k0", "k1")
+    if over is not None and any(key in merged_overrides for key in range_keys):
+        raise ValueError(
+            f"quantity {name!r} cannot combine over with k0 or k1."
+        )
+    if over is not None and at is not None:
+        raise ValueError(f"quantity {name!r} cannot combine over with at.")
+    for removed_key in ("every", "stride"):
+        if removed_key in merged_overrides:
+            raise ValueError(
+                f"quantity {name!r} no longer supports {removed_key!r}. "
+                "Use at = [time_index, ...] to select multiple times."
+            )
+
+    if over is None:
+        range_dsl: dict[str, Any] = {
+            "k0": deepcopy(merged_overrides.pop("k0", 0)),
+            "k1": deepcopy(merged_overrides.pop("k1", "last")),
+        }
+        if at is not None and not (
+            isinstance(at, Sequence) and not isinstance(at, (str, bytes, bytearray))
+        ):
+            range_dsl = {"k0": deepcopy(at), "k1": deepcopy(at)}
+    elif over == "all":
+        range_dsl = {"k0": 0, "k1": "last"}
+    elif isinstance(over, Mapping):
+        over_dict = dict(over)
+        allowed = {"from", "to"}
+        unknown = sorted(str(key) for key in over_dict if key not in allowed)
+        if unknown:
+            raise ValueError(
+                f"quantity {name!r}.over has unsupported key(s): {', '.join(unknown)}. "
+                "Use from or to."
+            )
+        range_dsl = {
+            "k0": deepcopy(over_dict.get("from", 0)),
+            "k1": deepcopy(over_dict.get("to", "last")),
+        }
+    else:
+        raise ValueError(f"quantity {name!r}.over must be 'all' or an object.")
 
     if merged_overrides:
         keys = ", ".join(sorted(str(k) for k in merged_overrides))
         raise ValueError(f"quantity {name!r} has unsupported override key(s): {keys}.")
 
-    inner: dict[str, Any] = {
-        "state": key,
-    }
+    inner: dict[str, Any] = {"state": key}
     if var is not None:
         inner["var"] = str(var)
+    if isinstance(at, Sequence) and not isinstance(at, (str, bytes, bytearray)):
+        if len(at) == 0:
+            raise ValueError(f"quantity {name!r}.at must not be empty.")
+        parts = []
+        for i, k in enumerate(at):
+            state = deepcopy(key)
+            state["k"] = deepcopy(k)
+            part: dict[str, Any] = {"state": state, "name": f"{expr_name}_at_{i}"}
+            if var is not None:
+                part["var"] = str(var)
+            parts.append(part)
+        return {"op": "vstack", "name": str(expr_name), "parts": parts}
     return {
         "op": "stack",
         "name": str(expr_name),

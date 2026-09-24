@@ -350,6 +350,20 @@ def _convert_residual(
         raise ValueError(f"{where} must be an object.")
     node = mapping_as_dict(raw, where=where)
 
+    at = node.get("at", None)
+    quantity = node.get("quantity", None)
+    if "at" not in node and isinstance(quantity, Mapping):
+        at = quantity.get("at", None)
+    if (
+        isinstance(at, Sequence)
+        and not isinstance(at, (str, bytes, bytearray))
+        and ("target" in node or "equals" in node)
+    ):
+        raise ValueError(
+            f"{where}: an at list cannot use an outer target or equals. "
+            "Put each target in an at entry: { time = ..., target = ... }."
+        )
+
     if "dsl" in node:
         dsl_node = node["dsl"]
         if not isinstance(dsl_node, Mapping):
@@ -363,6 +377,35 @@ def _convert_residual(
 
     if "bounds" in node:
         return _convert_bounds_node(node, name=name, where=where, var_aliases=var_aliases, ctx=ctx)
+
+    at_entries = _time_target_entries(node, where=where)
+    if at_entries is not None:
+        if "target" in node or "equals" in node:
+            raise ValueError(f"{where}: use either term target or per-time at targets, not both.")
+        parts: list[dict[str, Any]] = []
+        for i, entry in enumerate(at_entries):
+            lhs = dict(node)
+            lhs["at"] = deepcopy(entry["time"])
+            value = _convert_leaf(
+                lhs,
+                name=f"{name}_at_{i}_value",
+                where=f"{where}.at[{i}]",
+                var_aliases=var_aliases,
+                ctx=ctx,
+            )
+            target = _target_to_expr(
+                entry["target"],
+                name=f"{name}_at_{i}_target",
+                var=_node_var(lhs, var_aliases=var_aliases, ctx=ctx),
+                dim=_target_dim_hint(lhs, var_aliases=var_aliases, ctx=ctx),
+            )
+            parts.append({
+                "type": "sub",
+                "name": f"{name}_at_{i}",
+                "a": value,
+                "b": target,
+            })
+        return {"type": "vstack", "name": name, "parts": parts}
 
     target = node.get("target", node.get("equals", None))
     if target is not None:
@@ -382,6 +425,30 @@ def _convert_residual(
         }
 
     return _convert_leaf(node, name=name, where=where, var_aliases=var_aliases, ctx=ctx)
+
+
+def _time_target_entries(node: Mapping[str, Any], *, where: str) -> list[dict[str, Any]] | None:
+    """Parse explicit time/target pairs in an ``at`` list, when present."""
+    raw_at = node.get("at", None)
+    if not isinstance(raw_at, Sequence) or isinstance(raw_at, (str, bytes, bytearray)):
+        return None
+    if len(raw_at) == 0 or not any(isinstance(entry, Mapping) for entry in raw_at):
+        return None
+    if not all(isinstance(entry, Mapping) for entry in raw_at):
+        raise ValueError(f"{where}.at must contain either only time indices or only {{ time, target }} objects.")
+
+    entries: list[dict[str, Any]] = []
+    for i, raw_entry in enumerate(raw_at):
+        entry = mapping_as_dict(raw_entry, where=f"{where}.at[{i}]")
+        unknown = sorted(str(key) for key in entry if key not in {"time", "target"})
+        if unknown:
+            raise ValueError(
+                f"{where}.at[{i}] has unsupported key(s): {', '.join(unknown)}. Use time and target."
+            )
+        if "time" not in entry or "target" not in entry:
+            raise ValueError(f"{where}.at[{i}] requires both time and target.")
+        entries.append({"time": deepcopy(entry["time"]), "target": deepcopy(entry["target"])})
+    return entries
 
 
 def _convert_bounds_node(
@@ -546,6 +613,26 @@ def _convert_op_node(
                 var_aliases=var_aliases,
                 ctx=ctx,
             ),
+        }
+    if op == "vstack":
+        parts_raw = node.get("parts", None)
+        if not isinstance(parts_raw, Sequence) or isinstance(parts_raw, (str, bytes, bytearray)):
+            raise ValueError(f"{where}: op 'vstack' requires a parts list.")
+        if len(parts_raw) == 0:
+            raise ValueError(f"{where}: op 'vstack' requires at least one part.")
+        return {
+            "type": "vstack",
+            "name": str(node.get("name", name)),
+            "parts": [
+                _convert_residual(
+                    part,
+                    name=_child_name(name, str(i)),
+                    where=f"{where}.parts[{i}]",
+                    var_aliases=var_aliases,
+                    ctx=ctx,
+                )
+                for i, part in enumerate(parts_raw)
+            ],
         }
     return _convert_leaf(node, name=name, where=where, var_aliases=var_aliases, ctx=ctx)
 
@@ -722,7 +809,7 @@ _TERM_SHORTHAND_LEAF_KEYS = {
     "derivative_wrt",
     "k0",
     "k1",
-    "stride",
+    "over",
     "owner_type",
     "owner",
     "owner_name",

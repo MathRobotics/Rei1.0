@@ -2023,7 +2023,7 @@ class TestReiBasic:
         assert {k.k for k in torque_d1_keys} == {0, 1, 2}
         assert {k.k for k in torque_d1_jac_keys} == {0, 1, 2}
 
-    def test_stack_get_state_supports_stride_range(self) -> None:
+    def test_stack_get_state_supports_multiple_at_indices(self) -> None:
         dsl = {
             "time": {"N": 5, "dt": 0.1},
             "variables": [{"name": "p", "dim": 2, "init": [0.0, 0.0]}],
@@ -2031,7 +2031,7 @@ class TestReiBasic:
                 {
                     "expr": {
                         "type": "stack",
-                        "range": {"k0": 0, "k1": "last", "stride": 2},
+                        "range": {"at": [0, 2, "last"]},
                         "inner": {
                             "type": "get_state",
                             "key": {
@@ -2050,8 +2050,8 @@ class TestReiBasic:
         runtime = compile_nls_problem(dsl, build_state=lambda *_args, **_kwargs: {})
         torque_keys = [k for k in runtime.required if k.field == "torque"]
         torque_jac_keys = [k for k in runtime.required if k.field == "torque_J_p"]
-        assert {k.k for k in torque_keys} == {0, 2, 4}
-        assert {k.k for k in torque_jac_keys} == {0, 2, 4}
+        assert {k.k for k in torque_keys} == {0, 2, 5}
+        assert {k.k for k in torque_jac_keys} == {0, 2, 5}
 
     def test_get_state_builder_supports_last_index(self) -> None:
         dsl = {

@@ -204,6 +204,22 @@ def _resolve_ks(
 ) -> tuple[int, ...]:
     steps = _time_steps(runtime)
 
+    if "at" in spec:
+        if any(key in spec for key in ("ks", "k0", "k1", "stride")):
+            raise ValueError(f"{where}: at cannot be combined with ks, k0, k1, or stride.")
+        raw_at = spec["at"]
+        selected = (
+            raw_at
+            if isinstance(raw_at, Sequence) and not isinstance(raw_at, (str, bytes))
+            else [raw_at]
+        )
+        if len(selected) == 0:
+            raise ValueError(f"{where}.at must not be empty.")
+        return tuple(
+            _parse_time_index(k_raw, steps=steps, where=f"{where}.at[{i}]")
+            for i, k_raw in enumerate(selected)
+        )
+
     if "ks" in spec:
         if "k0" in spec or "k1" in spec:
             raise ValueError(f"{where}: use either `ks` or (`k0`, `k1`), not both.")
@@ -227,10 +243,9 @@ def _resolve_ks(
     k1 = _parse_time_index(k1_raw, steps=steps, where=f"{where}.k1")
     if k1 < k0:
         raise ValueError(f"{where}: expected k0 <= k1, got k0={k0}, k1={k1}.")
-    stride = int(spec.get("stride", 1))
-    if stride <= 0:
-        raise ValueError(f"{where}.stride must be > 0, got {stride}.")
-    return tuple(range(k0, k1 + 1, stride))
+    if "stride" in spec:
+        raise ValueError(f"{where}.stride is no longer supported. Use at = [time_index, ...].")
+    return tuple(range(k0, k1 + 1))
 
 
 def _resolve_state_route(
