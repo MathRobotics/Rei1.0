@@ -437,6 +437,38 @@ class TestKotsTrajectoryDynamicsMock:
         expected = rot_world @ J_local
         np.testing.assert_allclose(J_world, expected, rtol=0.0, atol=1e-12)
 
+    def test_kots_native_model_keeps_world_frame_jacobian(self) -> None:
+        model = _FakeKotsModelLinkLocalJacobian()
+        # RoboKots' current native-model API marks models with this metadata
+        # and returns link Jacobians in the requested frame already.
+        model._model_metadata = object()
+        builder = _kots_state_mod.KotsStateBuilder(
+            model,
+            data={},
+            q_var="q",
+            fields=("pos",),
+            dynamics_fields=None,
+        )
+        key = make_jac_key(
+            k=0,
+            owner_type="link",
+            owner_name="ee",
+            dtype=DTYPE_KINEMATICS,
+            field="pos",
+            var="q",
+        )
+
+        state = builder.build_state(np.array([0.3, -0.4]), required=[key])
+        expected = np.array(
+            [
+                [-0.3894183423086506, 0.0],
+                [1.921060994002885, 1.0],
+                [0.0, 0.0],
+            ],
+            dtype=float,
+        )
+        np.testing.assert_allclose(state[key], expected, rtol=0.0, atol=1e-12)
+
     def test_kots_state_field_name_keeps_canonical_torque_derivative_orders(self) -> None:
         assert _kots_state_mod.KotsAdapter.state_field_name("torque_d1") == "torque_d1"
         assert _kots_state_mod.KotsAdapter.state_field_name("torque_d2") == "torque_d2"

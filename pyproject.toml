@@ -36,7 +36,8 @@ where = ["."]
 include = ["rei*"]
 
 [tool.uv.sources]
-robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "develop" }
+# Pinned after validating the native-model/state-package API migration.
+robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "825dfe29cb4cae04b118298ea9a51a8d08e9de83" }
 
 [dependency-groups]
 dev = [

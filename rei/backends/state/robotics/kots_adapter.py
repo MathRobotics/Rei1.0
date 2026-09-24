@@ -326,7 +326,22 @@ class KotsAdapter:
             return self.stack_total_joint_jacobians(total_joint_ref.refs)
 
         J = self.jac_from_single_state_ref(state_ref)
+        # RoboKots' native-model API (introduced with the state-package
+        # migration) returns link kinematic Jacobians in the requested world
+        # frame.  Older releases returned local rows even for a world ref, so
+        # retain the conversion only for that legacy contract.
+        if self.uses_native_world_kinematics_jacobians():
+            return J
         return self.rotate_link_kinematics_jacobian_to_world(J=J, key=key, state_ref=state_ref)
+
+    def uses_native_world_kinematics_jacobians(self) -> bool:
+        """Whether RoboKots honors the frame on link-kinematics derivatives.
+
+        ``_model_metadata`` is installed by RoboKots' native-model input API.
+        Its Jacobian contract supersedes the legacy local-row behavior while
+        keeping the public ``Kots`` entry point unchanged.
+        """
+        return getattr(self.model, "_model_metadata", None) is not None
 
     def link_world_rotation(self, *, state_ref: Any) -> Array | None:
         owner_type = self.state_ref_owner_type(state_ref)

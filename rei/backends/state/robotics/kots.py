@@ -279,11 +279,13 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         if update_kinematics:
             self._update_kinematics(q_vec)
         state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
-        rhs_local = self.adapter.rotate_link_kinematics_rhs_to_local(
-            rhs=np.asarray(rhs, dtype=float),
-            key=key,
-            state_ref=state_ref,
-        )
+        rhs_local = np.asarray(rhs, dtype=float)
+        if not self.adapter.uses_native_world_kinematics_jacobians():
+            rhs_local = self.adapter.rotate_link_kinematics_rhs_to_local(
+                rhs=rhs_local,
+                key=key,
+                state_ref=state_ref,
+            )
         return self.adapter.transpose_matvec_from_state_ref(state_ref, rhs_local)
 
 
