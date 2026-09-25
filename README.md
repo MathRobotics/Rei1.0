@@ -54,7 +54,7 @@ runtime = compile_nls_problem_spec_toml(
     "examples/spec/basic.toml",
     build_state=lambda *_args, **_kwargs: {},
 )
-out = solve(runtime, solver="gauss_newton")
+out = solve(runtime)  # classical Levenberg–Marquardt
 
 print(out.solution)
 print(out.stats.status)
@@ -419,6 +419,21 @@ PYTHONPATH=/path/to/RoboKots:. python developer/benchmarks/robokots_jacobian_mul
 
 ## Solvers
 
+`solve()` now defaults to classical Levenberg–Marquardt (`"levenberg_marquardt"`).
+The previous adaptive Gauss–Newton algorithm remains unchanged and can be
+reproduced with `solver="gauss_newton"` and the same options/initial point.
+LM uses a gain ratio to accept/reject full steps and update damping; it does not
+use line search or the legacy gradient-progress acceptance near roundoff.
+See [the LM baseline](docs/levenberg-marquardt.md) for equations and migration.
+
+Both built-in solvers print state history without an external callback;
+set `options={"verbose": False}` to silence it. LM records accepted/rejected
+trial details in `outcome.trial_history`, separately from `outcome.history`.
+`options={"history_path": "history.jsonl"}` streams states to that file and
+trials to `history.lm_trials.jsonl`; `trial_history_path` overrides the latter.
+The previous solver retains `outcome.line_search_history` and
+`line_search_history_path`. See [solver history](docs/solver-history.md).
+
 ### Residual VJP operators
 
 For large trajectory parameter vectors, use `NLSRuntime.weighted_residual_vjp`
@@ -453,7 +468,8 @@ the corresponding rows.
 
 `solve()` accepts these solver names:
 
-- `"gauss_newton"`: built-in Gauss-Newton solver
+- `"levenberg_marquardt"`: classical LM baseline (default)
+- `"gauss_newton"`: previous adaptive Gauss-Newton solver (preserved)
 - `"scipy_minimize"`: requires `scipy`
 - `"cyipopt"`: requires `cyipopt`
 - `"liteopt"`: requires `liteopt`
@@ -465,8 +481,8 @@ from rei import solve
 
 out = solve(
     runtime,
-    solver="gauss_newton",
-    options={"max_iters": 50, "tol_r": 1e-10, "tol_dx": 1e-10},
+    solver="levenberg_marquardt",
+    options={"max_iters": 200, "tol_grad": 1e-10, "tol_dx": 1e-12},
 )
 
 print(out.solution)
@@ -474,7 +490,12 @@ print(out.stats)
 print(out.timing)
 ```
 
-The built-in Gauss-Newton solver and `nls()` check stationarity before treating
+LM stops on a small gradient OR a small relative step, as in the reference
+algorithm. `out.meta["reason"]` distinguishes these; `gradient_converged`
+reports whether `max(abs(J.T @ r)) <= tol_grad`. Use `tol_dx=0` to disable
+step-based convergence. A numerical stall or iteration limit remains possible.
+
+The preserved Gauss-Newton solver and `nls()` check stationarity before treating
 a small step as convergence. `tol_grad` (default `1e-10`) bounds
 `max(abs(J.T @ r))`. A small step with neither a sufficiently small residual
 nor gradient is reported as `stalled`. Gauss-Newton also restores the last

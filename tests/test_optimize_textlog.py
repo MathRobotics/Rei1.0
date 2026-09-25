@@ -77,6 +77,7 @@ def test_gauss_newton_callback_receives_current_jt_r() -> None:
 
     solve(
         runtime,
+        solver="gauss_newton",
         options={"max_iters": 1, "line_search": False},
         on_iter=lambda _k, _rnorm, _dxnorm, jt_r: received.append(np.asarray(jt_r)),
     )

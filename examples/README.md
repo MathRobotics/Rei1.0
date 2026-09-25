@@ -48,6 +48,16 @@ python examples/compare_robotics_backends.py --backend robokots
 
 ## サンプル一覧
 
+RoboKots / Pinocchio の軌道最適化例は LM が既定です。
+反復を実行中に自動表示し（`--quiet` で抑制）、`--show-trials` で試行詳細も表示します。
+`--history history.jsonl` で反復を `history.jsonl`、詳細を `history.lm_trials.jsonl` に分けて保存します。
+詳細の保存先は `--trial-history trials.jsonl` で変更できます。
+従来方式は `--solver gauss_newton` で再現し、`--show-line-search` と
+`--line-search-history line_search.jsonl` はこの方式に限って使用できます。
+`--history-vectors` で変数と
+`Jᵀr` の全成分も含めます。保存先は新しいファイル名を指定してください。
+詳細は [ソルバの履歴](../docs/solver-history.md) を参照してください。
+
 - `minimize_quadratic.py`: `get_var` ベースの最小 NLS を Problem Spec 風 dict で定義して解く
 - `get_state_minimal.py`: Problem Spec 風 dict から `get_state` と `build_state()` を接続する最小例
 - `toml_spec_problem.py`: 標準 TOML spec ファイル（`spec/basic.toml`）を読み込んで解く

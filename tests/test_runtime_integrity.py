@@ -210,7 +210,7 @@ def test_tiny_necessary_update_is_applied_before_convergence(solver):
                 return self.A @ self.x - 1.
         problem = ScaledProblem(np.array([[1e15]]))
         problem.set_point([0.])
-        out = solve(problem, options={'line_search': solver == 'gauss_newton', 'tol_grad': 1e-10})
+        out = solve(problem, solver='gauss_newton', options={'line_search': solver == 'gauss_newton', 'tol_grad': 1e-10})
     assert out.converged
     np.testing.assert_allclose(out.solution, [1e-15], rtol=1e-12, atol=0.)
     assert out.stats.residual_norm < 1e-10
@@ -219,6 +219,6 @@ def test_tiny_necessary_update_is_applied_before_convergence(solver):
 @pytest.mark.parametrize('line_search', [True, False])
 def test_excessive_damping_is_not_mistaken_for_stationarity(line_search):
     problem = SimplexMinNormProblem(np.ones((1, 1)))
-    out = solve(problem, options={'damping': 1e20, 'line_search': line_search})
+    out = solve(problem, solver='gauss_newton', options={'damping': 1e20, 'line_search': line_search})
     assert out.status == 'stalled'
     assert out.stats.residual_norm == pytest.approx(1.)

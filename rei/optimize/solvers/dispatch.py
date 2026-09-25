@@ -12,6 +12,7 @@ from ...core.timing import Profiler, ensure_profiler
 from ...problem import LinearizedProblem, as_linearized_problem
 from ...xops import as_vec
 from .gauss_newton import solve_gauss_newton
+from .levenberg_marquardt import solve_levenberg_marquardt
 from .nls import nls
 
 Array = np.ndarray
@@ -27,6 +28,10 @@ _COMMON_SOLVE_OPTION_KEYS = frozenset(
 )
 
 _SOLVER_REI_OPTION_KEYS: dict[str, frozenset[str]] = {
+    "levenberg_marquardt": frozenset({
+        "max_iters", "tol_grad", "tol_dx", "tau", "damping",
+        "history", "history_vectors", "history_path", "trial_history_path", "verbose",
+    }),
     "gauss_newton": frozenset(
         {
             "max_iters",
@@ -98,7 +103,7 @@ _ALL_REI_SOLVER_OPTION_KEYS = frozenset().union(*_SOLVER_REI_OPTION_KEYS.values(
 def _allowed_solve_option_keys(solver_key: str) -> frozenset[str]:
     allowed = set(_COMMON_SOLVE_OPTION_KEYS)
     allowed.update(_SOLVER_REI_OPTION_KEYS[solver_key])
-    if solver_key != "gauss_newton":
+    if solver_key not in {"gauss_newton", "levenberg_marquardt"}:
         allowed.add("backend_options")
     return frozenset(allowed)
 
@@ -115,17 +120,17 @@ def _normalize_backend_options_for_solver(
     allowed = _allowed_solve_option_keys(solver_key)
     unknown = tuple(k for k in options if k not in allowed)
     if not unknown:
-        if solver_key == "gauss_newton":
+        if solver_key in {"gauss_newton", "levenberg_marquardt"}:
             return None
         return _as_options_mapping(
             options.get("backend_options", None),
             where=f"solve({solver_key})",
         )
 
-    if solver_key == "gauss_newton":
-        allowed_text = _format_option_names(_allowed_solve_option_keys("gauss_newton"))
+    if solver_key in {"gauss_newton", "levenberg_marquardt"}:
+        allowed_text = _format_option_names(_allowed_solve_option_keys(solver_key))
         raise ValueError(
-            "solve(gauss_newton): unsupported option(s): "
+            f"solve({solver_key}): unsupported option(s): "
             f"{_format_option_names(unknown)}. "
             f"Allowed options are: {allowed_text}."
         )
@@ -996,14 +1001,14 @@ def solve_liteopt_gd(
 def solve(
     problem: Any,
     *,
-    solver: str = "gauss_newton",
+    solver: str = "levenberg_marquardt",
     x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
     on_iter: IterCallback | None = None,
     options: Mapping[str, Any] | None = None,
     profiler: Profiler | None = None,
 ) -> SolveResult:
-    """Dispatch runtime solve to one of: gauss_newton / scipy_minimize / cyipopt / liteopt.
+    """Dispatch runtime solve (default: classical Levenberg-Marquardt).
 
     Returns:
       SolveOutcome(solution, stats, timing, meta)
@@ -1011,8 +1016,17 @@ def solve(
     Solver parameters are provided via `options`.
     `x0` may be passed directly or as `options["x0"]` (but not both).
 
-    gauss_newton:
+    levenberg_marquardt (default):
+      max_iters=200, tol_grad=1e-10, tol_dx=1e-12, tau=1e-3, damping=None
+      history=True, history_vectors=False, history_path=None, trial_history_path=None
+      verbose=True; no line search or custom roundoff acceptance
+
+    gauss_newton (previous adaptive method, unchanged):
       max_iters, tol_r, tol_dx, tol_grad, damping, line_search, ls_beta, ls_min_step, ls_max_iters
+      ls_max_retries=3, damping_increase=10.0, damping_max=1e12
+      damping_decrease=0.1, c_armijo=1e-4
+      history=True, history_vectors=False, history_path=None, line_search_history_path=None
+      verbose=True (print state history during the solve)
 
     scipy_minimize:
       method, max_iters, tol, bounds, backend_options
@@ -1039,7 +1053,7 @@ def solve(
     if key not in _SOLVER_REI_OPTION_KEYS:
         raise ValueError(
             "Unknown solver. Use one of: "
-            "'gauss_newton', 'scipy_minimize', 'cyipopt', 'liteopt'. "
+            "'levenberg_marquardt', 'gauss_newton', 'scipy_minimize', 'cyipopt', 'liteopt'. "
             "Solver aliases are not supported. "
             f"Got solver={solver!r}."
         )
@@ -1051,6 +1065,13 @@ def solve(
     weighted = None if opts.get("weighted") is None else bool(opts["weighted"])
     term_indices = _normalize_term_indices_option(opts.get("term_indices", None))
     backend_options = _normalize_backend_options_for_solver(opts, solver_key=key)
+
+    if key == "levenberg_marquardt":
+        lm_options = {k: v for k, v in opts.items() if k in _SOLVER_REI_OPTION_KEYS[key]}
+        return solve_levenberg_marquardt(
+            problem, x0=x0_override, required=required, weighted=weighted,
+            term_indices=term_indices, on_iter=on_iter, profiler=profiler, **lm_options,
+        )
 
     if key == "gauss_newton":
         return solve_gauss_newton(
@@ -1189,6 +1210,7 @@ __all__ = [
     "nls",
     "solve",
     "solve_gauss_newton",
+    "solve_levenberg_marquardt",
     "solve_scipy_minimize",
     "solve_cyipopt_minimize",
     "solve_liteopt_gd",
