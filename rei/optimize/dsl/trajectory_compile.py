@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
 from ...core.mapping import mapping_as_dict
 from ...core.trajectory import TrajectoryMap
+from ...core.trajectory_dsl import validate_trajectory_maps
 from .dsl_ops import find_var_dsl
 from .trajectory import (
-    build_trajectory_map,
     build_trajectory_maps_with_derivatives,
     default_dt_from_time,
     default_steps_from_time,
@@ -103,14 +103,20 @@ def prepare_trajectory_problem_dsl(
     default_steps: int | None = None,
     default_q_dim: int | None = None,
     default_dt: float | None = None,
+    trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
 ) -> PreparedTrajectoryProblemDsl:
-    """Prepare a normalized trajectory DSL and derivative maps for backend compile paths."""
+    """Prepare a normalized DSL, preserving supplied map objects and filling gaps.
+
+    trajectory_maps may be an order-to-map mapping or a list indexed by order.
+    Supplied maps must use this DSL's knots/samples and derivative_wrt/dt units.
+    """
 
     dsl_dict = deepcopy(mapping_as_dict(dsl, where="dsl"))
     trajectory_dsl_raw = dsl_dict.get("trajectory", None)
     if not isinstance(trajectory_dsl_raw, Mapping):
         raise ValueError("DSL must contain [trajectory] section.")
     trajectory_dsl = mapping_as_dict(trajectory_dsl_raw, where="dsl.trajectory")
+    dsl_dict["trajectory"] = trajectory_dsl
 
     p_var_name = _resolve_p_var_name(trajectory_dsl=trajectory_dsl, p_var=p_var)
 
@@ -119,13 +125,6 @@ def prepare_trajectory_problem_dsl(
     if default_q_dim is None:
         default_q_dim = model_dof
 
-    traj_map = build_trajectory_map(
-        trajectory_dsl,
-        default_steps=default_steps,
-        default_q_dim=default_q_dim,
-    )
-    trajectory_dsl.setdefault("steps", int(traj_map.steps))
-    trajectory_dsl.setdefault("q_dim", int(traj_map.q_dim))
     dt = _resolve_dt(dsl_dict, default_dt=default_dt)
 
     model_order_i = int(model_order)
@@ -141,14 +140,27 @@ def prepare_trajectory_problem_dsl(
                 f"max_derivative_order must be >= 0, got {max_derivative_order_use}."
             )
 
+    existing = validate_trajectory_maps(trajectory_dsl, trajectory_maps,
+                                       default_steps=default_steps, default_q_dim=default_q_dim)
+    if existing and 0 not in existing:
+        raise ValueError("trajectory_maps must include order 0.")
+    max_derivative_order_use = max(max_derivative_order_use, max(existing, default=0))
     traj_maps = build_trajectory_maps_with_derivatives(
         trajectory_dsl,
         max_derivative_order=max_derivative_order_use,
         derivative_wrt=derivative_wrt,
-        default_steps=traj_map.steps,
-        default_q_dim=traj_map.q_dim,
+        default_steps=default_steps,
+        default_q_dim=default_q_dim,
         default_dt=dt,
+        existing_maps=existing,
     )
+    traj_map = traj_maps[0]
+    trajectory_dsl.setdefault("steps", int(traj_map.steps))
+    trajectory_dsl.setdefault("q_dim", int(traj_map.q_dim))
+    # Keep expression derivative units aligned with the prepared state maps,
+    # including compile calls which supply the time grid only through defaults.
+    if dsl_dict.get("time") is None:
+        dsl_dict["time"] = {"N": int(traj_map.steps) - 1, "dt": dt}
     traj_maps_by_order = {i: m for i, m in enumerate(traj_maps)}
 
     p_var_dsl = _ensure_variable_entry(dsl_dict, name=p_var_name)

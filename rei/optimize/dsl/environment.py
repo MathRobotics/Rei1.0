@@ -9,6 +9,7 @@ import numpy as np
 
 from ...core.time_grid import TimeGrid
 from ...core.trajectory import TrajectoryMap
+from ...core.trajectory_dsl import pick_trajectory_value, validate_trajectory_maps
 from ...core.expr.registry import ExprRegister
 from ...core.expr.types import VariablePack
 from .trajectory import (
@@ -87,6 +88,30 @@ class DslBuildEnv:
     trajectory_cache: dict[TrajectoryCacheKey, TrajectoryMap] = field(default_factory=dict)
     trajectory_derivative_cache: dict[TrajectoryDerivativeCacheKey, TrajectoryMap] = field(default_factory=dict)
 
+    def _trajectory_defaults(self, traj_dsl, default_q_dim):
+        typ = str(traj_dsl.get("type", "")).strip().lower()
+        steps = pick_trajectory_value(traj_dsl, section=typ, key="steps")
+        q_dim = pick_trajectory_value(traj_dsl, section=typ, key="q_dim")
+        return (default_steps_from_time(self.time) if steps is None else int(steps),
+                default_q_dim if q_dim is None else int(q_dim))
+
+    def seed_trajectory_maps(self, traj_dsl, maps, *, derivative_wrt="time", default_q_dim=None):
+        """Share prepared map objects with expressions, scoped to spec/time/units."""
+        steps, q_dim = self._trajectory_defaults(traj_dsl, default_q_dim)
+        existing = validate_trajectory_maps(traj_dsl, maps, default_steps=steps, default_q_dim=q_dim)
+        if not existing:
+            return
+        if 0 not in existing:
+            raise ValueError("trajectory_maps must include order 0.")
+        fingerprint = _trajectory_spec_fingerprint(traj_dsl)
+        wrt = _normalize_derivative_wrt(derivative_wrt)
+        if wrt not in {"time", "u"}:
+            raise ValueError("derivative_wrt must be 'time' or 'u'.")
+        dt = default_dt_from_time(self.time) if wrt == "time" else None
+        self.trajectory_cache[fingerprint, steps, q_dim] = existing[0]
+        for order, trajectory in existing.items():
+            self.trajectory_derivative_cache[fingerprint, order, wrt, dt, steps, q_dim] = trajectory
+
     def build_expr(self, dsl: dict[str, Any]) -> Any:
         typ = str(dsl["type"])
         builder = self.expr_register.expr.get(typ, None)
@@ -107,7 +132,7 @@ class DslBuildEnv:
         *,
         default_q_dim: int | None = None,
     ) -> TrajectoryMap:
-        default_steps = default_steps_from_time(self.time)
+        default_steps, default_q_dim = self._trajectory_defaults(traj_dsl, default_q_dim)
         key = (_trajectory_spec_fingerprint(traj_dsl), default_steps, default_q_dim)
         cached = self.trajectory_cache.get(key, None)
         if cached is not None:
@@ -135,7 +160,7 @@ class DslBuildEnv:
         if deriv_order == 0:
             return self.resolve_trajectory_map(traj_dsl, default_q_dim=default_q_dim)
 
-        default_steps = default_steps_from_time(self.time)
+        default_steps, default_q_dim = self._trajectory_defaults(traj_dsl, default_q_dim)
         default_dt = default_dt_from_time(self.time)
         fingerprint = _trajectory_spec_fingerprint(traj_dsl)
         wrt = _normalize_derivative_wrt(derivative_wrt)
@@ -174,7 +199,7 @@ class DslBuildEnv:
         if max_order == 0:
             return [self.resolve_trajectory_map(traj_dsl, default_q_dim=default_q_dim)]
 
-        default_steps = default_steps_from_time(self.time)
+        default_steps, default_q_dim = self._trajectory_defaults(traj_dsl, default_q_dim)
         default_dt = default_dt_from_time(self.time)
         fingerprint = _trajectory_spec_fingerprint(traj_dsl)
         wrt = _normalize_derivative_wrt(derivative_wrt)
@@ -192,6 +217,9 @@ class DslBuildEnv:
             for order in range(0, max_order + 1)
         ]
         cached_trajectories = [self.trajectory_derivative_cache.get(key, None) for key in keys]
+        base_key = (fingerprint, default_steps, default_q_dim)
+        if cached_trajectories[0] is None:
+            cached_trajectories[0] = self.trajectory_cache.get(base_key)
         if all(trajectory is not None for trajectory in cached_trajectories):
             return [trajectory for trajectory in cached_trajectories if trajectory is not None]
 
@@ -202,6 +230,8 @@ class DslBuildEnv:
             default_steps=default_steps,
             default_q_dim=default_q_dim,
             default_dt=default_dt,
+            existing_maps={r: trajectory for r, trajectory in enumerate(cached_trajectories)
+                           if trajectory is not None},
         )
         base_key = (fingerprint, default_steps, default_q_dim)
         self.trajectory_cache[base_key] = trajectories[0]

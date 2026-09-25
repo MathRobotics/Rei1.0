@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
 
-from .bspline import bspline_basis_derivative_matrices, default_clamped_uniform_knots
+from .bspline import bspline_basis_derivative_matrices_for_orders, default_clamped_uniform_knots
 
 Array = np.ndarray
 
@@ -371,6 +371,7 @@ class TrajectoryMap:
         u_samples: Array | None = None,
         max_derivative_order: int,
         parameter_scale: float = 1.0,
+        existing_maps: Mapping[int, "TrajectoryMap"] | None = None,
     ) -> list["TrajectoryMap"]:
         """Build derivative maps up to ``max_derivative_order`` for a clamped B-spline trajectory.
 
@@ -462,19 +463,44 @@ class TrajectoryMap:
             )
         u_vec = np.clip(u_vec, u_min, u_max)
 
-        basis_all = bspline_basis_derivative_matrices(
+        existing = normalize_trajectory_maps(existing_maps)
+        for trajectory in existing.values():
+            if (trajectory.steps, trajectory.q_dim, trajectory.p_dim) != (steps, q_dim, num_ctrl_points * q_dim):
+                raise ValueError("existing trajectory map dimensions do not match the B-spline specification.")
+        missing = [r for r in range(max_derivative_order + 1) if r not in existing]
+        basis_all = bspline_basis_derivative_matrices_for_orders(
             u_vec=u_vec,
             degree=degree,
             knots=knots,
             num_ctrl_points=num_ctrl_points,
-            max_derivative_order=max_derivative_order,
+            orders=missing,
         )
 
         maps: list[TrajectoryMap] = []
-        eye = np.eye(q_dim, dtype=float)
         for order in range(max_derivative_order + 1):
+            if order in existing:
+                maps.append(existing[order])
+                continue
             scale = float(parameter_scale) ** order
-            A = BsplineTrajectoryOperator(scale * basis_all[order, :, :], q_dim=q_dim)
+            A = BsplineTrajectoryOperator(scale * basis_all[order], q_dim=q_dim)
             b = np.zeros((steps * q_dim,), dtype=float)
             maps.append(cls(A=A, b=b, steps=steps, q_dim=q_dim))
         return maps
+
+
+def normalize_trajectory_maps(maps) -> dict[int, TrajectoryMap]:
+    """Copy the container, not the maps; reject invalid orders and mixed dimensions."""
+    if maps is None:
+        return {}
+    items = maps.items() if isinstance(maps, Mapping) else enumerate(maps)
+    result = {}
+    for order, trajectory in items:
+        if isinstance(order, bool) or not isinstance(order, (int, np.integer)) or order < 0:
+            raise ValueError("trajectory_maps keys must be nonnegative integer derivative orders.")
+        if not isinstance(trajectory, TrajectoryMap):
+            raise TypeError("trajectory_maps values must be TrajectoryMap objects.")
+        result[int(order)] = trajectory
+    dimensions = {(m.steps, m.q_dim, m.p_dim) for m in result.values()}
+    if len(dimensions) > 1:
+        raise ValueError("trajectory_maps must have matching steps, q_dim and p_dim.")
+    return result

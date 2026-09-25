@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable
 
@@ -9,6 +9,7 @@ import numpy as np
 from ..core.expr.types import Variable, VariablePack
 from ..core.state_cache import StateCache, StateKey
 from ..core.time_grid import TimeGrid
+from ..core.trajectory import TrajectoryMap
 from .dsl.environment import DslBuildEnv
 from .dsl.io import load_problem_toml
 from .dsl.variable_utils import expand_variable_init, resolve_variable_dim
@@ -118,12 +119,27 @@ def build_term(env: DslBuildEnv, dsl: dict[str, Any]) -> tuple[Any, Any, dict[st
     return expr, cost, attrs
 
 
-def build_nls_problem(dsl: dict[str, Any], *, expr_register: ExprRegister) -> tuple[NLSProblem, TimeGrid]:
+def build_nls_problem(dsl: dict[str, Any], *, expr_register: ExprRegister,
+                      trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
+                      derivative_wrt: str = "time") -> tuple[NLSProblem, TimeGrid]:
     time_dsl = dsl.get("time", None)
     time = TimeGrid.single_time() if time_dsl is None else TimeGrid.from_dsl(time_dsl)
 
     pack = build_variable_pack(dsl)
     env = DslBuildEnv(pack=pack, time=time, expr_register=expr_register, root_dsl=dsl)
+    if trajectory_maps is not None:
+        trajectory_dsl = dsl.get("trajectory")
+        if not isinstance(trajectory_dsl, Mapping):
+            raise ValueError("trajectory_maps requires a root trajectory specification.")
+        from ..core.trajectory_dsl import infer_bspline_q_dim_from_var
+
+        var_name = trajectory_dsl.get("var", "p")
+        variable = next((v for v in pack.vars if v.name == var_name), None)
+        q_dim = None
+        if variable is not None and trajectory_dsl.get("type") == "bspline":
+            q_dim = infer_bspline_q_dim_from_var(trajectory_dsl, var_dim=variable.dim())
+        env.seed_trajectory_maps(trajectory_dsl, trajectory_maps,
+                                 derivative_wrt=derivative_wrt, default_q_dim=q_dim)
     built_terms = [build_term(env, term_dsl) for term_dsl in dsl.get("terms", [])]
     terms = [(expr, cost) for expr, cost, _attrs in built_terms]
     term_attrs = [attrs for _expr, _cost, attrs in built_terms]
@@ -140,11 +156,14 @@ def compile_nls_problem(
     *,
     build_state: Callable[..., dict],
     expr_register: ExprRegister | None = None,
+    trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
+    derivative_wrt: str = "time",
 ) -> NLSRuntime:
     if expr_register is None:
         expr_register = create_default_expr_register()
 
-    problem, time = build_nls_problem(dsl, expr_register=expr_register)
+    problem, time = build_nls_problem(dsl, expr_register=expr_register,
+                                    trajectory_maps=trajectory_maps, derivative_wrt=derivative_wrt)
     cache = StateCache(build_state=build_state)
     required = collect_required_state_keys(problem)
     return NLSRuntime.from_problem(problem, state=cache, time=time, required=required)
@@ -155,6 +174,8 @@ def compile_nls_problem_spec(
     *,
     build_state: Callable[..., dict],
     expr_register: ExprRegister | None = None,
+    trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
+    derivative_wrt: str = "time",
 ) -> NLSRuntime:
     from .dsl.spec import problem_spec_to_dsl
 
@@ -162,6 +183,8 @@ def compile_nls_problem_spec(
         problem_spec_to_dsl(spec),
         build_state=build_state,
         expr_register=expr_register,
+        trajectory_maps=trajectory_maps,
+        derivative_wrt=derivative_wrt,
     )
 
 
@@ -170,6 +193,8 @@ def compile_nls_problem_spec_toml(
     *,
     build_state: Callable[..., dict],
     expr_register: ExprRegister | None = None,
+    trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
+    derivative_wrt: str = "time",
 ) -> NLSRuntime:
     from .dsl.spec import load_problem_spec_toml
 
@@ -177,6 +202,8 @@ def compile_nls_problem_spec_toml(
         load_problem_spec_toml(path),
         build_state=build_state,
         expr_register=expr_register,
+        trajectory_maps=trajectory_maps,
+        derivative_wrt=derivative_wrt,
     )
 
 

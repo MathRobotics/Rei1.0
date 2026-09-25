@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ..optimize.builder import compile_nls_problem
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl, prepare_trajectory_problem_dsl
 from ..optimize.runtime import NLSRuntime
+from ..core.trajectory import TrajectoryMap
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ def compile_trajectory_problem_with_adapter(
     default_steps: int | None = None,
     default_q_dim: int | None = None,
     default_dt: float | None = None,
+    trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
 ) -> BackendTrajectoryCompileResult:
     model_dof = adapter.infer_model_dof(model)
     model_order = adapter.infer_model_order(model)
@@ -64,13 +66,17 @@ def compile_trajectory_problem_with_adapter(
         default_steps=default_steps,
         default_q_dim=default_q_dim,
         default_dt=default_dt,
+        trajectory_maps=trajectory_maps,
     )
     state_builder = adapter.build_state_builder(
         model=model,
         data=data,
         prepared=prepared,
     )
-    runtime = compile_nls_problem(prepared.dsl, build_state=state_builder.build_state)
+    runtime = compile_nls_problem(
+        prepared.dsl, build_state=state_builder.build_state,
+        trajectory_maps=prepared.trajectory_derivative_maps, derivative_wrt=derivative_wrt,
+    )
     adapter.validate_runtime(
         runtime=runtime,
         state_builder=state_builder,

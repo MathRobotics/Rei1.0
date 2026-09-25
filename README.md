@@ -453,6 +453,45 @@ the expression VJP.  Custom costs used with this operator must implement
 
 ### Sparse B-spline trajectory maps
 
+Prepared maps are shared by the trajectory state builder and `get_traj_var`
+expressions. To reuse maps also used for IOC diagnostics, pass
+`trajectory_maps=maps` to `compile_kots_trajectory_problem`,
+`compile_pinocchio_trajectory_problem`, or `compile_trajectory_ioc_problem`:
+
+```python
+from rei import build_trajectory_maps_with_derivatives
+
+maps = build_trajectory_maps_with_derivatives(
+    problem["trajectory"],  # include q_dim (or pass default_q_dim)
+    max_derivative_order=3,
+    derivative_wrt="time",
+    default_steps=problem["time"]["N"] + 1,
+    default_dt=problem["time"]["dt"],
+)
+compiled = compile_kots_trajectory_problem(
+    problem, model=kots, max_derivative_order=3, trajectory_maps=maps,
+)
+assert compiled.trajectory_map is maps[0]
+assert compiled.trajectory_derivative_maps[3] is maps[3]
+```
+
+The API accepts a list indexed by derivative order or `{order: TrajectoryMap}`.
+A nonempty external collection must include order 0. Missing orders are built
+without replacing existing maps or re-evaluating their B-spline bases.
+`prepare_trajectory_problem_dsl` and the `compile_nls_problem*` APIs also accept
+`trajectory_maps`; `DslBuildEnv.seed_trajectory_maps` is the internal injection
+point. With no external maps, backend compilation generates and shares one set.
+
+Maps must match the DSL's knots, samples, parameter ordering, `derivative_wrt`,
+and `dt`. Rei validates orders and dimensions, but does not recompute supplied
+maps to verify their numeric contents. Treat shared maps as read-only. The
+compile-local cache separates DSL content, effective dimensions, derivative
+units and time step; time and parameter derivatives are not interchangeable.
+`derivative_wrt` on the compile API describes supplied maps; it does not
+override an expression's explicit/default derivative units. In particular,
+raw `get_traj_var` defaults to `"u"`; use `derivative_wrt="time"` for time
+derivatives. Finite-difference paths also retain existing map objects.
+
 B-spline derivative requests must satisfy `derivative_order <= degree`
 (likewise `max_derivative_order <= degree`). Larger orders raise `ValueError`
 instead of returning zero derivatives, including the nonuniform-sample path.

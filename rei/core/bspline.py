@@ -196,21 +196,34 @@ def bspline_basis_derivative_matrices(
             f"got derivative order {max_derivative_order} > degree {degree}."
         )
 
-    out = np.zeros((max_derivative_order + 1, u_vec.size, num_ctrl_points), dtype=float)
-    out[0, :, :] = bspline_basis_matrix(
-        u_vec=u_vec,
-        degree=degree,
-        knots=knots,
-        num_ctrl_points=num_ctrl_points,
+    matrices = bspline_basis_derivative_matrices_for_orders(
+        u_vec=u_vec, degree=degree, knots=knots, num_ctrl_points=num_ctrl_points,
+        orders=range(max_derivative_order + 1),
     )
-    if max_derivative_order == 0:
-        return out
+    return np.stack([matrices[r] for r in range(max_derivative_order + 1)])
+
+
+def bspline_basis_derivative_matrices_for_orders(
+    *, u_vec: Array, degree: int, knots: Array, num_ctrl_points: int, orders,
+) -> dict[int, Array]:
+    """Evaluate only requested orders; intermediate control transforms are shared."""
+    orders = set(orders)
+    if any(not isinstance(r, (int, np.integer)) or r < 0 or r > degree for r in orders):
+        raise ValueError(f"B-spline derivative orders must be integers in [0, {degree}].")
+    if not orders:
+        return {}
+    u_vec = np.asarray(u_vec, dtype=float).reshape(-1)
+    knots = np.asarray(knots, dtype=float).reshape(-1)
+    out = {}
+    if 0 in orders:
+        out[0] = bspline_basis_matrix(u_vec=u_vec, degree=degree, knots=knots,
+                                      num_ctrl_points=num_ctrl_points)
 
     current_knots = knots.copy()
     current_degree = degree
     current_num_ctrl = num_ctrl_points
     transform = np.eye(num_ctrl_points, dtype=float)
-    for order in range(1, max_derivative_order + 1):
+    for order in range(1, max(orders) + 1):
         D = _bspline_derivative_transform(
             degree=current_degree,
             knots=current_knots,
@@ -224,13 +237,17 @@ def bspline_basis_derivative_matrices(
         if current_num_ctrl <= 0:
             break
 
+        if order not in orders:
+            continue
+
         basis_low = bspline_basis_matrix(
             u_vec=u_vec,
             degree=current_degree,
             knots=current_knots,
             num_ctrl_points=current_num_ctrl,
         )
-        out[order, :, :] = basis_low @ transform
+        out[order] = basis_low @ transform
 
-    out[np.abs(out) < 1e-14] = 0.0
+    for matrix in out.values():
+        matrix[np.abs(matrix) < 1e-14] = 0.0
     return out

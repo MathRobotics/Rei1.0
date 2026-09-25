@@ -209,6 +209,7 @@ def compile_pinocchio_trajectory_problem(
     dynamics_custom_handlers: Mapping[str, tuple[Callable[..., Array], Callable[..., Array]]] | None = None,
     unsupported: str = "error",
     torque_jacobian: str = "auto",
+    trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
 ) -> PinocchioTrajectoryCompiledProblem:
     model_order = _infer_model_order(model)
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
@@ -242,6 +243,7 @@ def compile_pinocchio_trajectory_problem(
         model=model,
         data=data,
         adapter=adapter,
+        trajectory_maps=trajectory_maps,
         p_var=p_var,
         max_derivative_order=max_derivative_order,
         derivative_wrt=derivative_wrt,

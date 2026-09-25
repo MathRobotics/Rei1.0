@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 
 from .bspline import default_clamped_uniform_knots
-from .trajectory import TrajectoryMap
+from .trajectory import TrajectoryMap, normalize_trajectory_maps
 
 
 def pick_trajectory_value(dsl: Mapping[str, Any], *, section: str, key: str) -> Any:
@@ -146,6 +146,7 @@ def _finite_difference_maps(
     *,
     max_derivative_order: int,
     step_size: float,
+    existing_maps: Mapping[int, TrajectoryMap] | None = None,
 ) -> list[TrajectoryMap]:
     """Approximate derivative trajectory maps via finite-difference operators."""
 
@@ -158,15 +159,17 @@ def _finite_difference_maps(
     G = _first_derivative_operator(steps=int(base.steps), step_size=float(step_size))
     Iq = np.eye(int(base.q_dim), dtype=float)
 
+    existing = normalize_trajectory_maps(existing_maps)
     maps = [base]
-    G_power = np.eye(int(base.steps), dtype=float)
-    for _order in range(1, max_order + 1):
-        G_power = G @ G_power
-        D = np.kron(G_power, Iq)
+    D = np.kron(G, Iq)
+    for order in range(1, max_order + 1):
+        if order in existing:
+            maps.append(existing[order])
+            continue
         maps.append(
             TrajectoryMap(
-                A=D @ base.A,
-                b=D @ base.b,
+                A=D @ maps[-1].A,
+                b=D @ maps[-1].b,
                 steps=int(base.steps),
                 q_dim=int(base.q_dim),
             )
@@ -359,6 +362,7 @@ def build_trajectory_maps_with_derivatives(
     default_steps: int | None = None,
     default_q_dim: int | None = None,
     default_dt: float | None = None,
+    existing_maps: Mapping[int, TrajectoryMap] | None = None,
 ) -> list[TrajectoryMap]:
     """Build a ``TrajectoryMap`` for trajectory derivatives.
 
@@ -395,11 +399,13 @@ def build_trajectory_maps_with_derivatives(
     if typ == "":
         raise ValueError("build_trajectory_maps_with_derivatives: trajectory.type is required.")
 
-    base_map = build_trajectory_map(
-        traj_dsl,
-        default_steps=default_steps,
-        default_q_dim=default_q_dim,
-    )
+    existing = validate_trajectory_maps(traj_dsl, existing_maps,
+                                       default_steps=default_steps, default_q_dim=default_q_dim)
+    base_map = existing.get(0)
+    if typ != "bspline" or max_order == 0:
+        if base_map is None:
+            base_map = build_trajectory_map(traj_dsl, default_steps=default_steps,
+                                            default_q_dim=default_q_dim)
     if max_order == 0:
         return [base_map]
 
@@ -430,6 +436,7 @@ def build_trajectory_maps_with_derivatives(
             base_map,
             max_derivative_order=max_order,
             step_size=fd_step_size,
+            existing_maps=existing,
         )
 
     steps = resolve_optional_positive_int(
@@ -482,6 +489,7 @@ def build_trajectory_maps_with_derivatives(
             u_samples=u_samples,
             max_derivative_order=max_order,
             parameter_scale=parameter_scale,
+            existing_maps=existing,
         )
 
     # wrt == "time" reaches here.
@@ -522,10 +530,14 @@ def build_trajectory_maps_with_derivatives(
                 f"Expected {steps}, got {u_samples.size}."
             )
         if not _is_uniform_spacing(u_samples):
+            if base_map is None:
+                base_map = build_trajectory_map(traj_dsl, default_steps=default_steps,
+                                                default_q_dim=default_q_dim)
             return _finite_difference_maps(
                 base_map,
                 max_derivative_order=max_order,
                 step_size=dt,
+                existing_maps=existing,
             )
         u_span = float(u_samples[-1] - u_samples[0])
 
@@ -544,4 +556,36 @@ def build_trajectory_maps_with_derivatives(
         u_samples=u_samples,
         max_derivative_order=max_order,
         parameter_scale=parameter_scale,
+        existing_maps=existing,
     )
+
+
+def validate_trajectory_maps(traj_dsl, maps, *, default_steps=None, default_q_dim=None):
+    """Validate supplied map dimensions without evaluating spline basis functions.
+
+    The caller is responsible for matching knots, samples and derivative units.
+    """
+    existing = normalize_trajectory_maps(maps)
+    if not existing:
+        return existing
+    typ = str(traj_dsl.get("type", "")).strip().lower()
+    if typ not in {"bspline", "linear"}:
+        raise ValueError(f"unsupported trajectory type {typ!r}")
+    sample = next(iter(existing.values()))
+    for name, fallback in (("steps", default_steps), ("q_dim", default_q_dim)):
+        expected = resolve_optional_positive_int(pick_trajectory_value(traj_dsl, section=typ, key=name),
+                                                 name=name, fallback=fallback)
+        if expected is not None and getattr(sample, name) != expected:
+            raise ValueError(f"trajectory_maps {name} mismatch: expected {expected}, got {getattr(sample, name)}.")
+    if typ == "bspline":
+        degree = resolve_required_nonnegative_int(pick_trajectory_value(traj_dsl, section=typ, key="degree"), name="degree")
+        if max(existing) > degree:
+            raise ValueError(f"B-spline: requested derivative order {max(existing)} > degree {degree}.")
+        controls = resolve_required_positive_int(pick_trajectory_value(traj_dsl, section=typ, key="num_ctrl_points"), name="num_ctrl_points")
+        if sample.p_dim != controls * sample.q_dim:
+            raise ValueError("trajectory_maps p_dim does not match num_ctrl_points * q_dim.")
+    else:
+        A = np.asarray(pick_trajectory_value(traj_dsl, section=typ, key="A"), dtype=float)
+        if A.size != sample.steps * sample.q_dim * sample.p_dim or (A.ndim == 2 and A.shape != (sample.steps * sample.q_dim, sample.p_dim)):
+            raise ValueError("trajectory_maps dimensions do not match linear A.")
+    return existing
