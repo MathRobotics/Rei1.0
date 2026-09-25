@@ -420,8 +420,8 @@ PYTHONPATH=/path/to/RoboKots:. python developer/benchmarks/robokots_jacobian_mul
 ## Solvers
 
 `solve()` now defaults to classical Levenberg–Marquardt (`"levenberg_marquardt"`).
-The previous adaptive Gauss–Newton algorithm remains unchanged and can be
-reproduced with `solver="gauss_newton"` and the same options/initial point.
+The previous adaptive Gauss–Newton algorithm remains available as
+`solver="gauss_newton"` with the same options/initial point.
 LM uses a gain ratio to accept/reject full steps and update damping; it does not
 use line search or the legacy gradient-progress acceptance near roundoff.
 See [the LM baseline](docs/levenberg-marquardt.md) for equations and migration.

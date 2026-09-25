@@ -23,7 +23,8 @@ old = solve(runtime, solver="gauss_newton", options=previous_options)
 
 比較時は別の runtime を用意するか、両方に同じ `x0` を渡してください。
 ソルバは runtime の点を変更するため、連続実行だけでは同じ初期条件になりません。
-`solve_gauss_newton()` と `nls()` の動作は変えていません。
+`nls()` の動作は変えていません。`solve_gauss_newton()` は利用可能なままですが、
+数値的に無減衰となることを避ける相対ダンピング下限を持ちます。
 既存コードで `solver="gauss_newton"` を明示している場合は、自動で LM に変わりません。
 LM へ移行する際は `line_search`・`ls_*`・`c_armijo`・`tol_r`・旧ダンピング更新設定を
 除去してください。LM はこれらを黙って無視せずエラーにします。

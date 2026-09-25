@@ -119,16 +119,21 @@ options = {
     "damping_increase": 10.0,   # ダンピングを増やす倍率
     "damping_max": 1e12,       # 増加後のダンピングの上限
     "damping_decrease": 0.1,   # ダンピングを下げる倍率
+    "damping_min_factor": 100.0, # λ の相対下限の係数
     "c_armijo": 1e-4,         # 通常の探索に必要な減少の係数
 }
 ```
 
 `ls_max_retries = 0` で再試行を無効にできます。探索自体を無効にした場合も再試行しません。
-増加時のダンピングは `min(damping_max, max(1e-6, damping * damping_increase))` とし、
-初期値がゼロでも正の値にします。フルステップを採用した場合、または改善を確認した
-小ステップを採用した場合は、次の反復でダンピングを `damping_decrease` 倍に下げます。
-初期ダンピングを下限にはせず、通常の GN に近づけます。
-反復履歴の `damping` は実際に使った値、`next_damping` は次回の値です。
+各線形化点で `λ_min = damping_min_factor * eps * max(diag(JᵀJ))` を計算します。
+初期値、増加後の値、減少後の値のすべてをこの下限以上に保つため、`damping=0` でも
+実質的に無減衰な値にはなりません。増加時は
+`min(max(damping_max, λ_min), max(λ_min, damping * damping_increase))` です。
+したがって、絶対上限 `damping_max` が数値下限より小さい場合は、数値下限を優先します。
+フルステップを採用した場合、または改善を確認した小ステップを採用した場合は、次の
+反復でダンピングを `damping_decrease` 倍に下げますが、下限未満にはしません。
+反復履歴の `damping` は実際に使った値、`damping_min` はその点の相対下限、
+`next_damping` は次回の値です。
 `ls_min_step` と `ls_beta` は変更しません。各再探索は倍率 `1` から始まり、
 拡張した試行数上限はその反復内だけで使います。
 

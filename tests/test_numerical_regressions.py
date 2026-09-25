@@ -224,23 +224,29 @@ def test_kkt_still_rejects_nonoptimal_feasible_point():
     assert out.stationarity_inf == pytest.approx(1.)
 
 
-@pytest.mark.parametrize("solver", ["gauss_newton", "nls"])
-def test_least_squares_preserves_small_scale_direction(solver):
+def test_nls_preserves_small_scale_direction():
     from rei.optimize.solvers import nls
 
     J = np.diag([1., 1e-8])
     target = J @ np.ones(2)
-    if solver == "nls":
-        out = nls(lambda x: J @ x - target, lambda x: J, x0=np.zeros(2))
-    else:
-        rt = runtime_for(
-            sub(var("x"), {"type": "const", "var": "x", "value": [1., 1.]}),
-            [{"name": "x", "init": [0., 0.]}],
-            {"type": "diag_weight", "w": [1., 1e-16]},
-        )
-        out = solve(rt, solver="gauss_newton", options={"damping": 0.})
+    out = nls(lambda x: J @ x - target, lambda x: J, x0=np.zeros(2))
     assert out.converged
     np.testing.assert_allclose(out.solution, [1., 1.], atol=1e-10)
+
+
+def test_gauss_newton_applies_scale_aware_damping_floor():
+    # The relative λ floor deliberately regularizes the 1e-16 diagonal entry,
+    # even when the requested initial damping is zero.
+    rt = runtime_for(
+        sub(var("x"), {"type": "const", "var": "x", "value": [1., 1.]}),
+        [{"name": "x", "init": [0., 0.]}],
+        {"type": "diag_weight", "w": [1., 1e-16]},
+    )
+    out = solve(rt, solver="gauss_newton", options={"damping": 0., "verbose": False})
+    assert out.converged
+    np.testing.assert_allclose(out.solution[0], 1., atol=1e-10)
+    assert 0. < out.solution[1] < .01
+    assert out.history[0]["damping_min"] == pytest.approx(100. * np.finfo(float).eps)
 
 
 def test_augmented_damping_preserves_regularized_step():

@@ -74,7 +74,9 @@ def test_damping_retry_recomputes_direction_and_recovers():
     assert trials[0]["step_norm"] > trials[1]["step_norm"] > trials[2]["step_norm"]
     assert out.stats.objective < out.stats.initial_objective
     assert out.iterations == 1
-    assert out.history[-2]["damping"] == 1.
+    # The state record reports the damping to be used at that point, after
+    # accepting and relaxing the preceding step.
+    assert out.history[-2]["damping"] == .1
 
 
 def test_default_retry_recovers_previously_stalled_exponential_problem():
@@ -99,7 +101,11 @@ def test_retry_limit_does_not_mistake_tiny_damped_step_for_convergence(history):
         retries = [r for r in out.history if r["event"] == "iteration_retry"]
         assert len(retries) == 3
         assert [r["retry"] for r in retries] == [1, 2, 3]
-        assert retries[0]["damping"] == 1e-6  # positive bootstrap from zero
+        # The retry starts from a scale-aware numerical lower bound, rather
+        # than an unrelated absolute bootstrap such as 1e-6.
+        expected_floor = 100.0 * np.finfo(float).eps
+        assert retries[0]["damping_min"] == pytest.approx(expected_floor)
+        assert retries[0]["damping"] == pytest.approx(10.0 * expected_floor)
         assert out.history[-1]["reason"] == "line_search_retry_limit"
         assert out.history[-2]["line_search_trials"] == 4
 
@@ -127,12 +133,24 @@ def test_damping_cap_stops_retries_without_changing_point():
     {"damping_increase": 1.}, {"damping_increase": np.nan},
     {"damping_max": 0.}, {"damping_max": np.inf},
     {"damping_decrease": 0.}, {"damping_decrease": 1.}, {"damping_decrease": np.nan},
+    {"damping_min_factor": 0.}, {"damping_min_factor": np.nan},
     {"c_armijo": 0.}, {"c_armijo": 1.}, {"c_armijo": np.nan},
 ])
 def test_retry_options_validated_before_evaluation(options):
     problem = ScalarProblem(residual=lambda x: pytest.fail("must validate first"))
     with pytest.raises(ValueError):
         solve(problem, options=options)
+
+
+def test_damping_is_clamped_to_scale_aware_lower_bound():
+    # max(diag(J.T @ J)) is 9 here, so even damping=0 must use λ_min.
+    out = solve(ScalarProblem(1., lambda x: x, lambda x: 3.),
+                options={"damping": 0., "damping_min_factor": 10.,
+                         "max_iters": 1, "line_search": False, "verbose": False})
+    initial = out.history[0]
+    expected = 10.0 * np.finfo(float).eps * 9.0
+    assert initial["damping_min"] == pytest.approx(expected)
+    assert initial["damping"] == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("x0", [1e-8, 1e-12])
@@ -160,7 +178,7 @@ def test_success_relaxes_damping_and_continues_beyond_small_steps():
     assert states[0]["step_norm"] < 1e-3
     assert states[0]["jt_r_inf_norm"] > 1e-10
     assert len(states) > 1
-    assert states[1]["damping"] == states[0]["next_damping"]
+    assert states[1]["damping"] == states[1]["next_damping"]
     assert states[1]["damping"] < states[0]["damping"]
     assert out.history[-1]["jt_r_inf_norm"] <= 1e-10
 
