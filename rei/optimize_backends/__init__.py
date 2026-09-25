@@ -27,8 +27,11 @@ from .trajectory_ioc import (
     compile_trajectory_ioc_problem,
     estimate_ioc_weights,
 )
+from .ioc_observation import NoisyIocTrajectory, prepare_noisy_ioc_trajectory
 
 __all__ = [
+    "NoisyIocTrajectory",
+    "prepare_noisy_ioc_trajectory",
     "BackendCompileResult",
     "ProblemBackendAdapter",
     "compile_problem_with_adapter",

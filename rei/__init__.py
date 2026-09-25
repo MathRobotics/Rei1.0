@@ -100,6 +100,8 @@ from .optimize import (
     write_text_log,
 )
 from .optimize_backends import (
+    NoisyIocTrajectory,
+    prepare_noisy_ioc_trajectory,
     BackendFieldCapability,
     TrajectoryIocCompiledProblem,
     TrajectoryProblemDiagnostics,
@@ -110,6 +112,8 @@ from .optimize_backends import (
 )
 
 __all__ = [
+    "NoisyIocTrajectory",
+    "prepare_noisy_ioc_trajectory",
     "core",
     "optimize",
     "equations",

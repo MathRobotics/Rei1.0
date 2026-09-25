@@ -39,6 +39,7 @@ class KotsTrajectoryCompiledProblem:
     gravity: tuple[float, float, float] | None = None
     diagnostics: TrajectoryProblemDiagnostics | None = None
     state_builder: KotsTrajectoryStateBuilder | None = None
+    perturbation_report: Any = None
 
 
 @dataclass
@@ -434,6 +435,7 @@ class _KotsTrajectoryCompileAdapter:
     kots_backend: str | None = None
     gravity: Sequence[float] | None = None
     batch_trajectory: bool = True
+    perturbation: Any = None
     resolved_dynamics_fields: tuple[str, ...] = ()
     resolved_gravity: tuple[float, float, float] | None = None
 
@@ -515,6 +517,7 @@ class _KotsTrajectoryCompileAdapter:
             kots_backend=self.kots_backend,
             gravity=self.gravity,
             batch_trajectory=self.batch_trajectory,
+            perturbation=self.perturbation,
         )
         self.resolved_gravity = builder.gravity
         return builder
@@ -563,7 +566,15 @@ def compile_kots_trajectory_problem(
     kots_backend: str | None = None,
     gravity: Sequence[float] | None = None,
     batch_trajectory: bool = True,
+    perturbation: Any = None,
 ) -> KotsTrajectoryCompiledProblem:
+    """Compile with an optional fixed, non-mutating RoboKots model perturbation.
+
+    ``perturbation`` accepts a RoboKots PerturbationSpec, configuration mapping,
+    or TOML file path. Sampling occurs once when the state builder is created;
+    values and all derivatives use that same model, including template windows.
+    The realized changes are available as ``perturbation_report``.
+    """
     model_order = _infer_model_order(model)
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
     unsupported_policy = normalize_unsupported_policy(unsupported)
@@ -591,6 +602,7 @@ def compile_kots_trajectory_problem(
         kots_backend=kots_backend,
         gravity=gravity,
         batch_trajectory=batch_trajectory,
+        perturbation=perturbation,
     )
     compiled = compile_trajectory_problem_with_adapter(
         dsl_use,
@@ -617,6 +629,7 @@ def compile_kots_trajectory_problem(
         gravity=adapter.resolved_gravity,
         diagnostics=diagnostics,
         state_builder=compiled.state_builder,
+        perturbation_report=compiled.state_builder.perturbation_report,
     )
 
 

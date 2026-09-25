@@ -335,6 +335,107 @@ template.update_window(
 )
 ```
 
+### RoboKots model perturbations
+
+Pass `perturbation=` to sample model parameter uncertainty through RoboKots.
+It accepts a `robokots.PerturbationSpec`, a configuration dictionary, or a
+TOML file path. Install the pinned version with `uv sync --group kots`.
+
+```python
+compiled = compile_kots_trajectory_problem(
+    problem,
+    model=kots,
+    perturbation={
+        "seed": 42,
+        "mass_relative_std": 0.05,
+        "link_length_relative_std": 0.02,
+        "link_cog_translation_std": 0.001,
+    },
+)
+report = compiled.perturbation_report.to_dict()
+perturbed_model = compiled.state_builder.model
+```
+
+The original model is unchanged. Parameters are sampled once per builder and
+stay fixed during residual, Jacobian, JVP/VJP, and solver evaluations. This is
+model uncertainty; it does not add fresh measurement noise to each evaluation.
+Relative mass/length standard deviations above are in log space; translation
+standard deviations are in metres. RoboKots also supports explicit `rules`
+with parameter scopes and noise distributions; Rei passes their configuration
+through to RoboKots for validation.
+
+The same argument is accepted by `KotsStateBuilder`,
+`KotsTrajectoryStateBuilder`, `compile_kots_trajectory_problem_template`, and
+`compile_trajectory_ioc_problem(..., backend="kots", data=None)`.
+Builders expose `perturbation_report`; IOC results expose it through
+`compiled.compiled.perturbation_report`. Templates keep the sampled model
+across `update_window()` calls. For a new sample, construct a new builder or
+compile again from the nominal model with a different seed. Passing an already
+perturbed model together with `perturbation=` applies another perturbation.
+With `perturbation=None` (the default), the original model is used and the report
+is `None`. A TOML path is resolved relative to the process working directory;
+its root fields are the same as the dictionary above.
+
+Run the [model uncertainty example](examples/robokots_model_perturbation.py):
+
+```bash
+uv run --group kots python examples/robokots_model_perturbation.py
+uv run --group kots python examples/robokots_model_perturbation.py --perturbation examples/perturbation/planar2.toml --backend rust
+```
+
+### Observation noise between DOC and IOC
+
+`prepare_noisy_ioc_trajectory` adds independent, zero-mean Gaussian noise to
+the joint coordinates at each trajectory sample, then fits the observations
+back to the same trajectory map. For B-splines this uses the scalar basis
+without materializing the full Kronecker matrix.
+
+```python
+from rei import prepare_noisy_ioc_trajectory, estimate_ioc_weights
+
+# doc and ioc use the same variable layout and trajectory maps.
+# For a nullspace-reduced DOC solve, first lift the solution:
+# full_point = reduction.lift(doc_outcome.solution)
+full_point = doc_outcome.solution.copy()
+start, stop = doc.runtime.pack.slices[doc.p_var]
+observation = prepare_noisy_ioc_trajectory(
+    doc.trajectory_map,
+    full_point[start:stop],
+    std=0.001,  # radians for revolute joints; metres for prismatic joints
+    seed=42,
+)
+ioc_point = full_point.copy()
+ioc_point[start:stop] = observation.p
+result = estimate_ioc_weights(ioc, p=ioc_point)
+```
+
+`std` may also be a vector of length `q_dim` for per-joint noise levels.
+The helper preserves the input parameters, trajectory map and global random
+state. The same seed reproduces the same noise. `std=0` preserves the original
+parameters exactly. The result contains `q_clean`, `noise`, `q_observed`,
+`q_fitted`, fitted parameters `p`, `fit_rank` and `fit_residual_norm`.
+Arrays of joint observations have shape `(steps, q_dim)`.
+
+Noise is applied once, before IOC. IOC velocities and accelerations come from
+the fitted parameters and existing derivative maps. Least-squares fitting
+projects the observations into the trajectory space, so the fitted trajectory
+generally differs from the raw noisy observations. The fit does not enforce
+boundary conditions or joint limits, and endpoints also receive noise.
+Rank-deficient fits retain the original parameters' unobserved component.
+
+Run the complete DOC → observations → fit → clean/noisy IOC comparison:
+
+```bash
+uv run --group kots python examples/robokots_doc_noise_ioc.py --noise-std 0.001 --seed 42 --output /tmp/doc-noise-ioc.npz
+```
+
+The saved NPZ contains all three trajectories, sampled noise, fitted parameters,
+noise settings and estimated weights. This example uses a constrained DOC;
+the current IOC estimates objective stationarity without constraint multipliers.
+Its diagnostics are printed, and its weights are not a claim of exact recovery
+of the generating weights. Model perturbations (`perturbation=`) and observation
+noise are separate settings and may be combined in an experiment.
+
 ### Joint Mechanical Power
 
 `joint_power` evaluates the scalar mechanical power `torque.T @ velocity`.

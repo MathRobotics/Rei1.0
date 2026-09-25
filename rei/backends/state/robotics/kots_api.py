@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from os import PathLike
 from typing import Any
 
 import numpy as np
@@ -25,6 +27,33 @@ require_module_attrs(
     install_hint="uv sync --group kots",
 )
 StateType = _state_mod.StateType
+
+
+def apply_model_perturbation(model: Any, perturbation: Any = None) -> tuple[Any, Any]:
+    """Sample a model once, delegating configuration and validation to RoboKots.
+
+    Strings/paths name TOML files; mappings and PerturbationSpec are also
+    accepted. No optional perturbation API is imported when disabled.
+    """
+    if perturbation is None:
+        return model, None
+    try:
+        from robokots.perturbation import PerturbationSpec, apply_perturbation
+    except ImportError as exc:
+        raise ImportError(
+            "RoboKots model perturbation requires robokots.perturbation "
+            "with PerturbationSpec and apply_perturbation. "
+            "Update RoboKots with `uv sync --group kots`."
+        ) from exc
+    if isinstance(perturbation, Mapping):
+        spec = PerturbationSpec.from_dict(dict(perturbation))
+    elif isinstance(perturbation, (str, PathLike)):
+        spec = PerturbationSpec.from_toml_file(perturbation)
+    elif isinstance(perturbation, PerturbationSpec):
+        spec = perturbation
+    else:
+        raise TypeError("perturbation must be a PerturbationSpec, mapping, TOML file path, or None.")
+    return apply_perturbation(model, spec, return_report=True)
 
 
 def fallback_backend_field_name(state_field: str) -> str:

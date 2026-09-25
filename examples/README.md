@@ -43,10 +43,17 @@ uv sync --group kots
 python examples/robokots_ik.py
 python examples/robokots_trajectory_dynamics.py
 python examples/robokots_trajectory_dynamics.py --plot
+python examples/robokots_doc_noise_ioc.py --noise-std 0.001 --seed 42
 python examples/compare_robotics_backends.py --backend robokots
 ```
 
 ## サンプル一覧
+
+`robokots_doc_noise_ioc.py` は DOC → 各時刻の関節角への観測ノイズ付加 →
+同じB-splineへの再フィット → IOC を実行し、ノイズ有無で推定結果を比較します。
+`--noise-std` はrad単位、`--seed` は乱数seedです。`--output /tmp/demo.npz`
+で元軌道・観測値・フィット後軌道・推定重みを保存できます。
+既存IOCの制約乗数未対応という制限は、この例にも適用されます。
 
 RoboKots / Pinocchio の軌道最適化例は LM が既定です。
 反復を実行中に自動表示し（`--quiet` で抑制）、`--show-trials` で試行詳細も表示します。

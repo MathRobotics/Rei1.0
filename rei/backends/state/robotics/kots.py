@@ -115,7 +115,9 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         jacobian_method: str = "analytic",
         kots_backend: str | None = None,
         gravity: Sequence[float] | None = None,
+        perturbation: Any = None,
     ) -> None:
+        model, self.perturbation_report = kapi.apply_model_perturbation(model, perturbation)
         super().__init__(model, data, q_var=q_var)
         self.dtype = DTYPE_KINEMATICS
         self.owner_type = "link"
@@ -316,6 +318,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         kots_backend: str | None = None,
         gravity: Sequence[float] | None = None,
         batch_trajectory: bool = True,
+        perturbation: Any = None,
     ) -> None:
         self.trajectory_map = trajectory_map
         self.p_var = str(p_var)
@@ -357,6 +360,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             jacobian_method=jacobian_method,
             kots_backend=kots_backend,
             gravity=gravity,
+            perturbation=perturbation,
         )
         self.register_value_and_jac(
             dtype=DTYPE_COORD,

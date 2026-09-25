@@ -1,0 +1,5 @@
+# RoboKots model uncertainty: sampled once when Rei builds the backend.
+seed = 42
+mass_relative_std = 0.05 # log-space standard deviation
+link_length_relative_std = 0.02 # log-space standard deviation
+link_cog_translation_std = 0.001 # metres
