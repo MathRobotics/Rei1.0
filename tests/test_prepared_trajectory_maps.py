@@ -33,6 +33,8 @@ def maps_for(spec, max_order=3):
 
 
 def observe_basis(monkeypatch):
+    # Observe cold construction, independently of the cross-window basis cache.
+    bspline._cached_derivative_basis.cache_clear()
     calls = []
     original = bspline.bspline_basis_matrix
 

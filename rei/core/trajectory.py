@@ -468,10 +468,17 @@ class TrajectoryMap:
             if (trajectory.steps, trajectory.q_dim, trajectory.p_dim) != (steps, q_dim, num_ctrl_points * q_dim):
                 raise ValueError("existing trajectory map dimensions do not match the B-spline specification.")
         missing = [r for r in range(max_derivative_order + 1) if r not in existing]
+        # Affine reparameterization preserves the original control columns:
+        # N_i(U, u) = N_i((U-a)/s, (u-a)/s). Shift knots AND samples; shifting
+        # only samples would incorrectly reuse a different global window.
+        span = u_max - u_min
+        relative_knots = (knots - u_min) / span
+        relative_samples = (np.linspace(0., 1., steps) if u_samples is None
+                            else (u_vec - u_min) / span)
         basis_all = bspline_basis_derivative_matrices_for_orders(
-            u_vec=u_vec,
+            u_vec=relative_samples,
             degree=degree,
-            knots=knots,
+            knots=relative_knots,
             num_ctrl_points=num_ctrl_points,
             orders=missing,
         )
@@ -481,7 +488,7 @@ class TrajectoryMap:
             if order in existing:
                 maps.append(existing[order])
                 continue
-            scale = float(parameter_scale) ** order
+            scale = (float(parameter_scale) / span) ** order
             A = BsplineTrajectoryOperator(scale * basis_all[order], q_dim=q_dim)
             b = np.zeros((steps * q_dim,), dtype=float)
             maps.append(cls(A=A, b=b, steps=steps, q_dim=q_dim))

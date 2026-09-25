@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from functools import lru_cache
 
 Array = np.ndarray
 
@@ -88,14 +89,23 @@ def bspline_basis_matrix(
     num_ctrl_points = int(num_ctrl_points)
     knots = np.asarray(knots, dtype=float).reshape(-1)
 
-    basis = np.zeros((u_vec.size, num_ctrl_points), dtype=float)
-    for r, u in enumerate(u_vec):
-        basis[r, :] = bspline_basis_row(
-            u=float(u),
-            degree=degree,
-            knots=knots,
-            num_ctrl_points=num_ctrl_points,
-        )
+    # Cox-de Boor recurrence over all samples and control indices at once.
+    # Only the degree loop remains in Python. Preserve the scalar evaluator's
+    # right-endpoint convention, including repeated knots.
+    u = u_vec[:, None]
+    basis = ((knots[:num_ctrl_points] <= u)
+             & (u < knots[1:num_ctrl_points + 1])).astype(float)
+    basis[u_vec == knots[-1], -1] = 1.
+    for p in range(1, degree + 1):
+        left_den = knots[p:p + num_ctrl_points] - knots[:num_ctrl_points]
+        left = np.divide(u - knots[:num_ctrl_points], left_den,
+                         out=np.zeros_like(basis), where=left_den > 0)
+        next_basis = left * basis
+        right_den = knots[p + 1:p + num_ctrl_points] - knots[1:num_ctrl_points]
+        right = np.divide(knots[p + 1:p + num_ctrl_points] - u, right_den,
+                          out=np.zeros_like(basis[:, :-1]), where=right_den > 0)
+        next_basis[:, :-1] += right * basis[:, 1:]
+        basis = next_basis
 
     basis[np.abs(basis) < 1e-14] = 0.0
     row_sums = np.sum(basis, axis=1)
@@ -125,13 +135,11 @@ def _bspline_derivative_transform(
         return np.zeros((max(num_ctrl_points - 1, 0), num_ctrl_points), dtype=float)
 
     out = np.zeros((num_ctrl_points - 1, num_ctrl_points), dtype=float)
-    for i in range(num_ctrl_points - 1):
-        denom = float(knots[i + degree + 1] - knots[i + 1])
-        if denom <= 0.0:
-            continue
-        c = float(degree) / denom
-        out[i, i] = -c
-        out[i, i + 1] = c
+    indices = np.arange(num_ctrl_points - 1)
+    denom = knots[indices + degree + 1] - knots[indices + 1]
+    c = np.divide(float(degree), denom, out=np.zeros_like(denom), where=denom > 0)
+    out[indices, indices] = -c
+    out[indices, indices + 1] = c
     return out
 
 
@@ -206,7 +214,7 @@ def bspline_basis_derivative_matrices(
 def bspline_basis_derivative_matrices_for_orders(
     *, u_vec: Array, degree: int, knots: Array, num_ctrl_points: int, orders,
 ) -> dict[int, Array]:
-    """Evaluate only requested orders; intermediate control transforms are shared."""
+    """Evaluate only requested orders, reusing cached matrices across calls."""
     orders = set(orders)
     if any(not isinstance(r, (int, np.integer)) or r < 0 or r > degree for r in orders):
         raise ValueError(f"B-spline derivative orders must be integers in [0, {degree}].")
@@ -214,6 +222,25 @@ def bspline_basis_derivative_matrices_for_orders(
         return {}
     u_vec = np.asarray(u_vec, dtype=float).reshape(-1)
     knots = np.asarray(knots, dtype=float).reshape(-1)
+    # Cache immutable basis data only; callers receive independent writable
+    # arrays. Exact keys deliberately avoid merging nearby knot/sample grids.
+    return {order: _cached_derivative_basis(
+        int(degree), int(num_ctrl_points), knots.tobytes(), u_vec.tobytes(), int(order)
+    ).copy() for order in orders}
+
+
+@lru_cache(maxsize=64)
+def _cached_derivative_basis(degree, num_ctrl_points, knot_bytes, sample_bytes, order):
+    result = _derivative_matrices_uncached(
+        u_vec=np.frombuffer(sample_bytes, dtype=float), degree=degree,
+        knots=np.frombuffer(knot_bytes, dtype=float), num_ctrl_points=num_ctrl_points,
+        orders={order},
+    )[order]
+    result.setflags(write=False)
+    return result
+
+
+def _derivative_matrices_uncached(*, u_vec, degree, knots, num_ctrl_points, orders):
     out = {}
     if 0 in orders:
         out[0] = bspline_basis_matrix(u_vec=u_vec, degree=degree, knots=knots,

@@ -509,9 +509,23 @@ the same representation.  `TrajectoryMap.A` and `dqdp_at()` remain available
 for compatibility, but requesting a dense Jacobian intentionally materializes
 the corresponding rows.
 
+B-spline basis evaluation is vectorized over samples and control points.
+Map construction normalizes both knots and samples to the knot domain and
+caches up to 64 derivative basis matrices, independent of joint count. An
+affine change of the parameter axis preserves control-column order; derivative
+scaling is restored by `(parameter_scale / knot_span)**order`. Returned maps
+own their arrays, so modifying one map cannot corrupt the cache.
+Cache keys match normalized grids exactly (without rounding). Translated
+windows reuse a basis when those grids match; floating-point differences may
+cause a safe cache miss. Moving samples over fixed global knots generally
+changes the basis and is not treated as an equivalent local window.
+Run `uv run python developer/benchmarks/bspline_maps.py` to compare cold and
+cached map generation against the scalar recurrence.
+
 `solve()` accepts these solver names:
 
 - `"levenberg_marquardt"`: classical LM baseline (default)
+- `"lm-ls"`: LM directions with Armijo line search; gradient-only convergence
 - `"gauss_newton"`: previous adaptive Gauss-Newton solver (preserved)
 - `"scipy_minimize"`: requires `scipy`
 - `"cyipopt"`: requires `cyipopt`
