@@ -527,6 +527,8 @@ cached map generation against the scalar recurrence.
 - `"levenberg_marquardt"`: classical LM baseline (default)
 - `"lm-ls"`: LM directions with Armijo line search; gradient-only convergence
 - `"gauss_newton"`: previous adaptive Gauss-Newton solver (preserved)
+- `"gauss_newton_operator"`: JVP/VJP-based Gauss-Newton with damped CGLS (NumPy only)
+- `"gauss_newton_krylov"`: JVP/VJP-native trust-region GN with preconditioned truncated CG
 - `"scipy_minimize"`: requires `scipy`
 - `"cyipopt"`: requires `cyipopt`
 - `"liteopt"`: requires `liteopt`
@@ -546,6 +548,32 @@ print(out.solution)
 print(out.stats)
 print(out.timing)
 ```
+
+The Gauss–Newton variants serve different purposes:
+
+| Solver | Step computation | Globalization | Details |
+|---|---|---|---|
+| `gauss_newton` | Dense Jacobian and linear solve | Adaptive damping and line search | Existing baseline |
+| `gauss_newton_operator` | JVP/VJP with damped CGLS | Existing GN damping and line search | [Options and limits](docs/gauss-newton-operator.md) |
+| `gauss_newton_krylov` | JVP/VJP with preconditioned truncated CG | Trust region and adaptive inner tolerance | [Options and limits](docs/gauss-newton-krylov.md) |
+
+Both product-based variants support initial points, residual weighting, term
+selection, nullspace reduction, callbacks and JSONL histories. Generic models
+provide `eval`, `jvp`, `vjp` and point/state methods; no `linearize` is required.
+Expression products fall back to local derivative blocks where necessary, so
+not every expression is fully matrix-free.
+
+The CGLS variant retains an exact damping-floor column scan. Krylov removes
+that scan and uses affine-residual curvature for preconditioning when small
+enough, otherwise a fixed number of VJP probes. Its affine preconditioner is a
+size-limited dense matrix. Inner diagnostics are in `out.meta["inner_solves"]`.
+Use `line_search_history_path` for CGLS and `trial_history_path` for Krylov.
+
+RoboKots products support torque and its first/second time derivatives with
+appropriate model orders. The [DOC benchmark index](developer/benchmarks/kots_doc.md)
+separates measured solver performance, torque-derivative convergence limits,
+and research-only prototypes. A prototype's timing does not describe the
+production solver.
 
 LM stops on a small gradient OR a small relative step, as in the reference
 algorithm. `out.meta["reason"]` distinguishes these; `gradient_converged`

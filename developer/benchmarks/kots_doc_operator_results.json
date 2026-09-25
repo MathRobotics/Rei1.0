@@ -1,0 +1,1894 @@
+{
+  "installed_before": {
+    "settings": {
+      "model": "planar2.urdf",
+      "steps": 201,
+      "controls": 50,
+      "max_iters": 10,
+      "tol_grad": 1e-08,
+      "inner_tol": 1e-08,
+      "inner_max_iters": null,
+      "repeat": 3,
+      "warmup": 1,
+      "solvers": [
+        "gauss_newton",
+        "gauss_newton_operator"
+      ],
+      "output": "/tmp/rei-doc-before-warm.json"
+    },
+    "environment": {
+      "python": "3.13.1 (main, Jan 14 2025, 23:31:50) [Clang 19.1.6 ]",
+      "numpy": "2.5.3",
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "robokots": "/Users/a896/.venvs/rei/lib/python3.13/site-packages/robokots/__init__.py",
+      "robokots_source": {
+        "url": "https://github.com/MathRobotics/RoboKots.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3f2673d7af58cd34f7af11686136241cdf905c91",
+          "requested_revision": "develop"
+        }
+      },
+      "threads": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1"
+      }
+    },
+    "runs": [
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.16518104204442352,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226247,
+        "gradient_inf": 2.5584617935631125e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 8.537498069927096e-05,
+          "dynamics": 0.0022477100137621164,
+          "jacobian_mul": 0.03559708397369832
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505182,
+            "gradient": 0.0028419747208639234
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226247,
+            "gradient": 2.5584617935631125e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 3.097478375013452,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226214,
+        "gradient_inf": 1.2978610973667167e-11,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 7.491803262382746e-05,
+          "dynamics": 0.0020734580466523767,
+          "jacobian_mul": 0.03505870793014765
+        },
+        "inner_iterations": 103,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236709122053,
+            "gradient": 0.002842315448372112
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226214,
+            "gradient": 1.2978610973667167e-11
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 3.4878715410013683,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226214,
+        "gradient_inf": 1.2978610973667167e-11,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 9.529100498184562e-05,
+          "dynamics": 0.0024456660030409694,
+          "jacobian_mul": 0.03658012498635799
+        },
+        "inner_iterations": 103,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236709122053,
+            "gradient": 0.002842315448372112
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226214,
+            "gradient": 1.2978610973667167e-11
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.1893211249844171,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226247,
+        "gradient_inf": 2.5584617935631125e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 0.00013141502859070897,
+          "dynamics": 0.002439000003505498,
+          "jacobian_mul": 0.04284341697348282
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505182,
+            "gradient": 0.0028419747208639234
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226247,
+            "gradient": 2.5584617935631125e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.19309687498025596,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226247,
+        "gradient_inf": 2.5584617935631125e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 9.129202226176858e-05,
+          "dynamics": 0.002369499998167157,
+          "jacobian_mul": 0.04221741500077769
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505182,
+            "gradient": 0.0028419747208639234
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226247,
+            "gradient": 2.5584617935631125e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 3.207331041980069,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226214,
+        "gradient_inf": 1.2978610973667167e-11,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 0.0001057919580489397,
+          "dynamics": 0.0026044569676741958,
+          "jacobian_mul": 0.037189665948972106
+        },
+        "inner_iterations": 103,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236709122053,
+            "gradient": 0.002842315448372112
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226214,
+            "gradient": 1.2978610973667167e-11
+          }
+        ]
+      }
+    ],
+    "solution_max_abs_difference": 3.411093629779316e-11,
+    "summary": {
+      "gauss_newton": {
+        "median_seconds": 0.1893211249844171,
+        "min_seconds": 0.16518104204442352,
+        "max_seconds": 0.19309687498025596
+      },
+      "gauss_newton_operator": {
+        "median_seconds": 3.207331041980069,
+        "min_seconds": 3.097478375013452,
+        "max_seconds": 3.4878715410013683
+      }
+    }
+  },
+  "installed_after_2dof": {
+    "settings": {
+      "model": "planar2.urdf",
+      "steps": 201,
+      "controls": 50,
+      "max_iters": 10,
+      "tol_grad": 1e-08,
+      "inner_tol": 1e-08,
+      "inner_max_iters": null,
+      "repeat": 3,
+      "warmup": 1,
+      "solvers": [
+        "gauss_newton",
+        "gauss_newton_operator"
+      ],
+      "output": "/tmp/rei-doc-after-warm.json"
+    },
+    "environment": {
+      "python": "3.13.1 (main, Jan 14 2025, 23:31:50) [Clang 19.1.6 ]",
+      "numpy": "2.5.3",
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "robokots": "/Users/a896/.venvs/rei/lib/python3.13/site-packages/robokots/__init__.py",
+      "robokots_source": {
+        "url": "https://github.com/MathRobotics/RoboKots.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3f2673d7af58cd34f7af11686136241cdf905c91",
+          "requested_revision": "develop"
+        }
+      },
+      "threads": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1"
+      }
+    },
+    "runs": [
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.15554700000211596,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226247,
+        "gradient_inf": 2.5584617935631125e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 8.245994104072452e-05,
+          "dynamics": 0.0021427080500870943,
+          "jacobian_mul": 0.03323329205159098
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505182,
+            "gradient": 0.0028419747208639234
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226247,
+            "gradient": 2.5584617935631125e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 2.059490250016097,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.4154236543422619,
+        "gradient_inf": 9.223654731902845e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 6,
+          "dynamics": 6,
+          "jacobian_transpose_mul": 115,
+          "jacobian_mul:(201, 6, 1)": 382
+        },
+        "backend_seconds": {
+          "import_motions": 0.00011812400771304965,
+          "dynamics": 0.003180458035785705,
+          "jacobian_transpose_mul": 0.3753307474544272,
+          "jacobian_mul": 0.16254746029153466
+        },
+        "inner_iterations": 104,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746617
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367104830186,
+            "gradient": 0.0028423641283218163
+          },
+          {
+            "iteration": 2,
+            "objective": 0.4154236543422619,
+            "gradient": 9.223858990202233e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 2.1007739590131678,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.4154236543422619,
+        "gradient_inf": 9.223654731902845e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 6,
+          "dynamics": 6,
+          "jacobian_transpose_mul": 115,
+          "jacobian_mul:(201, 6, 1)": 382
+        },
+        "backend_seconds": {
+          "import_motions": 0.00013591593597084284,
+          "dynamics": 0.003370999067556113,
+          "jacobian_transpose_mul": 0.3350757071748376,
+          "jacobian_mul": 0.178934583615046
+        },
+        "inner_iterations": 104,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746617
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367104830186,
+            "gradient": 0.0028423641283218163
+          },
+          {
+            "iteration": 2,
+            "objective": 0.4154236543422619,
+            "gradient": 9.223858990202233e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.22547587502049282,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226247,
+        "gradient_inf": 2.5584617935631125e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 0.00012154103023931384,
+          "dynamics": 0.0031185830011963844,
+          "jacobian_mul": 0.045564751024357975
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505182,
+            "gradient": 0.0028419747208639234
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226247,
+            "gradient": 2.5584617935631125e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.1764747080160305,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226247,
+        "gradient_inf": 2.5584617935631125e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 0.00011079094838351011,
+          "dynamics": 0.00225283409235999,
+          "jacobian_mul": 0.03869250003481284
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505182,
+            "gradient": 0.0028419747208639234
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226247,
+            "gradient": 2.5584617935631125e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 2.1277447500033304,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.4154236543422619,
+        "gradient_inf": 9.223654731902845e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 6,
+          "dynamics": 6,
+          "jacobian_transpose_mul": 115,
+          "jacobian_mul:(201, 6, 1)": 382
+        },
+        "backend_seconds": {
+          "import_motions": 0.00011116795940324664,
+          "dynamics": 0.0034039990277960896,
+          "jacobian_transpose_mul": 0.3622407582006417,
+          "jacobian_mul": 0.17503061034949496
+        },
+        "inner_iterations": 104,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746617
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367104830186,
+            "gradient": 0.0028423641283218163
+          },
+          {
+            "iteration": 2,
+            "objective": 0.4154236543422619,
+            "gradient": 9.223858990202233e-12
+          }
+        ]
+      }
+    ],
+    "solution_max_abs_difference": 3.4108049717929134e-11,
+    "summary": {
+      "gauss_newton": {
+        "median_seconds": 0.1764747080160305,
+        "min_seconds": 0.15554700000211596,
+        "max_seconds": 0.22547587502049282
+      },
+      "gauss_newton_operator": {
+        "median_seconds": 2.1007739590131678,
+        "min_seconds": 2.059490250016097,
+        "max_seconds": 2.1277447500033304
+      }
+    }
+  },
+  "installed_after_7dof": {
+    "settings": {
+      "model": "7_dof_arm.urdf",
+      "steps": 201,
+      "controls": 50,
+      "max_iters": 10,
+      "tol_grad": 1e-08,
+      "inner_tol": 1e-08,
+      "inner_max_iters": null,
+      "repeat": 3,
+      "warmup": 1,
+      "solvers": [
+        "gauss_newton",
+        "gauss_newton_operator"
+      ],
+      "output": "/tmp/rei-doc-7dof-warm.json"
+    },
+    "environment": {
+      "python": "3.13.1 (main, Jan 14 2025, 23:31:50) [Clang 19.1.6 ]",
+      "numpy": "2.5.3",
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "robokots": "/Users/a896/.venvs/rei/lib/python3.13/site-packages/robokots/__init__.py",
+      "robokots_source": {
+        "url": "https://github.com/MathRobotics/RoboKots.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3f2673d7af58cd34f7af11686136241cdf905c91",
+          "requested_revision": "develop"
+        }
+      },
+      "threads": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1"
+      }
+    },
+    "runs": [
+      {
+        "solver": "gauss_newton",
+        "seconds": 1.6436697919853032,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026059,
+        "gradient_inf": 2.0470660002933863e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 7,
+          "dynamics": 7,
+          "jacobian_mul:(201, 21, 350)": 7
+        },
+        "backend_seconds": {
+          "import_motions": 0.0016045019729062915,
+          "dynamics": 0.005873332032933831,
+          "jacobian_mul": 0.477878333942499
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885163
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09611753280976,
+            "gradient": 179.49097496920214
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323119871998276,
+            "gradient": 0.12447413156844218
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573011395,
+            "gradient": 7.070025413131e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507302,
+            "gradient": 2.3125247835418547e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.519997124902618,
+            "gradient": 2.2603234489643253e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026059,
+            "gradient": 2.0470660002933863e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 27.064537166035734,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026047,
+        "gradient_inf": 2.0475360165722516e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 14,
+          "dynamics": 14,
+          "jacobian_transpose_mul": 1653,
+          "jacobian_mul:(201, 21, 1)": 3886
+        },
+        "backend_seconds": {
+          "import_motions": 0.0002733329311013222,
+          "dynamics": 0.010976751800626516,
+          "jacobian_transpose_mul": 8.056712499994319,
+          "jacobian_mul": 2.891209091525525
+        },
+        "inner_iterations": 1626,
+        "inner_limits": 1,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885162
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09624202993484,
+            "gradient": 179.4909729381894
+          },
+          {
+            "iteration": 2,
+            "objective": 1.532312478526956,
+            "gradient": 0.124474977623405
+          },
+          {
+            "iteration": 3,
+            "objective": 1.519997557319688,
+            "gradient": 7.07015120248915e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507325,
+            "gradient": 2.3125852144333103e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026167,
+            "gradient": 2.260361886552431e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026047,
+            "gradient": 2.0475364979899435e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 26.432956625008956,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026047,
+        "gradient_inf": 2.0475360165722516e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 14,
+          "dynamics": 14,
+          "jacobian_transpose_mul": 1653,
+          "jacobian_mul:(201, 21, 1)": 3886
+        },
+        "backend_seconds": {
+          "import_motions": 0.00024270813446491957,
+          "dynamics": 0.01102958305273205,
+          "jacobian_transpose_mul": 7.914997216197662,
+          "jacobian_mul": 2.8573391355457716
+        },
+        "inner_iterations": 1626,
+        "inner_limits": 1,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885162
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09624202993484,
+            "gradient": 179.4909729381894
+          },
+          {
+            "iteration": 2,
+            "objective": 1.532312478526956,
+            "gradient": 0.124474977623405
+          },
+          {
+            "iteration": 3,
+            "objective": 1.519997557319688,
+            "gradient": 7.07015120248915e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507325,
+            "gradient": 2.3125852144333103e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026167,
+            "gradient": 2.260361886552431e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026047,
+            "gradient": 2.0475364979899435e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 1.603138874983415,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026059,
+        "gradient_inf": 2.0470660002933863e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 7,
+          "dynamics": 7,
+          "jacobian_mul:(201, 21, 350)": 7
+        },
+        "backend_seconds": {
+          "import_motions": 0.0006908340146765113,
+          "dynamics": 0.006723457132466137,
+          "jacobian_mul": 0.4862984589417465
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885163
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09611753280976,
+            "gradient": 179.49097496920214
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323119871998276,
+            "gradient": 0.12447413156844218
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573011395,
+            "gradient": 7.070025413131e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507302,
+            "gradient": 2.3125247835418547e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.519997124902618,
+            "gradient": 2.2603234489643253e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026059,
+            "gradient": 2.0470660002933863e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 1.5675125420093536,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026059,
+        "gradient_inf": 2.0470660002933863e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 7,
+          "dynamics": 7,
+          "jacobian_mul:(201, 21, 350)": 7
+        },
+        "backend_seconds": {
+          "import_motions": 0.0005665850476361811,
+          "dynamics": 0.00618645700160414,
+          "jacobian_mul": 0.4818304569926113
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885163
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09611753280976,
+            "gradient": 179.49097496920214
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323119871998276,
+            "gradient": 0.12447413156844218
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573011395,
+            "gradient": 7.070025413131e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507302,
+            "gradient": 2.3125247835418547e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.519997124902618,
+            "gradient": 2.2603234489643253e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026059,
+            "gradient": 2.0470660002933863e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 26.739940250001382,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026047,
+        "gradient_inf": 2.0475360165722516e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 14,
+          "dynamics": 14,
+          "jacobian_transpose_mul": 1653,
+          "jacobian_mul:(201, 21, 1)": 3886
+        },
+        "backend_seconds": {
+          "import_motions": 0.00025004014605656266,
+          "dynamics": 0.010373749944847077,
+          "jacobian_transpose_mul": 8.10727903485531,
+          "jacobian_mul": 2.894346808840055
+        },
+        "inner_iterations": 1626,
+        "inner_limits": 1,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885162
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09624202993484,
+            "gradient": 179.4909729381894
+          },
+          {
+            "iteration": 2,
+            "objective": 1.532312478526956,
+            "gradient": 0.124474977623405
+          },
+          {
+            "iteration": 3,
+            "objective": 1.519997557319688,
+            "gradient": 7.07015120248915e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507325,
+            "gradient": 2.3125852144333103e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026167,
+            "gradient": 2.260361886552431e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026047,
+            "gradient": 2.0475364979899435e-10
+          }
+        ]
+      }
+    ],
+    "solution_max_abs_difference": 3.604609666307823e-12,
+    "summary": {
+      "gauss_newton": {
+        "median_seconds": 1.603138874983415,
+        "min_seconds": 1.5675125420093536,
+        "max_seconds": 1.6436697919853032
+      },
+      "gauss_newton_operator": {
+        "median_seconds": 26.739940250001382,
+        "min_seconds": 26.432956625008956,
+        "max_seconds": 27.064537166035734
+      }
+    }
+  },
+  "pinned_after_2dof": {
+    "settings": {
+      "model": "planar2.urdf",
+      "steps": 201,
+      "controls": 50,
+      "max_iters": 10,
+      "tol_grad": 1e-08,
+      "inner_tol": 1e-08,
+      "inner_max_iters": null,
+      "repeat": 3,
+      "warmup": 1,
+      "solvers": [
+        "gauss_newton",
+        "gauss_newton_operator"
+      ],
+      "output": "/tmp/rei-doc-pinned-2dof.json"
+    },
+    "environment": {
+      "robokots_checkout_commit": "825dfe29cb4cae04b118298ea9a51a8d08e9de83",
+      "rust_extension": "/Volumes/Samsung/workspace/RoboKots/robokots/_rust_core.cpython-313-darwin.so",
+      "rust_extension_sha256": "ca32740931f9011f69eb567af48a2c4ec9edbeca754411b7d52cd058f9207c51",
+      "python": "3.13.1 (main, Jan 14 2025, 23:31:50) [Clang 19.1.6 ]",
+      "numpy": "2.5.3",
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "robokots": "/Volumes/Samsung/workspace/RoboKots/robokots/__init__.py",
+      "robokots_source": {
+        "url": "https://github.com/MathRobotics/RoboKots.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3f2673d7af58cd34f7af11686136241cdf905c91",
+          "requested_revision": "develop"
+        }
+      },
+      "threads": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1"
+      }
+    },
+    "runs": [
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.11724670801777393,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226114,
+        "gradient_inf": 2.6070340772808334e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 4.783296026289463e-05,
+          "dynamics": 0.0017399999778717756,
+          "jacobian_mul": 0.015005625959020108
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505183,
+            "gradient": 0.002841974729285682
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226114,
+            "gradient": 2.6070340772808334e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 1.218199624971021,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226275,
+        "gradient_inf": 6.061519695704682e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 6,
+          "dynamics": 6,
+          "jacobian_transpose_mul": 109,
+          "jacobian_mul:(201, 6, 1)": 376
+        },
+        "backend_seconds": {
+          "import_motions": 0.00016162695828825235,
+          "dynamics": 0.002882584056351334,
+          "jacobian_transpose_mul": 0.013116169138811529,
+          "jacobian_mul": 0.042881512141320854
+        },
+        "inner_iterations": 98,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746617
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367335905706,
+            "gradient": 0.0028493419800460188
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226275,
+            "gradient": 6.0616727271884985e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 1.1939615409937687,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226275,
+        "gradient_inf": 6.061519695704682e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 6,
+          "dynamics": 6,
+          "jacobian_transpose_mul": 109,
+          "jacobian_mul:(201, 6, 1)": 376
+        },
+        "backend_seconds": {
+          "import_motions": 9.358307579532266e-05,
+          "dynamics": 0.0028037079609930515,
+          "jacobian_transpose_mul": 0.012991835945285857,
+          "jacobian_mul": 0.040947158995550126
+        },
+        "inner_iterations": 98,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746617
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367335905706,
+            "gradient": 0.0028493419800460188
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226275,
+            "gradient": 6.0616727271884985e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.11625149997416884,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226114,
+        "gradient_inf": 2.6070340772808334e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 9.408302139490843e-05,
+          "dynamics": 0.001918041962198913,
+          "jacobian_mul": 0.014726915978826582
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505183,
+            "gradient": 0.002841974729285682
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226114,
+            "gradient": 2.6070340772808334e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 0.11720483400858939,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226114,
+        "gradient_inf": 2.6070340772808334e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 7.241696584969759e-05,
+          "dynamics": 0.0018336669891141355,
+          "jacobian_mul": 0.014780749916099012
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.4154236706505183,
+            "gradient": 0.002841974729285682
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226114,
+            "gradient": 2.6070340772808334e-12
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 1.1947213750099763,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.41542365434226275,
+        "gradient_inf": 6.061519695704682e-12,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 6,
+          "dynamics": 6,
+          "jacobian_transpose_mul": 109,
+          "jacobian_mul:(201, 6, 1)": 376
+        },
+        "backend_seconds": {
+          "import_motions": 0.00011954200454056263,
+          "dynamics": 0.0031726250308565795,
+          "jacobian_transpose_mul": 0.012470034882426262,
+          "jacobian_mul": 0.038723737408872694
+        },
+        "inner_iterations": 98,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746617
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367335905706,
+            "gradient": 0.0028493419800460188
+          },
+          {
+            "iteration": 2,
+            "objective": 0.41542365434226275,
+            "gradient": 6.0616727271884985e-12
+          }
+        ]
+      }
+    ],
+    "solution_max_abs_difference": 3.782829605114557e-11,
+    "summary": {
+      "gauss_newton": {
+        "median_seconds": 0.11720483400858939,
+        "min_seconds": 0.11625149997416884,
+        "max_seconds": 0.11724670801777393
+      },
+      "gauss_newton_operator": {
+        "median_seconds": 1.1947213750099763,
+        "min_seconds": 1.1939615409937687,
+        "max_seconds": 1.218199624971021
+      }
+    }
+  },
+  "pinned_before": {
+    "settings": {
+      "model": "planar2.urdf",
+      "steps": 201,
+      "controls": 50,
+      "max_iters": 10,
+      "tol_grad": 1e-08,
+      "inner_tol": 1e-08,
+      "inner_max_iters": null,
+      "repeat": 3,
+      "warmup": 1,
+      "solvers": [
+        "gauss_newton_operator"
+      ],
+      "output": "/tmp/rei-doc-pinned-before.json"
+    },
+    "environment": {
+      "robokots_checkout_commit": "825dfe29cb4cae04b118298ea9a51a8d08e9de83",
+      "rust_extension": "/Volumes/Samsung/workspace/RoboKots/robokots/_rust_core.cpython-313-darwin.so",
+      "rust_extension_sha256": "ca32740931f9011f69eb567af48a2c4ec9edbeca754411b7d52cd058f9207c51",
+      "python": "3.13.1 (main, Jan 14 2025, 23:31:50) [Clang 19.1.6 ]",
+      "numpy": "2.5.3",
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "robokots": "/Volumes/Samsung/workspace/RoboKots/robokots/__init__.py",
+      "robokots_source": {
+        "url": "https://github.com/MathRobotics/RoboKots.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3f2673d7af58cd34f7af11686136241cdf905c91",
+          "requested_revision": "develop"
+        }
+      },
+      "threads": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1"
+      }
+    },
+    "runs": [
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 4.862714832997881,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.4154236543422618,
+        "gradient_inf": 1.6670956480311174e-11,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 0.00012129097012802958,
+          "dynamics": 0.0038286669878289104,
+          "jacobian_mul": 0.03125212498707697
+        },
+        "inner_iterations": 103,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367091911053,
+            "gradient": 0.002842313786627305
+          },
+          {
+            "iteration": 2,
+            "objective": 0.4154236543422618,
+            "gradient": 1.6670956480311174e-11
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 4.825038207985926,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.4154236543422618,
+        "gradient_inf": 1.6670956480311174e-11,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 9.483302710577846e-05,
+          "dynamics": 0.002650999929755926,
+          "jacobian_mul": 0.024003083002753556
+        },
+        "inner_iterations": 103,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367091911053,
+            "gradient": 0.002842313786627305
+          },
+          {
+            "iteration": 2,
+            "objective": 0.4154236543422618,
+            "gradient": 1.6670956480311174e-11
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 3.4118444159976207,
+        "status": "converged",
+        "iterations": 2,
+        "objective": 0.4154236543422618,
+        "gradient_inf": 1.6670956480311174e-11,
+        "feasibility": 1.7233599279780067e-13,
+        "variables": 92,
+        "residuals": 2010,
+        "calls": {
+          "import_motions": 3,
+          "dynamics": 3,
+          "jacobian_mul:(201, 6, 100)": 3
+        },
+        "backend_seconds": {
+          "import_motions": 0.00012929289368912578,
+          "dynamics": 0.002884749963413924,
+          "jacobian_mul": 0.019121791992802173
+        },
+        "inner_iterations": 103,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 29214.638346012394,
+            "gradient": 4623.118055746616
+          },
+          {
+            "iteration": 1,
+            "objective": 0.41542367091911053,
+            "gradient": 0.002842313786627305
+          },
+          {
+            "iteration": 2,
+            "objective": 0.4154236543422618,
+            "gradient": 1.6670956480311174e-11
+          }
+        ]
+      }
+    ],
+    "summary": {
+      "gauss_newton_operator": {
+        "median_seconds": 4.825038207985926,
+        "min_seconds": 3.4118444159976207,
+        "max_seconds": 4.862714832997881
+      }
+    }
+  },
+  "pinned_after_7dof": {
+    "settings": {
+      "model": "7_dof_arm.urdf",
+      "steps": 201,
+      "controls": 50,
+      "max_iters": 10,
+      "tol_grad": 1e-08,
+      "inner_tol": 1e-08,
+      "inner_max_iters": null,
+      "repeat": 3,
+      "warmup": 1,
+      "solvers": [
+        "gauss_newton",
+        "gauss_newton_operator"
+      ],
+      "output": "/tmp/rei-doc-pinned-7dof.json"
+    },
+    "environment": {
+      "robokots_checkout_commit": "825dfe29cb4cae04b118298ea9a51a8d08e9de83",
+      "rust_extension": "/Volumes/Samsung/workspace/RoboKots/robokots/_rust_core.cpython-313-darwin.so",
+      "rust_extension_sha256": "ca32740931f9011f69eb567af48a2c4ec9edbeca754411b7d52cd058f9207c51",
+      "python": "3.13.1 (main, Jan 14 2025, 23:31:50) [Clang 19.1.6 ]",
+      "numpy": "2.5.3",
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "robokots": "/Volumes/Samsung/workspace/RoboKots/robokots/__init__.py",
+      "robokots_source": {
+        "url": "https://github.com/MathRobotics/RoboKots.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "3f2673d7af58cd34f7af11686136241cdf905c91",
+          "requested_revision": "develop"
+        }
+      },
+      "threads": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1"
+      }
+    },
+    "runs": [
+      {
+        "solver": "gauss_newton",
+        "seconds": 1.9702543330495246,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026056,
+        "gradient_inf": 2.0471718721923251e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 7,
+          "dynamics": 7,
+          "jacobian_mul:(201, 21, 350)": 7
+        },
+        "backend_seconds": {
+          "import_motions": 0.000628625915851444,
+          "dynamics": 0.01195787504548207,
+          "jacobian_mul": 0.2750209160731174
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885163
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09611753281152,
+            "gradient": 179.49097496921303
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323119871998285,
+            "gradient": 0.12447413156846664
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573011393,
+            "gradient": 7.070025414076679e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507276,
+            "gradient": 2.3125247693955846e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026176,
+            "gradient": 2.2603230554319117e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026056,
+            "gradient": 2.0471718721923251e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 17.043970874976367,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026036,
+        "gradient_inf": 2.0475492091230705e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 14,
+          "dynamics": 14,
+          "jacobian_transpose_mul": 1691,
+          "jacobian_mul:(201, 21, 1)": 3924
+        },
+        "backend_seconds": {
+          "import_motions": 0.00036596000427380204,
+          "dynamics": 0.011965042911469936,
+          "jacobian_transpose_mul": 0.36919202469289303,
+          "jacobian_mul": 0.9287992246681824
+        },
+        "inner_iterations": 1664,
+        "inner_limits": 1,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885161
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09624216259596,
+            "gradient": 179.49097099847162
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323124788058633,
+            "gradient": 0.12447512114843198
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573200817,
+            "gradient": 7.070132697580261e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507307,
+            "gradient": 2.3125882391387964e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026185,
+            "gradient": 2.2604426826861035e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026036,
+            "gradient": 2.0475491614713182e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 17.446382083988283,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026036,
+        "gradient_inf": 2.0475492091230705e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 14,
+          "dynamics": 14,
+          "jacobian_transpose_mul": 1691,
+          "jacobian_mul:(201, 21, 1)": 3924
+        },
+        "backend_seconds": {
+          "import_motions": 0.00033641804475337267,
+          "dynamics": 0.013351208937820047,
+          "jacobian_transpose_mul": 0.4040968812187202,
+          "jacobian_mul": 0.9043887449079193
+        },
+        "inner_iterations": 1664,
+        "inner_limits": 1,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885161
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09624216259596,
+            "gradient": 179.49097099847162
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323124788058633,
+            "gradient": 0.12447512114843198
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573200817,
+            "gradient": 7.070132697580261e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507307,
+            "gradient": 2.3125882391387964e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026185,
+            "gradient": 2.2604426826861035e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026036,
+            "gradient": 2.0475491614713182e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 1.4441822919761762,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026056,
+        "gradient_inf": 2.0471718721923251e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 7,
+          "dynamics": 7,
+          "jacobian_mul:(201, 21, 350)": 7
+        },
+        "backend_seconds": {
+          "import_motions": 0.000514624931383878,
+          "dynamics": 0.006414126080926508,
+          "jacobian_mul": 0.25032662303419784
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885163
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09611753281152,
+            "gradient": 179.49097496921303
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323119871998285,
+            "gradient": 0.12447413156846664
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573011393,
+            "gradient": 7.070025414076679e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507276,
+            "gradient": 2.3125247693955846e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026176,
+            "gradient": 2.2603230554319117e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026056,
+            "gradient": 2.0471718721923251e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton",
+        "seconds": 1.374453625001479,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026056,
+        "gradient_inf": 2.0471718721923251e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 7,
+          "dynamics": 7,
+          "jacobian_mul:(201, 21, 350)": 7
+        },
+        "backend_seconds": {
+          "import_motions": 0.0011334999580867589,
+          "dynamics": 0.00636216695420444,
+          "jacobian_mul": 0.24544708500616252
+        },
+        "inner_iterations": 0,
+        "inner_limits": 0,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885163
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09611753281152,
+            "gradient": 179.49097496921303
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323119871998285,
+            "gradient": 0.12447413156846664
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573011393,
+            "gradient": 7.070025414076679e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507276,
+            "gradient": 2.3125247693955846e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026176,
+            "gradient": 2.2603230554319117e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026056,
+            "gradient": 2.0471718721923251e-10
+          }
+        ]
+      },
+      {
+        "solver": "gauss_newton_operator",
+        "seconds": 17.002221292001195,
+        "status": "converged",
+        "iterations": 6,
+        "objective": 1.5199971249026036,
+        "gradient_inf": 2.0475492091230705e-10,
+        "feasibility": 3.168535335886818e-13,
+        "variables": 322,
+        "residuals": 7035,
+        "calls": {
+          "import_motions": 14,
+          "dynamics": 14,
+          "jacobian_transpose_mul": 1691,
+          "jacobian_mul:(201, 21, 1)": 3924
+        },
+        "backend_seconds": {
+          "import_motions": 0.00032845884561538696,
+          "dynamics": 0.010891957848798484,
+          "jacobian_transpose_mul": 0.4011956913745962,
+          "jacobian_mul": 0.9396895127138123
+        },
+        "inner_iterations": 1664,
+        "inner_limits": 1,
+        "accepted": [
+          {
+            "iteration": 0,
+            "objective": 103222.12867261432,
+            "gradient": 4736.996575885161
+          },
+          {
+            "iteration": 1,
+            "objective": 248.09624216259596,
+            "gradient": 179.49097099847162
+          },
+          {
+            "iteration": 2,
+            "objective": 1.5323124788058633,
+            "gradient": 0.12447512114843198
+          },
+          {
+            "iteration": 3,
+            "objective": 1.5199975573200817,
+            "gradient": 7.070132697580261e-05
+          },
+          {
+            "iteration": 4,
+            "objective": 1.5199971249507307,
+            "gradient": 2.3125882391387964e-06
+          },
+          {
+            "iteration": 5,
+            "objective": 1.5199971249026185,
+            "gradient": 2.2604426826861035e-08
+          },
+          {
+            "iteration": 6,
+            "objective": 1.5199971249026036,
+            "gradient": 2.0475491614713182e-10
+          }
+        ]
+      }
+    ],
+    "solution_max_abs_difference": 3.3568009483175842e-12,
+    "summary": {
+      "gauss_newton": {
+        "median_seconds": 1.4441822919761762,
+        "min_seconds": 1.374453625001479,
+        "max_seconds": 1.9702543330495246
+      },
+      "gauss_newton_operator": {
+        "median_seconds": 17.043970874976367,
+        "min_seconds": 17.002221292001195,
+        "max_seconds": 17.446382083988283
+      }
+    }
+  }
+}
