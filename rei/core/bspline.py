@@ -190,6 +190,12 @@ def bspline_basis_derivative_matrices(
             f"got {max_derivative_order}."
         )
 
+    if max_derivative_order > degree:
+        raise ValueError(
+            "B-spline: requested derivative order must be <= degree; "
+            f"got derivative order {max_derivative_order} > degree {degree}."
+        )
+
     out = np.zeros((max_derivative_order + 1, u_vec.size, num_ctrl_points), dtype=float)
     out[0, :, :] = bspline_basis_matrix(
         u_vec=u_vec,
@@ -204,9 +210,7 @@ def bspline_basis_derivative_matrices(
     current_degree = degree
     current_num_ctrl = num_ctrl_points
     transform = np.eye(num_ctrl_points, dtype=float)
-    max_supported_order = min(max_derivative_order, degree)
-
-    for order in range(1, max_supported_order + 1):
+    for order in range(1, max_derivative_order + 1):
         D = _bspline_derivative_transform(
             degree=current_degree,
             knots=current_knots,

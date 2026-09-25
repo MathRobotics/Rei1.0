@@ -2390,7 +2390,7 @@ class TestReiBasic:
         )
         u_vec = np.linspace(float(knots[degree]), float(knots[num_ctrl_points]), 11, dtype=float)
 
-        max_order = 6
+        max_order = degree
         mats = bspline_basis_derivative_matrices(
             u_vec=u_vec,
             degree=degree,
@@ -2410,15 +2410,13 @@ class TestReiBasic:
             )
             assert np.allclose(mats[order, :, :], mat_single, atol=1e-10, rtol=1e-10)
 
-            assert np.allclose(mats[degree + 1 :, :, :], 0.0)
-
     def test_trajectory_map_from_bspline_derivatives_matches_single_order(self) -> None:
         steps = 7
         q_dim = 2
         degree = 3
         num_ctrl_points = 6
         parameter_scale = 1.7
-        max_order = 5
+        max_order = degree
 
         maps = TrajectoryMap.from_bspline_derivatives(
             steps=steps,
@@ -2456,11 +2454,11 @@ class TestReiBasic:
         }
         maps = build_trajectory_maps_with_derivatives(
             traj_dsl,
-            max_derivative_order=4,
+            max_derivative_order=3,
             derivative_wrt="time",
             default_dt=0.2,
         )
-        assert len(maps) == 5
+        assert len(maps) == 4
 
         map_d2 = build_trajectory_map_with_derivative(
             traj_dsl,

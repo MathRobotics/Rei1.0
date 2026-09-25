@@ -438,6 +438,10 @@ the expression VJP.  Custom costs used with this operator must implement
 
 ### Sparse B-spline trajectory maps
 
+B-spline derivative requests must satisfy `derivative_order <= degree`
+(likewise `max_derivative_order <= degree`). Larger orders raise `ValueError`
+instead of returning zero derivatives, including the nonuniform-sample path.
+
 B-spline `TrajectoryMap` instances retain a block-sparse operator instead of
 materializing `kron(basis, I)` in normal runtime paths.  Use
 `apply(p)`, `apply_at(k, p)`, `apply_transpose(rhs)`, and

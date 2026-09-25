@@ -457,6 +457,11 @@ def build_trajectory_maps_with_derivatives(
         pick_trajectory_value(traj_dsl, section="bspline", key="degree"),
         name="degree",
     )
+    if max_order > degree:
+        raise ValueError(
+            "B-spline: requested derivative order must be <= degree; "
+            f"got derivative order {max_order} > degree {degree}."
+        )
     num_ctrl_points = resolve_required_positive_int(
         pick_trajectory_value(traj_dsl, section="bspline", key="num_ctrl_points"),
         name="num_ctrl_points",

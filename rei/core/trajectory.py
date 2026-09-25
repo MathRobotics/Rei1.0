@@ -403,6 +403,11 @@ class TrajectoryMap:
                 "TrajectoryMap.from_bspline_derivatives: max_derivative_order must be >= 0, "
                 f"got {max_derivative_order}."
             )
+        if max_derivative_order > degree:
+            raise ValueError(
+                "B-spline: requested derivative order must be <= degree; "
+                f"got derivative order {max_derivative_order} > degree {degree}."
+            )
 
         if knot_vector is None:
             knots = default_clamped_uniform_knots(

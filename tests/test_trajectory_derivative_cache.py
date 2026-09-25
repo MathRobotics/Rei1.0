@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+import pytest
 
 import rei.optimize.dsl.environment as dsl_environment
 from rei.core.expr.registry import ExprRegister
@@ -219,8 +220,8 @@ def test_derivative_cache_key_separates_inputs_and_tracks_spec_mutation(monkeypa
     )
     assert len(calls) == 6
 
-    second_derivative = env.resolve_trajectory_map_with_derivative(
-        equivalent_spec, derivative_order=2, derivative_wrt="time", default_q_dim=2
-    )
-    assert second_derivative is not mutated_spec
+    with pytest.raises(ValueError, match="derivative order 2 > degree 1"):
+        env.resolve_trajectory_map_with_derivative(
+            equivalent_spec, derivative_order=2, derivative_wrt="time", default_q_dim=2
+        )
     assert len(calls) == 7
