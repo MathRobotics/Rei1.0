@@ -39,6 +39,10 @@ class KotsAdapter:
         self.state_type = state_type
         self._model_dof_cache: int | None = None
         self._model_order_cache: int | None = None
+        # Backend references depend on the fixed robot layout, field and frame,
+        # not on time steps or optimization variables. Keep this cache local to
+        # the builder; changing the robot topology requires a new builder.
+        self._total_joint_refs: dict[tuple[str, str | None], tuple[Any, ...] | None] = {}
 
     def _call_update_method(
         self,
@@ -189,13 +193,16 @@ class KotsAdapter:
         return str(frame_name)
 
     def resolve_total_joint_dynamics_refs(self, *, state_field: str, key: StateKey) -> tuple[Any, ...] | None:
+        state_field = self.state_field_name(state_field)
+        frame_name = self.total_joint_dynamics_frame_name(state_field=state_field, key=key)
+        cache_key = (state_field, frame_name)
+        if cache_key in self._total_joint_refs:
+            return self._total_joint_refs[cache_key]
         joints = self.dof_sorted_joints()
         if joints is None:
+            self._total_joint_refs[cache_key] = None
             return None
-        if len(joints) == 0:
-            return tuple()
 
-        frame_name = self.total_joint_dynamics_frame_name(state_field=state_field, key=key)
         refs: list[Any] = []
         for joint in joints:
             joint_name = str(getattr(joint, "name", ""))
@@ -209,7 +216,9 @@ class KotsAdapter:
                     frame_name=frame_name,
                 )
             )
-        return tuple(refs)
+        result = tuple(refs)
+        self._total_joint_refs[cache_key] = result
+        return result
 
     @staticmethod
     def state_ref_data_type(state_ref: Any) -> str | None:

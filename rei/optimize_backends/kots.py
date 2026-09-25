@@ -13,6 +13,7 @@ from ..core.trajectory import TrajectoryMap
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl
 from ..optimize.runtime import NLSRuntime
 from ._state_field_utils import (
+    base_field_name,
     canonicalize_unique_fields,
     required_base_fields_in_order_from_dsl,
     validate_runtime_field_coverage,
@@ -531,6 +532,13 @@ class _KotsTrajectoryCompileAdapter:
             builder=state_builder,
             dynamics_owner_type=self.dynamics_owner_type,
         )
+        # Prepare fixed per-joint references once, before any trajectory/IOC
+        # evaluation. Additional state requests are cached on their first use.
+        for key in runtime.required_list():
+            if key.dtype == DTYPE_DYNAMICS and key.owner.owner_type == self.dynamics_owner_type:
+                state_builder.adapter.resolve_total_joint_dynamics_refs(
+                    state_field=base_field_name(key.field), key=key,
+                )
 
 
 def compile_kots_trajectory_problem(

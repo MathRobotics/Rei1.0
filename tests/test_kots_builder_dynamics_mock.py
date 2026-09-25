@@ -54,6 +54,70 @@ compile_trajectory_ioc_problem = _traj_ioc_mod.compile_trajectory_ioc_problem
 estimate_ioc_weights = _traj_ioc_mod.estimate_ioc_weights
 inspect_trajectory_problem_backend = _traj_diag_mod.inspect_trajectory_problem_backend
 
+def test_total_joint_refs_are_prepared_once_and_reused(monkeypatch):
+    adapter_module = importlib.import_module("rei.backends.state.robotics.kots_adapter")
+    calls = []
+    original = adapter_module.KotsAdapter.make_state_type
+
+    def counted(self, **kwargs):
+        calls.append(kwargs.copy())
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(adapter_module.KotsAdapter, "make_state_type", counted)
+    model = _FakeKotsModel()
+    model.robot_ = types.SimpleNamespace(joints=[
+        types.SimpleNamespace(name="second", dof=1, dof_index=1),
+        types.SimpleNamespace(name="fixed", dof=0, dof_index=0),
+        types.SimpleNamespace(name="first", dof=1, dof_index=0),
+    ])
+    dsl = {
+        "time": {"N": 1, "dt": .2},
+        "trajectory": {"type": "linear", "var": "p", "steps": 2,
+                       "q_dim": 2, "A": np.tile(np.eye(2), (2, 1)).tolist()},
+        "variables": [{"name": "p", "dim": 2, "init": [0., 0.]}],
+        "terms": [{"expr": {"type": "get_state", "key": {
+            "k": k, "owner_type": "total_joint", "owner_name": "robot",
+            "dtype": DTYPE_DYNAMICS, "field": "torque",
+        }, "jac": {"var": "p"}}, "cost": {"type": "l2"}} for k in range(2)],
+    }
+    compiled = compile_kots_trajectory_problem(dsl, model=model)
+    assert [c["owner_name"] for c in calls] == ["first", "second"]
+    adapter = compiled.state_builder.adapter
+    key = make_key(k=0, owner_type="total_joint", owner_name="robot",
+                   dtype=DTYPE_DYNAMICS, field="torque")
+    refs = adapter.resolve_total_joint_dynamics_refs(state_field="torque", key=key)
+    monkeypatch.setattr(adapter, "dof_sorted_joints",
+                        lambda: pytest.fail("cached refs must not resolve joints again"))
+    for k in range(100):
+        key = make_key(k=k, owner_type="total_joint", owner_name="robot",
+                       dtype=DTYPE_DYNAMICS, field="torque", frame="local")
+        assert compiled.state_builder._resolve_state_ref(key).refs is refs
+    assert len(calls) == 2
+
+
+def test_total_joint_ref_cache_separates_fields_frames_and_builders():
+    model = _FakeKotsModel()
+    model.robot_ = types.SimpleNamespace(joints=[
+        types.SimpleNamespace(name="joint", dof=1, dof_index=0),
+    ])
+    builder = _kots_state_mod.KotsStateBuilder(model)
+    key = make_key(k=0, owner_type="total_joint", owner_name="robot",
+                   dtype=DTYPE_DYNAMICS, field="torque")
+    resolve = builder.adapter.resolve_total_joint_dynamics_refs
+    torque = resolve(state_field="torque", key=key)
+    derivative = resolve(state_field="torque_d1", key=key)
+    assert derivative is not torque
+    assert resolve(state_field="torque_d1", key=key) is derivative
+    world = resolve(state_field="force", key=key)
+    local_key = make_key(k=1, owner_type="total_joint", owner_name="robot",
+                         dtype=DTYPE_DYNAMICS, field="force", frame="local")
+    local = resolve(state_field="force", key=local_key)
+    assert world is not local
+    assert resolve(state_field="force", key=local_key) is local
+    other = _kots_state_mod.KotsStateBuilder(model)
+    assert other.adapter.resolve_total_joint_dynamics_refs(state_field="torque", key=key) is not torque
+
+
 class _FakeKotsModel:
     def __init__(self) -> None:
         self._motion = np.zeros((6,), dtype=float)

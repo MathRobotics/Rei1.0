@@ -407,7 +407,11 @@ compiled = compile_kots_trajectory_problem(
 
 For `total_joint` dynamics, Rei expands the request to a list of per-joint
 `StateType("joint", joint_name, field)` entries and passes that list to
-RoboKots. Rei expects RoboKots to support list inputs for `jacobian`,
+RoboKots. These references are prepared during trajectory compilation and
+cached per builder, field, and effective frame, so time steps and repeated IOC
+evaluations reuse them. Additional requests are cached on first use. Create a
+new builder if the robot's joint names, order, or topology change.
+Rei expects RoboKots to support list inputs for `jacobian`,
 `jacobian_mul`, and `jacobian_transpose_mul`. If a list call is unavailable,
 Rei falls back to per-joint calls where possible.
 
