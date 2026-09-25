@@ -49,6 +49,9 @@ class SolveOutcome:
     stats: SolveStats
     timing: TimingReport
     meta: dict[str, Any] = field(default_factory=dict)
+    history: list[dict[str, Any]] = field(default_factory=list)
+    line_search_history: list[dict[str, Any]] = field(default_factory=list)
+    trial_history: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.solution = np.asarray(self.solution, dtype=float).reshape(-1).copy()

@@ -4,6 +4,7 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS: dict[str, tuple[str, str]] = {
+    "format_solver_history": ("rei.optimize.history", "format_solver_history"),
     "ProblemPoint": ("rei.problem", "ProblemPoint"),
     "EvaluateProblem": ("rei.problem", "EvaluateProblem"),
     "LinearizedProblem": ("rei.problem", "LinearizedProblem"),

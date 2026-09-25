@@ -167,7 +167,7 @@ class ScalarProblem:
 def test_gauss_newton_rejected_search_is_stalled():
     problem = ScalarProblem(-1.1, lambda x: np.exp(10*x)-1, lambda x: 10*np.exp(10*x))
     with np.errstate(over="ignore"):
-        out = solve(problem)
+        out = solve(problem, solver="gauss_newton", options={"ls_max_retries": 0})
     assert out.status == "stalled"
     assert not out.converged
     np.testing.assert_array_equal(out.solution, [-1.1])
@@ -238,7 +238,7 @@ def test_least_squares_preserves_small_scale_direction(solver):
             [{"name": "x", "init": [0., 0.]}],
             {"type": "diag_weight", "w": [1., 1e-16]},
         )
-        out = solve(rt, options={"damping": 0.})
+        out = solve(rt, solver="gauss_newton", options={"damping": 0.})
     assert out.converged
     np.testing.assert_allclose(out.solution, [1., 1.], atol=1e-10)
 
@@ -250,5 +250,5 @@ def test_augmented_damping_preserves_regularized_step():
         [{"name": "x", "init": [0., 0.]}],
         {"type": "diag_weight", "w": [4., 9.]},
     )
-    out = solve(rt, options={"damping": 2., "max_iters": 1, "line_search": False})
+    out = solve(rt, solver="gauss_newton", options={"damping": 2., "max_iters": 1, "line_search": False})
     np.testing.assert_allclose(out.solution, [8./6., 27./11.], atol=1e-12)

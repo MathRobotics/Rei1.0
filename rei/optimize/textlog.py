@@ -10,6 +10,7 @@ import numpy as np
 
 from ..core.outcome import SolveOutcome
 from .report import format_timing_report
+from .history import format_solver_history
 
 IterRow = tuple[int, float, float]
 # The fourth argument is optional so existing three-argument callbacks remain
@@ -208,7 +209,9 @@ def format_solver_text_log(
         lines.append("")
         lines.extend(format_timing_report(outcome.timing, title=str(timing_title)).splitlines())
 
-    if iter_history is not None:
+    if outcome.history:
+        lines.extend(["", "[solve.history]", format_solver_history(outcome.history)])
+    elif iter_history is not None:
         rows = list(iter_history)
         if deduplicate_iter:
             rows = compress_iter_history(rows)
