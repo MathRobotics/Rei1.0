@@ -64,7 +64,7 @@ def test_multivariable_subtraction_solves_coupled_problem():
     rt = runtime_for(stack(sub(var("x"), var("y")), var("y")), [
         {"name": "x", "init": [3.]}, {"name": "y", "init": [1.]},
     ])
-    out = solve(rt)
+    out = solve(rt, options={"tol_grad": 1e-10})
     assert out.converged
     np.testing.assert_allclose(out.solution, [0., 0.], atol=1e-8)
 

@@ -538,6 +538,11 @@ algorithm. `out.meta["reason"]` distinguishes these; `gradient_converged`
 reports whether `max(abs(J.T @ r)) <= tol_grad`. Use `tol_dx=0` to disable
 step-based convergence. A numerical stall or iteration limit remains possible.
 
+`solver="lm-ls"` combines damped least-squares directions with backtracking.
+Both LM solvers default to `tol_grad=1e-8`; `lm-ls` declares convergence only
+when this gradient tolerance is met. See [LM with line search](docs/lm-ls.md)
+for settings, stopping reasons, and history output.
+
 The preserved Gauss-Newton solver and `nls()` check stationarity before treating
 a small step as convergence. `tol_grad` (default `1e-10`) bounds
 `max(abs(J.T @ r))`. A small step with neither a sufficiently small residual

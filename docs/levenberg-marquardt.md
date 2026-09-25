@@ -12,7 +12,7 @@ LM には複数の更新則があります。「唯一の古典的 LM」とい�
 # 新しい基準：古典的 LM
 out = solve(runtime, solver="levenberg_marquardt", options={
     "max_iters": 200,
-    "tol_grad": 1e-10,
+    "tol_grad": 1e-8,
     "tol_dx": 1e-12,
     "tau": 1e-3,
 })

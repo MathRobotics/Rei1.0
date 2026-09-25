@@ -107,6 +107,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "solve": ("rei.optimize.solvers", "solve"),
     "solve_gauss_newton": ("rei.optimize.solvers", "solve_gauss_newton"),
     "solve_levenberg_marquardt": ("rei.optimize.solvers", "solve_levenberg_marquardt"),
+    "solve_lm_ls": ("rei.optimize.solvers", "solve_lm_ls"),
     "solve_scipy_minimize": ("rei.optimize.solvers", "solve_scipy_minimize"),
     "solve_cyipopt_minimize": ("rei.optimize.solvers", "solve_cyipopt_minimize"),
     "solve_liteopt_gd": ("rei.optimize.solvers", "solve_liteopt_gd"),

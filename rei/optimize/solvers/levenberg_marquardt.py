@@ -41,7 +41,7 @@ def solve_levenberg_marquardt(
     required: Iterable[StateKey] | None = None,
     weighted: bool | None = None,
     term_indices: Iterable[int] | None = None,
-    tol_grad: float = 1e-10,
+    tol_grad: float = 1e-8,
     tol_dx: float = 1e-12,
     tau: float = 1e-3,
     damping: float | None = None,

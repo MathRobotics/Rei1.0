@@ -28,7 +28,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="RoboKots trajectory dynamics example.")
     parser.add_argument("--jacobian-method", choices=("analytic", "numerical", "autodiff"), default="analytic")
     parser.add_argument("--history", type=Path, help="Stream history to a new JSONL file.")
-    parser.add_argument("--solver", choices=("levenberg_marquardt", "gauss_newton"), default="levenberg_marquardt")
+    parser.add_argument("--solver", choices=("levenberg_marquardt", "gauss_newton", "lm-ls"), default="levenberg_marquardt")
     parser.add_argument("--trial-history", type=Path, help="LM trial JSONL path (default: <history stem>.lm_trials.jsonl).")
     parser.add_argument("--show-trials", action="store_true", help="Show LM trials.")
     parser.add_argument("--history-vectors", action="store_true", help="Include reduced variables and Jᵀr vectors.")
@@ -43,8 +43,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.solver == "levenberg_marquardt" and (args.line_search_history or args.show_line_search):
-        parser.error("--line-search-history/--show-line-search require --solver gauss_newton")
-    if args.solver == "gauss_newton" and (args.trial_history or args.show_trials):
+        parser.error("--line-search-history/--show-line-search require --solver gauss_newton or lm-ls")
+    if args.solver != "levenberg_marquardt" and (args.trial_history or args.show_trials):
         parser.error("--trial-history/--show-trials require --solver levenberg_marquardt")
 
     if not _MODEL_PATH.is_file():
@@ -72,10 +72,12 @@ def main() -> None:
     out_reduced = solve(
         reduction.runtime,
         solver=args.solver,
-        options={"max_iters": 500, "tol_dx": 1e-8 if args.solver == "gauss_newton" else 1e-12,
+        options={"max_iters": 500,
+                 **({} if args.solver == "lm-ls" else
+                    {"tol_dx": 1e-8 if args.solver == "gauss_newton" else 1e-12}),
                  "history_path": args.history, "history_vectors": args.history_vectors,
                  "verbose": not args.quiet,
-                 **({"line_search_history_path": args.line_search_history} if args.solver == "gauss_newton"
+                 **({"line_search_history_path": args.line_search_history} if args.solver != "levenberg_marquardt"
                     else {"trial_history_path": args.trial_history})},
     )
     reduction.runtime.update_state_if_needed()

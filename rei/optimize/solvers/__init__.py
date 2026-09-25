@@ -6,6 +6,7 @@ from .dispatch import (
     solve_cyipopt_minimize,
     solve_gauss_newton,
     solve_levenberg_marquardt,
+    solve_lm_ls,
     solve_liteopt_gd,
     solve_scipy_minimize,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "solve",
     "solve_gauss_newton",
     "solve_levenberg_marquardt",
+    "solve_lm_ls",
     "solve_scipy_minimize",
     "solve_cyipopt_minimize",
     "solve_liteopt_gd",
