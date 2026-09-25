@@ -10,7 +10,7 @@ from ...core.expr.types import Variable, VariablePack
 from ...core.state_cache import StateKey
 from ...xops import set_pack_x
 from .matrix_scaling import scale_matrix_with_projection_svd
-from ..runtime import LinearizedTerm, NLSRuntime, StackedTermSlice
+from ..runtime import LinearizedTerm, NLSRuntime, StackedTermSlice, collect_expr_required
 
 Array = np.ndarray
 
@@ -346,6 +346,12 @@ def build_nullspace_equality_reduction(
     linearity_rtol: float = 1e-6,
     linearity_seed: int = 0,
 ) -> NullspaceEqualityReduction:
+    """Eliminate selected affine equalities.
+
+    With required=None, setup and linearity checks request only state used by
+    the selected equality expressions, not state for the remaining objectives.
+    An explicit required iterable retains the caller's state selection.
+    """
     if not isinstance(runtime, NLSRuntime):
         raise TypeError(
             "build_nullspace_equality_reduction: runtime must be NLSRuntime."
@@ -443,7 +449,14 @@ def build_nullspace_equality_reduction(
     else:
         obj_idxs = _normalize_term_indices(n_terms=n_terms, term_indices=objective_term_indices)
 
-    req = runtime.required_list(required)
+    if required is None:
+        req = []
+        for index in eq_idxs:
+            expr, _cost = runtime.problem.terms[index]
+            req.extend(collect_expr_required(expr))
+        req = runtime.required_list(req)
+    else:
+        req = runtime.required_list(required)
     n_full = int(runtime.pack.n_total)
     x_cur = np.asarray(runtime.pack.get(), dtype=float).reshape(-1)
     if x_cur.size != n_full:
