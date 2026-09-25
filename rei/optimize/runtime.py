@@ -628,12 +628,16 @@ class NLSRuntime:
     ) -> dict[int, tuple[Array, Array, Array]]:
         """Evaluate compatible dynamics stacks across IOC terms in one VJP batch.
 
-        RoboKots' heterogeneous VJP API preserves one output per input state
-        request.  Keeping the request-to-term mapping here is essential: IOC
-        needs one gradient column per cost term, not only their sum.
+        RoboKots sums its heterogeneous VJP requests.  Matrix RHS columns
+        preserve the individual term gradients while still using one reverse
+        pass; the legacy per-request API remains the fallback.
         """
         batch_vjp = getattr(self.state, "jacobian_transpose_mul_many", None) if self.state is not None else None
-        if not callable(batch_vjp):
+        fused_column_vjp = (
+            getattr(self.state, "jacobian_transpose_mul_many_fused_columns", None)
+            if self.state is not None else None
+        )
+        if not callable(batch_vjp) and not callable(fused_column_vjp):
             return {}
 
         candidates: list[dict[str, Any]] = []
@@ -671,6 +675,9 @@ class NLSRuntime:
         try:
             self.update_state_if_needed(required=_dedupe_required(value_required))
             requests_by_var: list[list[tuple[StateKey, StateKey, Array]]] = [[] for _ in reference_vars]
+            objective_requests_by_var: list[list[list[tuple[StateKey, StateKey, Array]]]] = [
+                [] for _ in reference_vars
+            ]
             request_owners: list[list[tuple[dict[str, Any], int]]] = [[] for _ in reference_vars]
             for candidate in candidates:
                 rhs_parts: list[Array] = []
@@ -684,9 +691,40 @@ class NLSRuntime:
                     offset = stop
                 candidate["grads"] = [np.zeros((var.dim(),), dtype=float) for var in reference_vars]
                 for var_index, _var in enumerate(reference_vars):
+                    objective_requests: list[tuple[StateKey, StateKey, Array]] = []
                     for part, rhs_part in zip(candidate["parts"], rhs_parts, strict=True):
-                        requests_by_var[var_index].append((part.key_value, part.key_jacs[var_index], rhs_part))
+                        request = (part.key_value, part.key_jacs[var_index], rhs_part)
+                        requests_by_var[var_index].append(request)
+                        objective_requests.append(request)
                         request_owners[var_index].append((candidate, var_index))
+                    objective_requests_by_var[var_index].append(objective_requests)
+
+            if callable(fused_column_vjp):
+                for var_index, request_groups in enumerate(objective_requests_by_var):
+                    columns = np.asarray(fused_column_vjp(request_groups), dtype=float)
+                    expected = (reference_vars[var_index].dim(), len(candidates))
+                    if columns.shape != expected:
+                        raise ValueError(
+                            "fused-column residual VJP shape mismatch. "
+                            f"Expected {expected}, got {columns.shape}."
+                        )
+                    for column, candidate in enumerate(candidates):
+                        candidate["grads"][var_index] += columns[:, column]
+                out: dict[int, tuple[Array, Array, Array]] = {}
+                for candidate in candidates:
+                    raw = np.asarray(candidate["raw"], dtype=float).reshape(-1)
+                    zeros = [np.zeros((raw.size, var.dim()), dtype=float) for var in candidate["vars"]]
+                    apply_cost = getattr(candidate["cost"], "apply", None)
+                    weighted = (np.asarray(apply_cost(raw, zeros)[0], dtype=float).reshape(-1)
+                                if callable(apply_cost) else raw.copy())
+                    out[int(candidate["idx"])] = (
+                        raw, weighted,
+                        self._assemble_global_gradient(
+                            term_name=self._term_display_name(int(candidate["idx"])),
+                            expr_vars=candidate["vars"], gradients=candidate["grads"],
+                        ),
+                    )
+                return out
 
             for var_index, requests in enumerate(requests_by_var):
                 contributions = [np.asarray(value, dtype=float) for value in batch_vjp(requests)]

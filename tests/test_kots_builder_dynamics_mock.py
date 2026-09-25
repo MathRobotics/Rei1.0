@@ -416,6 +416,114 @@ class _FakeKotsModelJacobianTransposeMulNoDenseJac(_FakeKotsModel):
         return J.T @ R
 
 
+class _FakeKotsModelFusedColumns(_FakeKotsModelJacobianTransposeMulNoDenseJac):
+    def __init__(self) -> None:
+        super().__init__()
+        self.multi_vjp_calls = 0
+
+    def jacobian_transpose_mul_many(self, requests):
+        self.multi_vjp_calls += 1
+        result = None
+        for state_ref, rhs in requests:
+            J = self._jacobian_matrix(state_ref)
+            R = np.asarray(rhs, dtype=float)
+            value = np.einsum("ij,tjk->tik", J.T, R)
+            result = value if result is None else result + value
+        return result
+
+
+class _FakeKotsModelFusedColumns69:
+    """Shape-only 69-DoF Rust-VJP stand-in used as a CI batching guard."""
+
+    def __init__(self) -> None:
+        self.multi_vjp_calls = 0
+        self.request_shapes: list[tuple[int, ...]] = []
+
+    def dof(self) -> int:
+        return 69
+
+    def order(self) -> int:
+        return 4
+
+    def import_motions(self, _motion) -> None:
+        pass
+
+    def kinematics(self, **_kwargs) -> None:
+        pass
+
+    def dynamics(self, **_kwargs) -> None:
+        pass
+
+    def jacobian_transpose_mul_many(self, requests):
+        self.multi_vjp_calls += 1
+        self.request_shapes = [tuple(np.asarray(rhs).shape) for _ref, rhs in requests]
+        rows, _dof, cols = self.request_shapes[0]
+        return np.zeros((rows, 69 * 4, cols), dtype=float)
+
+
+def test_kots_fused_column_vjp_returns_one_gradient_per_objective():
+    model = _FakeKotsModelFusedColumns()
+    trajectory = TrajectoryMap.from_blocks([
+        np.eye(2), 2. * np.eye(2),
+    ])
+    builder = KotsTrajectoryStateBuilder(
+        model, {}, trajectory_map=trajectory,
+        trajectory_derivative_maps={1: trajectory, 2: trajectory},
+    )
+    keys = {
+        field: [make_key(k=k, owner_type="total_joint", owner_name="robot",
+                         dtype=DTYPE_DYNAMICS, field=field) for k in range(2)]
+        for field in ("torque", "torque_d1")
+    }
+    rhs = {
+        "torque": [np.array([1., -2.]), np.array([.5, 3.])],
+        "torque_d1": [np.array([-4., .25]), np.array([2., -1.])],
+    }
+    p = np.array([.25, -.5])
+    actual = builder.param_jacobian_transpose_mul_many_fused_columns(
+        p,
+        [[*zip(keys["torque"], rhs["torque"], strict=True)],
+         [*zip(keys["torque_d1"], rhs["torque_d1"], strict=True)]],
+    )
+    expected = np.column_stack([
+        sum((builder.param_jacobian_transpose_mul(p, key, value)
+             for key, value in zip(keys[field], rhs[field], strict=True)), start=np.zeros(2))
+        for field in ("torque", "torque_d1")
+    ])
+    np.testing.assert_allclose(actual, expected)
+    assert model.multi_vjp_calls == 1
+
+
+def test_kots_fused_column_vjp_100_frames_69_dof_regression_guard():
+    """CI guard: full torque/torque_d1 workload is one matrix-RHS VJP."""
+    steps, dof, controls = 100, 69, 20
+    model = _FakeKotsModelFusedColumns69()
+    maps = TrajectoryMap.from_bspline_derivatives(
+        steps=steps, q_dim=dof, degree=3, num_ctrl_points=controls,
+        max_derivative_order=3,
+    )
+    builder = KotsTrajectoryStateBuilder(
+        model, {}, trajectory_map=maps[0],
+        trajectory_derivative_maps=dict(enumerate(maps)),
+    )
+    request_groups = [
+        [
+            (make_key(k=k, owner_type="total_joint", owner_name="robot",
+                      dtype=DTYPE_DYNAMICS, field=field), np.ones((dof,)))
+            for k in range(steps)
+        ]
+        for field in ("torque", "torque_d1")
+    ]
+
+    out = builder.param_jacobian_transpose_mul_many_fused_columns(
+        np.zeros((dof * controls,)), request_groups,
+    )
+
+    assert out.shape == (dof * controls, 2)
+    assert model.multi_vjp_calls == 1
+    assert model.request_shapes == [(steps, dof, 2), (steps, dof, 2)]
+
+
 class _FakeKotsModelOrder4:
     def __init__(self) -> None:
         self._motion = np.zeros((8,), dtype=float)
@@ -1348,6 +1456,55 @@ class TestKotsTrajectoryDynamicsMock:
         assert result["backend"] == "kots"
         assert model.jacobian_transpose_mul_calls > 0
         assert model.jacobian_calls == 0
+
+    def test_ioc_dynamics_stacks_fuse_terms_into_one_column_vjp(self) -> None:
+        """Two torque objectives retain separate gradients in one reverse pass."""
+        model = _FakeKotsModelFusedColumns()
+
+        def dynamics_stack(name: str, field: str) -> dict:
+            return {
+                "type": "vstack",
+                "name": name,
+                "parts": [
+                    {
+                        "type": "get_state",
+                        "name": f"{field}{k}",
+                        "key": {
+                            "k": k,
+                            "owner_type": "total_joint",
+                            "owner_name": "robot",
+                            "dtype": DTYPE_DYNAMICS,
+                            "field": field,
+                        },
+                        "jac": {"var": "p"},
+                    }
+                    for k in range(2)
+                ],
+            }
+
+        dsl = {
+            "time": {"N": 1, "dt": 0.2},
+            "trajectory": {
+                "type": "linear", "var": "p", "steps": 2, "q_dim": 2,
+                "A": [[1., 0.], [0., 1.], [2., 0.], [0., 2.]],
+            },
+            "variables": [{"name": "p", "dim": 2, "init": [.5, -.25]}],
+            "terms": [
+                {"expr": dynamics_stack("torque_a", "torque"), "cost": {"type": "l2"}},
+                {"expr": dynamics_stack("torque_b", "torque"), "cost": {"type": "l2"}},
+            ],
+        }
+        compiled = compile_trajectory_ioc_problem(dsl, backend="kots", model=model, data={})
+
+        _idxs, _names, _attrs, residuals, weighted, gradients = (
+            compiled.runtime.term_gradient_contributions()
+        )
+
+        assert model.multi_vjp_calls == 1
+        assert model.jacobian_transpose_mul_calls == 0
+        assert model.jacobian_calls == 0
+        assert len(residuals) == len(weighted) == len(gradients) == 2
+        assert all(np.all(np.isfinite(gradient)) for gradient in gradients)
 
     def test_compile_trajectory_ioc_problem_kots_mixed_q_and_torque_keeps_fallback_term_local(self) -> None:
         model = _FakeKotsModelJacobianTransposeMulNoDenseJac()

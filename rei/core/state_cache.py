@@ -320,3 +320,33 @@ class StateCache:
             ),
             dtype=float,
         )
+
+    def jacobian_transpose_mul_many_fused_columns(
+        self,
+        request_groups: Iterable[Iterable[tuple[StateKey, StateKey, Array | Any]]],
+    ) -> Array:
+        """Return one summed VJP column for each compatible request group."""
+        groups = [list(group) for group in request_groups]
+        if len(groups) < 2:
+            raise AttributeError("fused-column state VJP requires at least two request groups")
+        builder = getattr(self.build_state, "__self__", None)
+        pack = self._pack_last
+        p_var = getattr(builder, "p_var", None)
+        fused_columns = getattr(builder, "param_jacobian_transpose_mul_many_fused_columns", None)
+        if builder is None or pack is None or not callable(fused_columns) or not isinstance(p_var, str):
+            raise AttributeError("StateCache: backend does not expose fused-column parameter VJP.")
+        parsed = [
+            str(jac_key.field).partition("_J_")
+            for group in groups for _value_key, jac_key, _rhs in group
+        ]
+        if not parsed or not all(sep and base and jac_var == p_var for base, sep, jac_var in parsed):
+            raise AttributeError("fused-column state VJP requires Jacobian StateKeys for the trajectory parameter.")
+        return np.asarray(
+            fused_columns(
+                np.asarray(pack.get(), dtype=float).reshape(-1),
+                [[(value_key, rhs) for value_key, _jac_key, rhs in group] for group in groups],
+                pack=pack,
+                time=self._time_last,
+            ),
+            dtype=float,
+        )

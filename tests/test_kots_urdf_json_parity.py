@@ -377,15 +377,18 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise(
     batched, batched_shapes, batched_imports, batched_updates, batched_compiled = estimate(batch_trajectory=True)
 
     # Same stationarity result, while the two per-step VJPs become one batch.
-    np.testing.assert_allclose(batched["weights"], stepwise["weights"], rtol=0.0, atol=0.0)
+    # Matrix-RHS fusion changes only floating-point accumulation order.
+    np.testing.assert_allclose(batched["weights"], stepwise["weights"], rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(
         batched["stationarity"]["ikkt_residual"],
         stepwise["stationarity"]["ikkt_residual"],
         rtol=0.0,
-        atol=0.0,
+        atol=1e-12,
     )
     assert stepwise_shapes == [(2,)] * (2 * len(fields))
-    assert batched_shapes == [(2, 2)] * len(fields)
+    # With multiple objectives the fused-column API calls
+    # ``jacobian_transpose_mul_many`` directly, not this single-VJP probe.
+    assert batched_shapes == ([] if len(fields) > 1 else [(2, 2)] * len(fields))
     # Value evaluation and the following VJP share the same batch outward state.
     assert batched_imports == 1
     assert batched_updates == 1
@@ -477,7 +480,7 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
 
     grouped, grouped_probe = estimate(expose_many=False)
     multi, multi_probe = estimate(expose_many=True)
-    np.testing.assert_allclose(multi["weights"], grouped["weights"], rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(multi["weights"], grouped["weights"], rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(
         multi["stationarity"]["ikkt_residual"],
         grouped["stationarity"]["ikkt_residual"],
@@ -493,9 +496,9 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
     assert multi["stationarity"]["active_indices"] == grouped["stationarity"]["active_indices"]
     assert grouped_probe.single_calls == 3
     assert multi_probe.many_calls == 1
-    # IOC term-gradient columns must remain separate, so this path falls back
-    # to field-local VJPs after detecting RoboKots' fused-return contract.
-    assert multi_probe.single_calls == 3
+    # Matrix RHS keeps IOC term-gradient columns separate in the same reverse
+    # recurrence, so no field-local VJP calls are needed.
+    assert multi_probe.single_calls == 0
 
     def residual_vjp(*, expose_many: bool) -> tuple[np.ndarray, _VjpProbe]:
         probe = _VjpProbe(Kots.from_json_file(str(model_path), order=5), expose_many=expose_many)

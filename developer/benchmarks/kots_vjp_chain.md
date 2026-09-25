@@ -36,3 +36,17 @@ This isolates Python trajectory chaining; it does not run the Rust VJP kernel
 or the user's IOC workload. It establishes the local regression, but does not
 attribute all of the reported 185 → 248 ms IOC slowdown or the 19 → 27 ms
 kernel increase. Those require the original workload and profiling setup.
+
+The automated batching guard is
+`test_kots_fused_column_vjp_100_frames_69_dof_regression_guard`.  It constructs
+the representative 100-frame / 69-DoF B-spline workload with `torque` and
+`torque_d1`, and asserts that Rei emits two `(100, 69, 2)` matrix-RHS requests
+to exactly one RoboKots batch VJP.  It deliberately checks call structure,
+not elapsed time, so ordinary CI remains stable while preventing a return to
+per-term or per-frame reverse passes.
+
+For the end-to-end Rust measurement, run
+`uv run python developer/benchmarks/kots_ioc_69dof.py`.  Its fixed default is
+`estimate_ioc_weights` on 100 frames, 69 DoF, 20 B-spline controls, and
+`q`, `qdot`, `qddot`, `qdddot`, `torque`, `torque_d1` terms.  It reports a
+median without imposing a machine-dependent timing threshold in CI.
