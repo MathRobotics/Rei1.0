@@ -904,6 +904,69 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             ))
         return result
 
+    def param_jacobian_mul_many(self, x_all, requests, *, pack=None, time=None):
+        """Batched state JVPs, mapping parameter directions without dense maps.
+
+        Unlike build_state's matrix RHS, each request carries one direction.
+        Dynamics requests share the same cached outward state as batched VJPs.
+        Unsupported families signal capability absence before changing state.
+        """
+        if not self.batch_trajectory or not callable(getattr(self.model, "jacobian_mul", None)):
+            raise AttributeError("RoboKots batched JVP is unavailable.")
+        requests = list(requests)
+        if not requests:
+            return []
+        p = self._extract_q(np.asarray(x_all, dtype=float), pack=pack)
+        self._validate_trajectory_parameter_size(p)
+        steps = self._expected_steps(time=time)
+        groups = {}
+        for index, (key, direction) in enumerate(requests):
+            if key.dtype != DTYPE_DYNAMICS:
+                raise AttributeError("Batched trajectory JVP currently supports dynamics only.")
+            if key.owner.owner_type not in (self.dynamics_owner_type, _KINETIC_ENERGY_OWNER_TYPE):
+                raise AttributeError("Batched trajectory JVP requires an aggregate dynamics state.")
+            if not self._accept_required_key_for_traj(key, steps=steps):
+                raise ValueError(f"Invalid trajectory JVP key: {key!r}")
+            route = self._route_for_key(key)
+            entry = self._dispatch.get(route)
+            if entry is None:
+                raise AttributeError("No dynamics handler for trajectory JVP.")
+            direction = np.asarray(direction, dtype=float)
+            if direction.shape != (self.trajectory_map.p_dim,):
+                raise ValueError("Trajectory JVP direction shape mismatch.")
+            signature = (key.owner, key.field, key.frame, key.rel_frame)
+            groups.setdefault(signature, []).append((index, key, direction, entry))
+        out = [None] * len(requests)
+        dof, order = self._model_dof(), self._model_order()
+        for group in groups.values():
+            ks = [int(key.k) for _, key, _, _ in group]
+            key, entry = group[0][1], group[0][3]
+            state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
+            total_ref = self.adapter.as_total_joint_dynamics_state_ref(state_ref)
+            refs = state_ref if total_ref is None else list(total_ref.refs)
+            directions = np.stack([v for _, _, v, _ in group])
+            used_order = self._preferred_motion_jacobian_used_order(key) or order
+            motion_direction = np.zeros((len(ks), dof, used_order))
+            for derivative, trajectory in self.trajectory_derivative_maps.items():
+                if int(derivative) >= used_order:
+                    continue
+                if isinstance(trajectory.A, BsplineTrajectoryOperator):
+                    operator = trajectory.A
+                    values = np.einsum('tc,tcq->tq', operator.basis[ks],
+                        directions.reshape(len(ks), operator.num_ctrl_points, dof))
+                else:
+                    values = np.stack([trajectory.A[k*dof:(k+1)*dof] @ v
+                                       for k, v in zip(ks, directions, strict=True)])
+                motion_direction[:, :, int(derivative)] = values
+            self._update_batched_dynamics(self._compose_motions(p, ks=ks), p=p, time=time)
+            product = np.asarray(self.model.jacobian_mul(
+                refs, motion_direction.reshape(len(ks), dof*used_order, 1)), dtype=float)
+            if product.ndim != 3 or product.shape[0] != len(ks) or product.shape[-1] != 1:
+                raise ValueError(f"RoboKots batched JVP returned unexpected shape {product.shape}.")
+            for row, (index, _, _, _) in enumerate(group):
+                out[index] = product[row, :, 0].copy()
+        return out
+
     def param_jacobian_transpose_mul(
         self,
         x_all: Array,

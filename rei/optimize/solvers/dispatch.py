@@ -12,6 +12,8 @@ from ...core.timing import Profiler, ensure_profiler
 from ...problem import LinearizedProblem, as_linearized_problem
 from ...xops import as_vec
 from .gauss_newton import solve_gauss_newton
+from .gauss_newton_operator import solve_gauss_newton_operator
+from .gauss_newton_krylov import solve_gauss_newton_krylov
 from .levenberg_marquardt import solve_levenberg_marquardt
 from .lm_ls import solve_lm_ls
 from .nls import nls
@@ -105,13 +107,30 @@ _SOLVER_REI_OPTION_KEYS: dict[str, frozenset[str]] = {
     ),
 }
 
+_SOLVER_REI_OPTION_KEYS["gauss_newton_operator"] = (
+    _SOLVER_REI_OPTION_KEYS["gauss_newton"] | {"inner_tol", "inner_max_iters"}
+)
+
+_SOLVER_REI_OPTION_KEYS["gauss_newton_krylov"] = frozenset({
+    "max_iters", "tol_grad", "initial_radius", "max_radius", "acceptance",
+    "inner_max_iters", "forcing_min", "forcing_max", "preconditioner",
+    "preconditioner_probes", "preconditioner_max_size", "preconditioner_floor",
+    "preconditioner_refresh", "seed", "history", "history_vectors", "history_path",
+    "trial_history_path", "verbose",
+})
+
+_BUILTIN_NLS_SOLVERS = frozenset({
+    "gauss_newton", "gauss_newton_operator", "gauss_newton_krylov",
+    "levenberg_marquardt", "lm-ls",
+})
+
 _ALL_REI_SOLVER_OPTION_KEYS = frozenset().union(*_SOLVER_REI_OPTION_KEYS.values())
 
 
 def _allowed_solve_option_keys(solver_key: str) -> frozenset[str]:
     allowed = set(_COMMON_SOLVE_OPTION_KEYS)
     allowed.update(_SOLVER_REI_OPTION_KEYS[solver_key])
-    if solver_key not in {"gauss_newton", "levenberg_marquardt", "lm-ls"}:
+    if solver_key not in _BUILTIN_NLS_SOLVERS:
         allowed.add("backend_options")
     return frozenset(allowed)
 
@@ -128,14 +147,14 @@ def _normalize_backend_options_for_solver(
     allowed = _allowed_solve_option_keys(solver_key)
     unknown = tuple(k for k in options if k not in allowed)
     if not unknown:
-        if solver_key in {"gauss_newton", "levenberg_marquardt", "lm-ls"}:
+        if solver_key in _BUILTIN_NLS_SOLVERS:
             return None
         return _as_options_mapping(
             options.get("backend_options", None),
             where=f"solve({solver_key})",
         )
 
-    if solver_key in {"gauss_newton", "levenberg_marquardt", "lm-ls"}:
+    if solver_key in _BUILTIN_NLS_SOLVERS:
         allowed_text = _format_option_names(_allowed_solve_option_keys(solver_key))
         raise ValueError(
             f"solve({solver_key}): unsupported option(s): "
@@ -1040,6 +1059,15 @@ def solve(
       history=True, history_vectors=False, history_path=None, line_search_history_path=None
       verbose=True (print state history during the solve)
 
+    gauss_newton_operator:
+      gauss_newton options plus inner_tol=1e-8, inner_max_iters=None
+      Uses eval/jvp/vjp and damped CGLS; runtime local-block fallback supported.
+
+    gauss_newton_krylov:
+      Inexact trust-region GN with PCG; no full-column damping scan.
+      initial_radius=None, inner_max_iters=50, preconditioner="auto"
+      forcing_min=1e-4, forcing_max=.1; tol_grad is the only convergence criterion.
+
     scipy_minimize:
       method, max_iters, tol, bounds, backend_options
       (unknown top-level keys are forwarded to scipy's options dict)
@@ -1065,7 +1093,7 @@ def solve(
     if key not in _SOLVER_REI_OPTION_KEYS:
         raise ValueError(
             "Unknown solver. Use one of: "
-            "'levenberg_marquardt', 'lm-ls', 'gauss_newton', 'scipy_minimize', 'cyipopt', 'liteopt'. "
+            "'levenberg_marquardt', 'lm-ls', 'gauss_newton', 'gauss_newton_operator', 'gauss_newton_krylov', 'scipy_minimize', 'cyipopt', 'liteopt'. "
             "Solver aliases are not supported. "
             f"Got solver={solver!r}."
         )
@@ -1084,6 +1112,21 @@ def solve(
         return lm_solver(
             problem, x0=x0_override, required=required, weighted=weighted,
             term_indices=term_indices, on_iter=on_iter, profiler=profiler, **lm_options,
+        )
+
+    if key == "gauss_newton_krylov":
+        krylov_options = {k: v for k, v in opts.items() if k in _SOLVER_REI_OPTION_KEYS[key]}
+        return solve_gauss_newton_krylov(
+            problem, x0=x0_override, required=required, weighted=weighted,
+            term_indices=term_indices, on_iter=on_iter, profiler=profiler, **krylov_options,
+        )
+
+    if key == "gauss_newton_operator":
+        gn_options = {k: v for k, v in opts.items() if k in _SOLVER_REI_OPTION_KEYS[key]}
+        gn_options.setdefault("max_iters", 200)
+        return solve_gauss_newton_operator(
+            problem, x0=x0_override, required=required, weighted=weighted,
+            term_indices=term_indices, on_iter=on_iter, profiler=profiler, **gn_options,
         )
 
     if key == "gauss_newton":
@@ -1224,6 +1267,8 @@ __all__ = [
     "nls",
     "solve",
     "solve_gauss_newton",
+    "solve_gauss_newton_operator",
+    "solve_gauss_newton_krylov",
     "solve_levenberg_marquardt",
     "solve_lm_ls",
     "solve_scipy_minimize",

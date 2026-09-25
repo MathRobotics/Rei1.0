@@ -28,9 +28,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="RoboKots trajectory dynamics example.")
     parser.add_argument("--jacobian-method", choices=("analytic", "numerical", "autodiff"), default="analytic")
     parser.add_argument("--history", type=Path, help="Stream history to a new JSONL file.")
-    parser.add_argument("--solver", choices=("levenberg_marquardt", "gauss_newton", "lm-ls"), default="levenberg_marquardt")
-    parser.add_argument("--trial-history", type=Path, help="LM trial JSONL path (default: <history stem>.lm_trials.jsonl).")
-    parser.add_argument("--show-trials", action="store_true", help="Show LM trials.")
+    parser.add_argument("--solver", choices=("levenberg_marquardt", "gauss_newton", "gauss_newton_operator", "gauss_newton_krylov", "lm-ls"), default="levenberg_marquardt")
+    parser.add_argument("--trial-history", type=Path, help="LM or Krylov trust-region trial JSONL path.")
+    parser.add_argument("--show-trials", action="store_true", help="Show LM or Krylov trust-region trials.")
     parser.add_argument("--history-vectors", action="store_true", help="Include reduced variables and Jᵀr vectors.")
     parser.add_argument("--show-history", action="store_true", help="Show iterations (already enabled by default).")
     parser.add_argument("--quiet", action="store_true", help="Disable live iteration output.")
@@ -42,10 +42,11 @@ def main() -> None:
         help="Plot series declared by term plot metadata.",
     )
     args = parser.parse_args()
-    if args.solver == "levenberg_marquardt" and (args.line_search_history or args.show_line_search):
-        parser.error("--line-search-history/--show-line-search require --solver gauss_newton or lm-ls")
-    if args.solver != "levenberg_marquardt" and (args.trial_history or args.show_trials):
-        parser.error("--trial-history/--show-trials require --solver levenberg_marquardt")
+    trust_solver = args.solver in ("levenberg_marquardt", "gauss_newton_krylov")
+    if trust_solver and (args.line_search_history or args.show_line_search):
+        parser.error("--line-search-history/--show-line-search require --solver gauss_newton, gauss_newton_operator or lm-ls")
+    if not trust_solver and (args.trial_history or args.show_trials):
+        parser.error("--trial-history/--show-trials require --solver levenberg_marquardt or gauss_newton_krylov")
 
     if not _MODEL_PATH.is_file():
         raise SystemExit(f"Model file not found: {_MODEL_PATH}")
@@ -73,11 +74,11 @@ def main() -> None:
         reduction.runtime,
         solver=args.solver,
         options={"max_iters": 500,
-                 **({} if args.solver == "lm-ls" else
+                 **({} if args.solver in ("lm-ls", "gauss_newton_krylov") else
                     {"tol_dx": 1e-8 if args.solver == "gauss_newton" else 1e-12}),
                  "history_path": args.history, "history_vectors": args.history_vectors,
                  "verbose": not args.quiet,
-                 **({"line_search_history_path": args.line_search_history} if args.solver != "levenberg_marquardt"
+                 **({"line_search_history_path": args.line_search_history} if not trust_solver
                     else {"trial_history_path": args.trial_history})},
     )
     reduction.runtime.update_state_if_needed()

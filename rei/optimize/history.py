@@ -37,7 +37,7 @@ class SolverHistoryRecorder:
         self.line_search_path = (
             Path(line_search_path) if line_search_path is not None else
             self.path.with_name(self.path.stem + (
-                ".line_search.jsonl" if trial_kind == "line_search" else ".lm_trials.jsonl"
+                ".line_search.jsonl" if trial_kind == "line_search" else f".{trial_kind}_trials.jsonl"
             )) if self.path is not None else None
         )
         self.events: list[dict[str, Any]] = []
@@ -102,6 +102,7 @@ def format_solver_history(
     """Show states and indented trials; unavailable numbers are shown as '-'."""
     history = list(history)
     is_lm = bool(history and history[0].get("solver") == "levenberg_marquardt")
+    is_trust = bool(history and history[0].get("solver") == "gauss_newton_krylov")
     widths = (4, 16, 9, 9, 8, 8, 8, 6)
 
     def table_row(values: Iterable[str]) -> str:
@@ -111,17 +112,18 @@ def format_solver_history(
         )
 
     lines = [table_row(("iter", "event", "objective", "Δobj", "|Jᵀr|inf", "step",
-                        "λ" if is_lm else "scale", "ρ" if is_lm else "trials")) + " result"]
+                        "λ" if is_lm else "radius" if is_trust else "scale",
+                        "ρ" if is_lm or is_trust else "trials")) + " result"]
 
     def number(value: Any) -> str:
         return "-" if value is None else f"{value:.2e}"
 
     for row in history:
         event = row["event"]
-        if not include_line_search and event.startswith(("line_search_", "lm_")):
+        if not include_line_search and event.startswith(("line_search_", "lm_", "trust_region_")):
             continue
         label = event
-        if event in {"line_search_trial", "lm_trial"}:
+        if event in {"line_search_trial", "lm_trial", "trust_region_trial"}:
             label = f"  trial {row['trial']}"
         result = row.get("reason", row.get("acceptance_reason") or row.get("line_search_status", row.get("status", "")))
         if event == "iteration_retry":
@@ -131,8 +133,8 @@ def format_solver_history(
             table_row((str(row["iteration"]), label,
                        number(row.get("objective")), number(row.get("delta_objective")),
                        number(row.get("jt_r_inf_norm")), number(row.get("step_norm")),
-                       number(row.get("damping" if is_lm else "step_scale")),
-                       number(row.get("gain_ratio")) if is_lm else str(trials)))
+                       number(row.get("damping" if is_lm else "trust_radius" if is_trust else "step_scale")),
+                       number(row.get("gain_ratio")) if is_lm or is_trust else str(trials)))
             + f" {result}"
         )
     return "\n".join(lines)

@@ -94,6 +94,34 @@ class NullspaceReducedRuntime:
     def required_list(self, required: Iterable[StateKey] | None = None) -> list[StateKey]:
         return self.full_runtime.required_list(required)
 
+    def operator_required_list(self, required=None, *, term_indices=None):
+        return self.full_runtime.operator_required_list(
+            required, term_indices=self._selected_full_term_indices(term_indices))
+
+    def linear_residual_gram(self, *, weighted=True, term_indices=None, max_size=512):
+        self._sync_full_from_reduced()
+        gram = self.full_runtime.linear_residual_gram(
+            weighted=weighted, term_indices=self._selected_full_term_indices(term_indices),
+            max_size=max_size)
+        if gram is None:
+            return None
+        return self.nullspace_basis.T @ gram @ self.nullspace_basis
+
+    def residual_jvp(self, direction, *, required=None, weighted=True, term_indices=None):
+        direction = np.asarray(direction, dtype=float)
+        if direction.shape != (self.pack.n_total,):
+            raise ValueError("Reduced residual JVP: direction shape mismatch.")
+        self._sync_full_from_reduced()
+        return self.full_runtime.residual_jvp(
+            self.nullspace_basis @ direction, required=required, weighted=weighted,
+            term_indices=self._selected_full_term_indices(term_indices))
+
+    def residual_vjp(self, rhs, *, required=None, weighted=True, term_indices=None):
+        self._sync_full_from_reduced()
+        return self.nullspace_basis.T @ self.full_runtime.residual_vjp(
+            rhs, required=required, weighted=weighted,
+            term_indices=self._selected_full_term_indices(term_indices))
+
     def lift(self, z: Array) -> Array:
         z_vec = np.asarray(z, dtype=float).reshape(-1)
         n_reduced = int(self.nullspace_basis.shape[1])

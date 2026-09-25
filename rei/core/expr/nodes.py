@@ -10,6 +10,41 @@ from ..trajectory import TrajectoryMap
 from .types import Expr, RuntimeContext, Variable
 
 
+def _jvp(expr, ctx, tangents):
+    """Apply an expression derivative, falling back only to local blocks."""
+    vectors = [np.asarray(v, dtype=float) for v in tangents]
+    for var, vector in zip(expr.vars, vectors, strict=True):
+        if vector.shape != (var.dim(),):
+            raise ValueError(f"{expr.name}: tangent size mismatch for {var.name!r}.")
+    fn = getattr(expr, "jvp", None)
+    if callable(fn):
+        return np.asarray(fn(ctx, vectors), dtype=float)
+    update = getattr(ctx.state, "update_if_needed", None)
+    if callable(update):
+        update(ctx.pack, time=ctx.time, required=expr.deps())
+    value, blocks = expr.eval(ctx)
+    out = np.zeros(np.asarray(value).size)
+    for var, block, vector in zip(expr.vars, blocks, vectors, strict=True):
+        block = np.asarray(block, dtype=float)
+        if block.shape != (out.size, var.dim()):
+            raise ValueError(f"{expr.name}: Jacobian block shape mismatch.")
+        out += block @ vector
+    return out
+
+
+def _trajectory_jvp(trajectory, tangent, k):
+    tangent = np.asarray(tangent, dtype=float)
+    if tangent.shape != (trajectory.p_dim,):
+        raise ValueError("Trajectory JVP: tangent shape mismatch.")
+    out = np.asarray(trajectory.A @ tangent, dtype=float).reshape(-1)
+    if k is None:
+        return out
+    if int(k) < 0 or int(k) >= trajectory.steps:
+        raise ValueError("Trajectory JVP: time index out of range.")
+    start = int(k) * trajectory.q_dim
+    return out[start:start + trajectory.q_dim].copy()
+
+
 def _merged_vars(*expressions: Expr) -> list[Variable]:
     """Keep first-occurrence ordering while identifying blocks by variable name."""
     variables: dict[str, Variable] = {}
@@ -45,6 +80,33 @@ class GetStateExpr:
     vars: Sequence[Variable]
     key_value: StateKey
     key_jacs: Sequence[StateKey]
+
+    def jvp(self, ctx: RuntimeContext, tangents):
+        requests = [(self.key_value, key, v)
+                    for key, v in zip(self.key_jacs, tangents, strict=True)]
+        fn = getattr(ctx.state, "jacobian_mul_many", None)
+        if callable(fn):
+            try:
+                products = fn(requests)
+                if len(products) != len(requests):
+                    raise ValueError("State JVP provider returned the wrong number of products.")
+                out = np.zeros(self.eval_value(ctx).size)
+                for product in products:
+                    product = np.asarray(product, dtype=float)
+                    if product.shape != out.shape:
+                        raise ValueError("State JVP provider returned an invalid shape.")
+                    out += product
+                return out
+            except AttributeError:
+                pass
+        update = getattr(ctx.state, "update_if_needed", None)
+        if callable(update):
+            update(ctx.pack, time=ctx.time, required=self.deps())
+        value, blocks = self.eval(ctx)
+        out = np.zeros(value.size)
+        for block, tangent in zip(blocks, tangents, strict=True):
+            out += block @ tangent
+        return out
 
     def deps(self):
         return [self.key_value, *self.key_jacs]
@@ -95,6 +157,9 @@ class GetStateExpr:
                 except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
                     g = None
             if g is None:
+                update = getattr(sc, "update_if_needed", None)
+                if callable(update):
+                    update(ctx.pack, time=ctx.time, required=[key_jac])
                 J = np.asarray(sc.get(key_jac), dtype=float)
                 if J.shape != (y.size, v.dim()):
                     raise ValueError(
@@ -120,6 +185,13 @@ class GetVarExpr:
     name: str
     vars: Sequence[Variable]
     k: int | None = None
+
+    def jvp(self, ctx: RuntimeContext, tangents):
+        # The value operation is linear and already validates time slicing.
+        tangent, = tangents
+        if np.asarray(tangent).shape != (self.vars[0].dim(),):
+            raise ValueError(f"{self.name}: tangent shape mismatch.")
+        return GetVarExpr(self.name, [Variable(self.vars[0].name, tangent)], self.k).eval_value(ctx)
 
     def deps(self):
         return []
@@ -253,6 +325,10 @@ class TrajectoryVarExpr:
     trajectory: TrajectoryMap
     k: int | None = None
 
+    def jvp(self, ctx: RuntimeContext, tangents):
+        tangent, = tangents
+        return _trajectory_jvp(self.trajectory, tangent, self.k)
+
     def deps(self):
         return []
 
@@ -339,6 +415,11 @@ class TrajectoryVarDerivativesExpr:
     vars: Sequence[Variable]
     trajectories: Sequence[TrajectoryMap]
     k: int | None = None
+
+    def jvp(self, ctx: RuntimeContext, tangents):
+        tangent, = tangents
+        self.eval_value(ctx)  # Validate the common shape of the derivative maps.
+        return np.concatenate([_trajectory_jvp(t, tangent, self.k) for t in self.trajectories])
 
     def deps(self):
         return []
@@ -491,6 +572,15 @@ class TimeDiffExpr:
     scale: float = 1.0
     use_time_dt: bool = False
     dt: float | None = None
+
+    def jvp(self, ctx: RuntimeContext, tangents):
+        self.eval_value(ctx)  # Preserve shape/time validation of value evaluation.
+        tangent = _jvp(self.base, ctx, tangents).reshape(-1, int(self.segment_dim))
+        scale = float(self.scale)
+        if self.use_time_dt:
+            dt = self.dt if self.dt is not None else ctx.time.dt
+            scale /= float(dt)
+        return scale * np.diff(tangent, axis=0).reshape(-1)
 
     @property
     def vars(self):
@@ -657,6 +747,9 @@ class ConstantExpr:
         blocks = [np.zeros((y.size, v.dim()), dtype=float) for v in self.vars]
         return y, blocks
 
+    def jvp(self, ctx: RuntimeContext, tangents):
+        return np.zeros(self.eval_value(ctx).size)
+
     def vjp(self, ctx: RuntimeContext, rhs):
         del ctx
         r = np.asarray(rhs, dtype=float)
@@ -694,6 +787,9 @@ class RepeatConstantExpr:
         blocks = [np.zeros((y.size, v.dim()), dtype=float) for v in self.vars]
         return y, blocks
 
+    def jvp(self, ctx: RuntimeContext, tangents):
+        return np.zeros(self.eval_value(ctx).size)
+
     def vjp(self, ctx: RuntimeContext, rhs):
         del ctx
         r = np.asarray(rhs, dtype=float)
@@ -708,6 +804,14 @@ class SubExpr:
     name: str
     a: Expr
     b: Expr
+
+    def jvp(self, ctx: RuntimeContext, tangents):
+        by_name = dict(zip((v.name for v in self.vars), tangents, strict=True))
+        a = _jvp(self.a, ctx, [by_name[v.name] for v in self.a.vars])
+        b = _jvp(self.b, ctx, [by_name[v.name] for v in self.b.vars])
+        if a.shape != b.shape:
+            raise ValueError(f"{self.name}: tangent shape mismatch.")
+        return a - b
 
     @property
     def vars(self):
@@ -917,6 +1021,33 @@ class StackExpr:
             r_list.append(np.asarray(value(ctx), float).reshape(-1))
         return np.concatenate(r_list, axis=0) if r_list else np.zeros((0,), float)
 
+    def jvp(self, ctx: RuntimeContext, tangents):
+        by_name = dict(zip((v.name for v in self.vars), tangents, strict=True))
+        batch = getattr(ctx.state, "jacobian_mul_many", None)
+        if callable(batch) and self.parts and all(isinstance(p, GetStateExpr) for p in self.parts):
+            requests = [(p.key_value, key, by_name[v.name]) for p in self.parts
+                        for v, key in zip(p.vars, p.key_jacs, strict=True)]
+            try:
+                products = batch(requests)
+                if len(products) != len(requests):
+                    raise ValueError("Stack JVP: wrong number of products.")
+                parts = []
+                offset = 0
+                for p in self.parts:
+                    out = np.zeros(p.eval_value(ctx).size)
+                    for value in products[offset:offset + len(p.vars)]:
+                        value = np.asarray(value, dtype=float)
+                        if value.shape != out.shape:
+                            raise ValueError("Stack JVP: invalid product shape.")
+                        out += value
+                    parts.append(out)
+                    offset += len(p.vars)
+                return np.concatenate(parts)
+            except AttributeError:
+                pass
+        parts = [_jvp(p, ctx, [by_name[v.name] for v in p.vars]) for p in self.parts]
+        return np.concatenate(parts) if parts else np.zeros(0)
+
     def eval(self, ctx: RuntimeContext):
         variables = self.vars
         r_list = []
@@ -1057,6 +1188,10 @@ class ComponentExpr:
         steps = int(y.size // seg)
         return y.reshape(steps, seg)[:, idx].reshape(-1)
 
+    def jvp(self, ctx: RuntimeContext, tangents):
+        self.eval_value(ctx)
+        return _jvp(self.base, ctx, tangents).reshape(-1, int(self.segment_dim))[:, int(self.index)].copy()
+
     def eval(self, ctx: RuntimeContext):
         y, blocks = self.base.eval(ctx)
         y = np.asarray(y, dtype=float).reshape(-1)
@@ -1119,6 +1254,10 @@ class ComponentExpr:
 class HingeExpr:
     name: str
     base: Expr
+
+    def jvp(self, ctx: RuntimeContext, tangents):
+        value = np.asarray(self.base.eval_value(ctx), dtype=float).reshape(-1)
+        return (value > 0.) * _jvp(self.base, ctx, tangents)
 
     @property
     def vars(self):

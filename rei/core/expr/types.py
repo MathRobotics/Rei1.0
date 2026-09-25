@@ -115,6 +115,24 @@ class DirectVectorExpr:
     def eval_value(self, ctx: RuntimeContext) -> Array:
         return np.asarray(self.fn_value(ctx), dtype=float).reshape(-1)
 
+    def jvp(self, ctx: RuntimeContext, tangents: Sequence[Array]) -> Array:
+        """Fallback product using the callback's local derivative blocks."""
+        r, blocks = self.eval(ctx)
+        out = np.zeros(r.size)
+        for var, block, tangent in zip(self.vars, blocks, tangents, strict=True):
+            tangent = np.asarray(tangent, dtype=float)
+            if tangent.shape != (var.dim(),):
+                raise ValueError(f"{self.name}: tangent shape mismatch for {var.name!r}.")
+            out += block @ tangent
+        return out
+
+    def vjp(self, ctx: RuntimeContext, rhs: Array) -> list[Array]:
+        r, blocks = self.eval(ctx)
+        rhs = np.asarray(rhs, dtype=float)
+        if rhs.ndim not in (1, 2) or rhs.shape[0] != r.size:
+            raise ValueError(f"{self.name}: rhs shape mismatch for vjp.")
+        return [block.T @ rhs for block in blocks]
+
     def eval(self, ctx: RuntimeContext) -> Tuple[Array, Sequence[Array]]:
         r = self.eval_value(ctx)
 

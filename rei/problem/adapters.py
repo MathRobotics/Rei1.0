@@ -42,6 +42,18 @@ class NLSRuntimeLinearProblem:
     def required_list(self, required: Iterable[StateKey] | None = None) -> list[StateKey]:
         return runtime_required_list(self.runtime, required)
 
+    def operator_required_list(self, required=None):
+        fn = getattr(self.runtime, "operator_required_list", None)
+        if callable(fn):
+            return fn(required, term_indices=self.term_indices)
+        return self.required_list(required)
+
+    def linear_residual_gram(self, *, max_size=512):
+        fn = getattr(self.runtime, "linear_residual_gram", None)
+        if not callable(fn):
+            return None
+        return fn(weighted=self.weighted, term_indices=self.term_indices, max_size=max_size)
+
     def linearize(self, *, required: Iterable[StateKey] | None = None) -> tuple[Array, Array]:
         linearize_stacked = getattr(self.runtime, "linearize_stacked_terms", None)
         if callable(linearize_stacked):
@@ -80,8 +92,14 @@ class NLSRuntimeLinearProblem:
         return np.asarray(r, dtype=float).reshape(-1)
 
     def jvp(self, v: Array | Any, *, required: Iterable[StateKey] | None = None) -> Array:
-        _r, J = self.linearize(required=required)
         v_vec = as_vec(v, expected_size=int(self.n_total), name="v")
+        residual_jvp = getattr(self.runtime, "residual_jvp", None)
+        if callable(residual_jvp):
+            return np.asarray(residual_jvp(
+                v_vec, weighted=bool(self.weighted), required=required,
+                term_indices=self.term_indices,
+            ), dtype=float).reshape(-1)
+        _r, J = self.linearize(required=required)
         return np.asarray(J, dtype=float) @ v_vec
 
     def vjp(self, w: Array | Any, *, required: Iterable[StateKey] | None = None) -> Array:

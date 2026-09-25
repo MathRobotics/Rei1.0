@@ -180,6 +180,21 @@ class StateCache:
     def set_memo(self, key: StateKey, value: Any) -> None:
         self._memo[key] = value
 
+    def jacobian_mul_many(self, requests):
+        """Apply state JVPs through the trajectory backend's batched path."""
+        requests = list(requests)
+        builder = getattr(self.build_state, "__self__", None)
+        fn = getattr(builder, "param_jacobian_mul_many", None)
+        if not callable(fn) or self._pack_last is None:
+            raise AttributeError("StateCache: no trajectory JVP provider.")
+        p_var = getattr(builder, "p_var", None)
+        for value_key, jac_key, _direction in requests:
+            base, sep, var = str(jac_key.field).partition("_J_")
+            if not sep or var != p_var or base != value_key.field:
+                raise AttributeError("StateCache: JVP variable or field does not match provider.")
+        return fn(self._pack_last.get(), [(key, v) for key, _jac, v in requests],
+                  pack=self._pack_last, time=self._time_last)
+
     def jacobian_transpose_mul(self, value_key: StateKey, jac_key: StateKey, rhs: Array | Any) -> Array:
         """Compute a state Jacobian VJP through the backend when it exposes one."""
 

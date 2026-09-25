@@ -105,6 +105,8 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "Profiler": ("rei.core.timing", "Profiler"),
     "nls": ("rei.optimize.solvers", "nls"),
     "solve": ("rei.optimize.solvers", "solve"),
+    "solve_gauss_newton_krylov": ("rei.optimize.solvers", "solve_gauss_newton_krylov"),
+    "solve_gauss_newton_operator": ("rei.optimize.solvers", "solve_gauss_newton_operator"),
     "solve_gauss_newton": ("rei.optimize.solvers", "solve_gauss_newton"),
     "solve_levenberg_marquardt": ("rei.optimize.solvers", "solve_levenberg_marquardt"),
     "solve_lm_ls": ("rei.optimize.solvers", "solve_lm_ls"),

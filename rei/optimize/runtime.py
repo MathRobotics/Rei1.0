@@ -189,6 +189,72 @@ class NLSRuntime:
     def eval(self, *, required: Iterable[StateKey] | None = None) -> Array:
         return self.eval_stacked_terms(required=required, weighted=True, term_indices=None)
 
+    def operator_required_list(self, required=None, *, term_indices=None):
+        if required is not None:
+            return self.required_list(required)
+        return collect_value_required(self.problem, term_indices=self._normalize_term_indices(term_indices))
+
+    def linear_residual_gram(self, *, weighted=True, term_indices=None, max_size=512):
+        from .linear_preconditioner import linear_residual_gram
+        return linear_residual_gram(self, weighted=weighted, term_indices=term_indices,
+                                    max_size=max_size)
+
+    def residual_jvp(
+        self,
+        direction: Array | Any,
+        *,
+        weighted: bool = True,
+        required: Iterable[StateKey] | None = None,
+        term_indices: Iterable[int] | None = None,
+    ) -> Array:
+        """Apply the selected residual Jacobian without global assembly.
+
+        Optional ``expr.jvp(ctx, tangents)`` receives one vector per expr.vars.
+        Expressions without that capability use their local Jacobian blocks.
+        Weighting applies Cost.apply to a single directional column, so custom
+        nonsymmetric residual transformations also retain the right derivative.
+        """
+        direction = np.asarray(direction, dtype=float)
+        if direction.shape != (self.pack.n_total,):
+            raise ValueError("residual_jvp: direction must match the variable pack size.")
+        idxs = self._normalize_term_indices(term_indices)
+        self.update_state_if_needed(required=self.operator_required_list(required, term_indices=idxs))
+        products = []
+        for idx in idxs:
+            expr, cost = self.problem.terms[idx]
+            tangents = []
+            for var in expr.vars:
+                start, stop = self.pack.slices[var.name]
+                if stop - start != var.dim():
+                    raise ValueError(f"residual_jvp: variable size mismatch for {var.name!r}.")
+                tangents.append(direction[start:stop])
+            jvp = getattr(expr, "jvp", None)
+            if callable(jvp):
+                raw = np.asarray(expr.eval_value(self.ctx), dtype=float).reshape(-1)
+                product = np.asarray(jvp(self.ctx, tangents), dtype=float)
+            else:
+                self.update_state_if_needed(required=collect_expr_required(expr))
+                raw, blocks = expr.eval(self.ctx)
+                raw = np.asarray(raw, dtype=float).reshape(-1)
+                product = np.zeros(raw.size)
+                for var, block, tangent in zip(expr.vars, blocks, tangents, strict=True):
+                    block = np.asarray(block, dtype=float)
+                    if block.shape != (raw.size, var.dim()):
+                        raise ValueError(f"residual_jvp: invalid Jacobian block for {var.name!r}.")
+                    product += block @ tangent
+            if product.shape != raw.shape:
+                raise ValueError(f"residual_jvp: output shape mismatch for term {idx}.")
+            if weighted:
+                value, columns = cost.apply(raw, [product[:, None]])
+                if len(columns) != 1:
+                    raise ValueError("residual_jvp: cost must return one directional column.")
+                column = np.asarray(columns[0], dtype=float)
+                if column.shape != (np.asarray(value).size, 1):
+                    raise ValueError("residual_jvp: invalid weighted directional column.")
+                product = column[:, 0]
+            products.append(product)
+        return np.concatenate(products) if products else np.zeros(0)
+
     def residual_vjp(
         self,
         rhs: Array | Any,
