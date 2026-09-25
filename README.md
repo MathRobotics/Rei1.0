@@ -254,7 +254,31 @@ not account for constraint KKT multipliers, and inactive or dependent terms
 can prevent weight identification. See the [IOC validation report](docs/ioc-validation.md)
 for known-answer tests, migration details, and remaining limitations.
 
-### RoboKots Jacobian Strategy
+### RoboKots Jacobians
+
+Choose the differentiation method independently of the matrix strategy:
+
+```python
+compiled = compile_kots_trajectory_problem(
+    problem, model=kots, jacobian_method="autodiff",
+)
+```
+
+`jacobian_method` accepts `"analytic"` (default), `"numerical"` (RoboKots finite
+differences), or `"autodiff"` (RoboKots JAX forward-mode AD). The same option is
+available on both Kots state builders and `compile_trajectory_ioc_problem`
+with `backend="kots"`; it applies to DOC Jacobians and IOC gradient products.
+The trajectory example also accepts `--jacobian-method`.
+
+AD requires JAX and supports rigid-body momentum, force, torque, and their time
+derivatives for fixed/revolute/prismatic models; it does not support kinematic
+outputs or kinetic energy. Numerical kinetic-energy derivatives are also
+unsupported by RoboKots. Unsupported requests raise errors, without switching
+to analytic derivatives. AD runs without JIT, in a local float64 context, and
+forms a dense Jacobian before multiplying. Numerical/AD methods currently use
+per-time-step evaluation even when `batch_trajectory=True`; analytic mode keeps
+the batched fast paths. These alternatives are primarily useful for validation
+and can be much slower than the default.
 
 The Kots trajectory backend uses RoboKots multiply APIs by default for
 trajectory-parameter dynamics Jacobians:

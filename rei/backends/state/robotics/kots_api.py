@@ -239,17 +239,37 @@ class RoboKotsJacobianOperator:
     stays private in this module.
     """
 
-    def __init__(self, model: Any) -> None:
+    def __init__(self, model: Any, *, jacobian_method: str = "analytic") -> None:
+        if jacobian_method not in ("analytic", "numerical", "autodiff"):
+            raise ValueError("jacobian_method must be 'analytic', 'numerical', or 'autodiff'.")
         self.model = model
+        self.jacobian_method = jacobian_method
 
     def dense(self, state_ref: Any) -> Array:
+        if self.jacobian_method == "numerical":
+            return np.asarray(self.model.jacobian(state_ref, numerical=True), dtype=float)
+        if self.jacobian_method == "autodiff":
+            # Keep double precision local: do not change the application's JAX config.
+            try:
+                from jax import enable_x64
+            except ImportError:  # JAX < 0.8
+                from jax.experimental import enable_x64
+
+            with enable_x64():
+                return np.asarray(self.model.jacobian_autodiff(state_ref), dtype=float)
         return jacobian(self.model, state_ref)
 
     def dense_list(self, refs: tuple[Any, ...]) -> Array | None:
+        if self.jacobian_method != "analytic":
+            return self.dense(list(refs))
         return jacobian_list(self.model, refs)
 
     def jvp(self, state_ref: Any, cols: Array, *, value_size: int | None = None) -> Array:
         C = np.asarray(cols, dtype=float)
+        if self.jacobian_method == "numerical":
+            return np.asarray(self.model.jacobian_mul(state_ref, C, numerical=True), dtype=float)
+        if self.jacobian_method == "autodiff":
+            return self.dense(state_ref) @ C
         if C.ndim == 1:
             return _fallback_jacobian_vec_mul(self.model, state_ref, C)
         if value_size is None:
@@ -260,6 +280,10 @@ class RoboKotsJacobianOperator:
         return _fallback_jacobian_from_vec_mul(self.model, state_ref, C, value_size=int(value_size))
 
     def vjp(self, state_ref: Any, rhs: Array) -> Array:
+        if self.jacobian_method == "numerical":
+            return np.asarray(self.model.jacobian_transpose_mul(state_ref, rhs, numerical=True), dtype=float)
+        if self.jacobian_method == "autodiff":
+            return self.dense(state_ref).T @ np.asarray(rhs, dtype=float)
         return _fallback_jacobian_transpose_mul(self.model, state_ref, rhs)
 
 

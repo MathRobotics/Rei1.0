@@ -40,6 +40,73 @@ kots_api = importlib.import_module("rei.backends.state.robotics.kots_api")
 optional = importlib.import_module("rei.backends.optional")
 
 
+@pytest.mark.parametrize("method", ["numerical", "autodiff"])
+def test_explicit_jacobian_method_never_uses_analytic(method):
+    if method == "autodiff":
+        pytest.importorskip("jax")
+    matrix = np.array([[1., 2., 3.], [4., 5., 6.]])
+
+    class Model:
+        def jacobian(self, ref, *, numerical=False):
+            assert numerical
+            return matrix
+
+        def jacobian_mul(self, ref, rhs, *, numerical=False):
+            assert numerical
+            return matrix @ rhs
+
+        def jacobian_transpose_mul(self, ref, rhs, *, numerical=False):
+            assert numerical
+            return matrix.T @ rhs
+
+        def jacobian_autodiff(self, ref):
+            return matrix
+
+    op = kots_api.RoboKotsJacobianOperator(Model(), jacobian_method=method)
+    np.testing.assert_array_equal(op.dense(object()), matrix)
+    np.testing.assert_array_equal(op.dense_list((object(),)), matrix)
+    for cols in (np.ones(3), np.eye(3)):
+        np.testing.assert_array_equal(op.jvp(object(), cols), matrix @ cols)
+    for rhs in (np.ones(2), np.eye(2)):
+        np.testing.assert_array_equal(op.vjp(object(), rhs), matrix.T @ rhs)
+
+
+def test_invalid_jacobian_method_is_rejected():
+    with pytest.raises(ValueError, match="jacobian_method"):
+        kots_api.RoboKotsJacobianOperator(object(), jacobian_method="typo")
+
+
+@pytest.mark.parametrize("method", ["numerical", "autodiff"])
+def test_unsupported_derivative_does_not_fall_back(method):
+    if method == "autodiff":
+        pytest.importorskip("jax")
+
+    class Model:
+        def jacobian(self, ref, *, numerical=False):
+            assert numerical, "must not fall back to analytic"
+            raise NotImplementedError("unsupported state")
+
+        def jacobian_autodiff(self, ref):
+            raise NotImplementedError("unsupported state")
+
+    op = kots_api.RoboKotsJacobianOperator(Model(), jacobian_method=method)
+    with pytest.raises(NotImplementedError, match="unsupported state"):
+        op.dense_list((object(),))
+
+
+def test_autodiff_uses_local_double_precision():
+    jax = pytest.importorskip("jax")
+
+    class Model:
+        def jacobian_autodiff(self, ref):
+            assert jax.config.x64_enabled
+            return np.eye(2)
+
+    before = jax.config.x64_enabled
+    kots_api.RoboKotsJacobianOperator(Model(), jacobian_method="autodiff").dense(object())
+    assert jax.config.x64_enabled == before
+
+
 class _StrictStateType:
     def __init__(self, owner_type: str, owner_name: str, field: str, frame: str | None) -> None:
         if field == "torque_d1":

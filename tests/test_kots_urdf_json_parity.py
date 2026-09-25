@@ -223,6 +223,34 @@ def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
     np.testing.assert_allclose(J_batched, J_stepwise, rtol=0.0, atol=0.0)
 
 
+@pytest.mark.parametrize("method", ["numerical", "autodiff"])
+@pytest.mark.parametrize("strategy", ["dense", "mul"])
+def test_kots_derivative_methods_match_analytic_doc_and_ioc(method, strategy):
+    if Kots is None:
+        pytest.skip("RoboKots is not installed.")
+    if method == "autodiff":
+        pytest.importorskip("jax")
+    model_path = Path(__file__).resolve().parents[1] / "examples/models/planar2.json"
+    dsl = _minimal_kots_trajectory_dsl(2)
+    dsl["variables"][0]["init"] = [0.2, -0.3, 0.4, 0.1]
+
+    def evaluate(selected):
+        compiled = compile_trajectory_ioc_problem(
+            dsl, backend="kots", data=None,
+            model=Kots.from_json_file(str(model_path), order=5),
+            jacobian_method=selected, jacobian_strategy=strategy,
+            gravity=(0., -9.81, 0.),
+        )
+        r, J = compiled.runtime.linearize()
+        *_, gradients = compiled.runtime.term_gradient_contributions()
+        return r, J, np.asarray(gradients)
+
+    expected = evaluate("analytic")
+    actual = evaluate(method)
+    for result, reference in zip(actual, expected):
+        np.testing.assert_allclose(result, reference, rtol=2e-5, atol=2e-6)
+
+
 def test_kots_total_body_kinetic_energy_matches_stepwise_with_torque() -> None:
     """The frame-free total_body StateType works beside joint torque terms."""
     if Kots is None:

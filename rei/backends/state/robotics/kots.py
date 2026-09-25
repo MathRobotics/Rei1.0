@@ -112,6 +112,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         dynamics_fields: Sequence[str] | None = DYNAMICS_FIELDS,
         dynamics_owner_type: str = "total_joint",
         prefer_matvec_jacobian: bool = False,
+        jacobian_method: str = "analytic",
         kots_backend: str | None = None,
         gravity: Sequence[float] | None = None,
     ) -> None:
@@ -125,7 +126,8 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             raise ValueError("KotsStateBuilder: dynamics_owner_type must be non-empty.")
         self._needs_dynamics_update = False
         self.prefer_matvec_jacobian = bool(prefer_matvec_jacobian)
-        self._jacobian_ops = kapi.RoboKotsJacobianOperator(self.model)
+        self._jacobian_ops = kapi.RoboKotsJacobianOperator(self.model, jacobian_method=jacobian_method)
+        self.jacobian_method = self._jacobian_ops.jacobian_method
         self.adapter = KotsAdapter(self, state_type=StateType)
 
         supported_fields = {
@@ -310,6 +312,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         dynamics_owner_type: str = "total_joint",
         prefer_matvec_jacobian: bool = False,
         jacobian_strategy: str | None = None,
+        jacobian_method: str = "analytic",
         kots_backend: str | None = None,
         gravity: Sequence[float] | None = None,
         batch_trajectory: bool = True,
@@ -322,7 +325,9 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             jacobian_strategy,
             prefer_matvec_jacobian=prefer_matvec_jacobian,
         )
-        self.batch_trajectory = bool(batch_trajectory)
+        # Fused trajectory derivatives use analytic-only RoboKots APIs.
+        # Other methods use the single-time operator for both DOC and IOC.
+        self.batch_trajectory = bool(batch_trajectory) and jacobian_method == "analytic"
         # The RoboKots model owns the materialized outward state.  Retain the
         # exact batch signature that was loaded so value/JVP/VJP phases of one
         # IOC evaluation can share it without another import+dynamics pass.
@@ -349,6 +354,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             dynamics_fields=dynamics_fields,
             dynamics_owner_type=dynamics_owner_type,
             prefer_matvec_jacobian=prefer_matvec_jacobian,
+            jacobian_method=jacobian_method,
             kots_backend=kots_backend,
             gravity=gravity,
         )

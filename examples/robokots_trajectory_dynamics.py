@@ -25,6 +25,7 @@ _KOTS_BACKEND = "rust"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="RoboKots trajectory dynamics example.")
+    parser.add_argument("--jacobian-method", choices=("analytic", "numerical", "autodiff"), default="analytic")
     parser.add_argument(
         "--plot",
         action="store_true",
@@ -44,6 +45,7 @@ def main() -> None:
         problem,
         model=kots,
         kots_backend=_KOTS_BACKEND,
+        jacobian_method=args.jacobian_method,
     )
     runtime = compiled.runtime
 

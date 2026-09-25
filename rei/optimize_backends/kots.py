@@ -429,6 +429,7 @@ class _KotsTrajectoryCompileAdapter:
     dynamics_owner_type: str = "total_joint"
     prefer_matvec_jacobian: bool = False
     jacobian_strategy: str | None = None
+    jacobian_method: str = "analytic"
     kots_backend: str | None = None
     gravity: Sequence[float] | None = None
     batch_trajectory: bool = True
@@ -509,6 +510,7 @@ class _KotsTrajectoryCompileAdapter:
             dynamics_owner_type=self.dynamics_owner_type,
             prefer_matvec_jacobian=self.prefer_matvec_jacobian,
             jacobian_strategy=self.jacobian_strategy,
+            jacobian_method=self.jacobian_method,
             kots_backend=self.kots_backend,
             gravity=self.gravity,
             batch_trajectory=self.batch_trajectory,
@@ -548,6 +550,7 @@ def compile_kots_trajectory_problem(
     unsupported: str = "error",
     prefer_matvec_jacobian: bool = False,
     jacobian_strategy: str | None = None,
+    jacobian_method: str = "analytic",
     kots_backend: str | None = None,
     gravity: Sequence[float] | None = None,
     batch_trajectory: bool = True,
@@ -575,6 +578,7 @@ def compile_kots_trajectory_problem(
         dynamics_owner_type=dynamics_owner_type,
         prefer_matvec_jacobian=prefer_matvec_jacobian,
         jacobian_strategy=jacobian_strategy,
+        jacobian_method=jacobian_method,
         kots_backend=kots_backend,
         gravity=gravity,
         batch_trajectory=batch_trajectory,
