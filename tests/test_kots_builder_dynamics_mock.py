@@ -147,10 +147,14 @@ def test_kots_batch_motion_vjp_chains_each_map_once(monkeypatch):
     ))
 
 
-def test_kots_batch_motion_vjp_preserves_per_request_columns():
+@pytest.mark.parametrize("dense", [False, True])
+@pytest.mark.parametrize("rhs_columns", [None, 3])
+def test_kots_batch_motion_vjp_preserves_per_request_columns(monkeypatch, dense, rhs_columns):
     maps = TrajectoryMap.from_bspline_derivatives(
         steps=4, q_dim=2, degree=3, num_ctrl_points=5, max_derivative_order=2,
     )
+    if dense:
+        maps = [TrajectoryMap(A=m.A.to_dense(), b=m.b, steps=m.steps, q_dim=m.q_dim) for m in maps]
     builder = KotsTrajectoryStateBuilder(
         _FakeKotsModel(), {}, trajectory_map=maps[0],
         trajectory_derivative_maps={1: maps[1], 2: maps[2]},
@@ -159,12 +163,38 @@ def test_kots_batch_motion_vjp_preserves_per_request_columns():
                      dtype=DTYPE_DYNAMICS, field="torque") for k in (0, 1, 1, 3)]
     group = [(index, key, np.ones(2), object()) for index, key in enumerate(keys)]
     grads = np.arange(24., dtype=float).reshape(4, 6) / 5.
-    out = [None] * len(group)
-    builder._chain_batched_param_vjp_group(out=out, group=group, motions=[], motion_grads=grads)
+    if rhs_columns is not None:
+        grads = grads[:, :, None] * np.arange(1, rhs_columns + 1)[None, None, :]
     expected = [builder._trajectory_motion_gradient_transpose_at(k=int(key.k), motion_grad=grad)
                 for key, grad in zip(keys, grads, strict=True)]
+    def forbid_full_rhs(*args, **kwargs):
+        pytest.fail("independent VJPs must not build a full-grid RHS or dense B-spline matrix")
+    monkeypatch.setattr(TrajectoryMap, "apply_transpose", forbid_full_rhs)
+    monkeypatch.setattr(BsplineTrajectoryOperator, "to_dense", forbid_full_rhs)
+    out = [None] * len(group)
+    builder._chain_batched_param_vjp_group(out=out, group=group, motions=[], motion_grads=grads)
     for actual, reference in zip(out, expected, strict=True):
         np.testing.assert_allclose(actual, reference)
+
+
+@pytest.mark.parametrize("dense", [False, True])
+def test_compose_motions_only_evaluates_requested_times(monkeypatch, dense):
+    maps = TrajectoryMap.from_bspline_derivatives(
+        steps=100, q_dim=2, degree=3, num_ctrl_points=5, max_derivative_order=2,
+    )
+    if dense:
+        maps = [TrajectoryMap(A=m.A.to_dense(), b=m.b, steps=m.steps, q_dim=m.q_dim) for m in maps]
+    for order, m in enumerate(maps):
+        m.b[:] = order + .25
+    builder = KotsTrajectoryStateBuilder(_FakeKotsModel(), {}, trajectory_map=maps[0],
+        trajectory_derivative_maps={1: maps[1], 2: maps[2]})
+    p = np.arange(10.) / 7
+    ks = [99, 3, 3, 0]
+    expected = np.stack([builder._compose_motion(p, k=k) for k in ks])
+    def forbid_full_apply(*args, **kwargs):
+        pytest.fail("sparse time requests must not evaluate the full trajectory")
+    monkeypatch.setattr(TrajectoryMap, "apply", forbid_full_apply)
+    np.testing.assert_allclose(builder._compose_motions(p, ks=ks), expected)
 
 
 class _FakeKotsModel:

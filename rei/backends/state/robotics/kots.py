@@ -16,7 +16,7 @@ from ....core.state_schema import (
     split_jac_field,
     torque_derivative_order,
 )
-from ....core.trajectory import TrajectoryMap
+from ....core.trajectory import BsplineTrajectoryOperator, TrajectoryMap
 from ..dispatch.template import BackendDispatchStateBuilder
 from .motion import (
     interleaved_motion_jacobian_used_order,
@@ -427,10 +427,14 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             derivative_order_i = int(derivative_order)
             if derivative_order_i >= order:
                 continue
-            values = np.asarray(trajectory.apply(p_vec), dtype=float).reshape(
-                trajectory.steps, dof,
-            )
-            motion[:, derivative_order_i::order] = values[indices]
+            if isinstance(trajectory.A, BsplineTrajectoryOperator):
+                operator = trajectory.A
+                values = operator.basis[indices] @ p_vec.reshape(operator.num_ctrl_points, dof)
+                values += trajectory.b.reshape(trajectory.steps, dof)[indices]
+            else:
+                # Sparse time requests must not evaluate the entire dense map.
+                values = np.stack([trajectory.apply_at(p_vec, int(k)) for k in indices])
+            motion[:, derivative_order_i::order] = values
         return motion
 
     def _can_batch_trajectory_entries(self, grouped: Mapping[int, list[tuple[StateKey, Any]]]) -> bool:
@@ -1277,23 +1281,35 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 "Batched RoboKots VJP output must have one leading result per requested time step."
             )
         dof = self._model_dof()
-        if dof <= 0 or grads.ndim != 2 or grads.shape[1] % dof != 0:
+        if dof <= 0 or grads.ndim not in (2, 3) or grads.shape[1] % dof != 0:
             raise ValueError("Batched RoboKots VJP motion dimension does not match trajectory chain.")
         used_order = int(grads.shape[1] // dof)
         ks = np.asarray([int(key.k) for _index, key, _rhs, _state_ref in group], dtype=int)
-        values = np.zeros((self.trajectory_map.p_dim, len(group)), dtype=float)
-        # Each request becomes one RHS column. This preserves IOC ownership
-        # while replacing N per-frame transpose maps by one map VJP per
-        # derivative order.
+        if np.any(ks < 0) or np.any(ks >= self.trajectory_map.steps):
+            raise ValueError("Batched RoboKots VJP time index is out of range.")
+        values = np.zeros((len(group), self.trajectory_map.p_dim, *grads.shape[2:]), dtype=float)
+        # Each request is independent: B[k, c] * grad[k, q]. Do not embed
+        # these in a (steps, dof, requests) zero tensor: that introduces a
+        # quadratic time dimension and a mostly-zero matrix multiplication.
         for derivative_order in range(used_order):
             trajectory = self.trajectory_derivative_maps.get(derivative_order)
             if trajectory is None:
                 continue
-            full_rhs = np.zeros((trajectory.steps, dof, len(group)), dtype=float)
-            full_rhs[ks, :, np.arange(len(group))] = grads[:, derivative_order::used_order]
-            values += trajectory.apply_transpose(full_rhs.reshape(trajectory.steps * dof, len(group)))
-        for column, (index, _key, _rhs, _state_ref) in enumerate(group):
-            out[index] = values[:, column]
+            local_grads = grads[:, derivative_order::used_order]
+            if isinstance(trajectory.A, BsplineTrajectoryOperator):
+                basis = trajectory.A.basis[ks]
+                if grads.ndim == 2:
+                    product = basis[:, :, None] * local_grads[:, None, :]
+                else:
+                    product = basis[:, :, None, None] * local_grads[:, None, :, :]
+                values += product.reshape(values.shape)
+            else:
+                # Preserve the general map path without allocating a large
+                # selected Jacobian or zero-filled RHS batch.
+                for row, k in enumerate(ks):
+                    values[row] += trajectory.apply_transpose_at(int(k), local_grads[row])
+        for row, (index, _key, _rhs, _state_ref) in enumerate(group):
+            out[index] = values[row]
 
     def _evaluate_trajectory_entry(
         self,
