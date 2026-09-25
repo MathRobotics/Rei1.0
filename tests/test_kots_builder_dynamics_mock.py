@@ -118,6 +118,55 @@ def test_total_joint_ref_cache_separates_fields_frames_and_builders():
     assert other.adapter.resolve_total_joint_dynamics_refs(state_field="torque", key=key) is not torque
 
 
+def test_kots_batch_motion_vjp_chains_each_map_once(monkeypatch):
+    maps = TrajectoryMap.from_bspline_derivatives(
+        steps=5, q_dim=2, degree=3, num_ctrl_points=5, max_derivative_order=2,
+    )
+    builder = KotsTrajectoryStateBuilder(
+        _FakeKotsModel(), {}, trajectory_map=maps[0],
+        trajectory_derivative_maps={1: maps[1], 2: maps[2]},
+    )
+    ks = [0, 2, 2, 4]
+    grads = np.arange(24., dtype=float).reshape(4, 6) / 7.
+    expected = sum(
+        builder._trajectory_motion_gradient_transpose_at(k=k, motion_grad=grad)
+        for k, grad in zip(ks, grads, strict=True)
+    )
+    calls = []
+    original = TrajectoryMap.apply_transpose
+
+    def counted(self, rhs):
+        calls.append(self)
+        return original(self, rhs)
+
+    monkeypatch.setattr(TrajectoryMap, "apply_transpose", counted)
+    actual = builder._trajectory_motion_gradient_transpose_many(ks=ks, motion_grads=grads)
+    np.testing.assert_allclose(actual, expected)
+    assert len(calls) == 3 and all(actual is expected for actual, expected in zip(
+        calls, maps, strict=True,
+    ))
+
+
+def test_kots_batch_motion_vjp_preserves_per_request_columns():
+    maps = TrajectoryMap.from_bspline_derivatives(
+        steps=4, q_dim=2, degree=3, num_ctrl_points=5, max_derivative_order=2,
+    )
+    builder = KotsTrajectoryStateBuilder(
+        _FakeKotsModel(), {}, trajectory_map=maps[0],
+        trajectory_derivative_maps={1: maps[1], 2: maps[2]},
+    )
+    keys = [make_key(k=k, owner_type="total_joint", owner_name="robot",
+                     dtype=DTYPE_DYNAMICS, field="torque") for k in (0, 1, 1, 3)]
+    group = [(index, key, np.ones(2), object()) for index, key in enumerate(keys)]
+    grads = np.arange(24., dtype=float).reshape(4, 6) / 5.
+    out = [None] * len(group)
+    builder._chain_batched_param_vjp_group(out=out, group=group, motions=[], motion_grads=grads)
+    expected = [builder._trajectory_motion_gradient_transpose_at(k=int(key.k), motion_grad=grad)
+                for key, grad in zip(keys, grads, strict=True)]
+    for actual, reference in zip(out, expected, strict=True):
+        np.testing.assert_allclose(actual, reference)
+
+
 class _FakeKotsModel:
     def __init__(self) -> None:
         self._motion = np.zeros((6,), dtype=float)

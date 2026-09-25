@@ -414,6 +414,25 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             motion[deriv_order_i::order] = q_r
         return motion
 
+    def _compose_motions(self, p: Array, *, ks: Sequence[int]) -> Array:
+        """Compose several interleaved motions from each trajectory map once."""
+        indices = np.asarray(ks, dtype=int).reshape(-1)
+        dof = int(self.trajectory_map.q_dim)
+        order = int(self._model_order())
+        if np.any(indices < 0) or np.any(indices >= self.trajectory_map.steps):
+            raise ValueError("KotsTrajectoryStateBuilder: trajectory time index is out of range.")
+        motion = np.zeros((indices.size, dof * order), dtype=float)
+        p_vec = np.asarray(p, dtype=float).reshape(-1)
+        for derivative_order, trajectory in self.trajectory_derivative_maps.items():
+            derivative_order_i = int(derivative_order)
+            if derivative_order_i >= order:
+                continue
+            values = np.asarray(trajectory.apply(p_vec), dtype=float).reshape(
+                trajectory.steps, dof,
+            )
+            motion[:, derivative_order_i::order] = values[indices]
+        return motion
+
     def _can_batch_trajectory_entries(self, grouped: Mapping[int, list[tuple[StateKey, Any]]]) -> bool:
         """Whether all requested trajectory entries can use RoboKots batch APIs.
 
@@ -841,6 +860,46 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 result += trajectory.apply_transpose_at(k, grad[derivative_order::used_order])
         return result
 
+    def _trajectory_motion_gradient_transpose_many(
+        self,
+        *,
+        ks: Sequence[int],
+        motion_grads: Array,
+    ) -> Array | None:
+        """Chain a time batch of motion cotangents with one VJP per map.
+
+        A backend VJP has one interleaved motion cotangent per requested time.
+        Accumulating those into the full trajectory grid lets each derivative
+        map perform a single transpose multiply instead of one Python call per
+        frame. ``np.add.at`` preserves the previous sum semantics for repeated
+        time indices.
+        """
+        indices = np.asarray(ks, dtype=int).reshape(-1)
+        grads = np.asarray(motion_grads, dtype=float)
+        dof = self._model_dof()
+        if (
+            dof <= 0 or grads.ndim not in (2, 3) or grads.shape[0] != indices.size
+            or grads.shape[1] % dof != 0 or np.any(indices < 0)
+            or np.any(indices >= self.trajectory_map.steps)
+        ):
+            return None
+        used_order = int(grads.shape[1] // dof)
+        result_shape = ((self.trajectory_map.p_dim,) if grads.ndim == 2
+                        else (self.trajectory_map.p_dim, grads.shape[2]))
+        result = np.zeros(result_shape, dtype=float)
+        for derivative_order in range(used_order):
+            trajectory = self.trajectory_derivative_maps.get(derivative_order)
+            if trajectory is None:
+                continue
+            shape = ((trajectory.steps, dof) if grads.ndim == 2
+                     else (trajectory.steps, dof, grads.shape[2]))
+            full_rhs = np.zeros(shape, dtype=float)
+            np.add.at(full_rhs, indices, grads[:, derivative_order::used_order])
+            result += trajectory.apply_transpose(full_rhs.reshape(
+                trajectory.steps * dof, *full_rhs.shape[2:]
+            ))
+        return result
+
     def param_jacobian_transpose_mul(
         self,
         x_all: Array,
@@ -929,6 +988,15 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
 
         out: list[Array | None] = [None] * len(prepared)
         grouped_items = list(groups.values())
+        motions_by_time_grid: dict[tuple[int, ...], Array] = {}
+
+        def motions_for(ks: Sequence[int]) -> Array:
+            grid = tuple(int(k) for k in ks)
+            motions = motions_by_time_grid.get(grid)
+            if motions is None:
+                motions = self._compose_motions(p, ks=grid)
+                motions_by_time_grid[grid] = motions
+            return motions
 
         # RoboKots >= the batched multi-VJP API can evaluate heterogeneous
         # state fields (for example torque and torque_d1) from the same outward
@@ -940,14 +1008,14 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             and len(grouped_items) >= 2
             and self._batched_multi_vjp_contract != "fused"
         )
-        group_motions: list[list[Array]] = []
+        group_motions: list[Array] = []
         if use_multi_vjp:
             for group in grouped_items:
                 if len(group) < 2:
                     use_multi_vjp = False
                     break
                 ks = [int(key.k) for _index, key, _rhs, _state_ref in group]
-                group_motions.append([self._compose_motion(p, k=k) for k in ks])
+                group_motions.append(motions_for(ks))
             if use_multi_vjp:
                 first_ks = [int(key.k) for _index, key, _rhs, _state_ref in grouped_items[0]]
                 if any(
@@ -958,7 +1026,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
 
         if use_multi_vjp:
             self._update_batched_dynamics(
-                np.stack(group_motions[0], axis=0),
+                group_motions[0],
                 p=p,
                 time=time,
             )
@@ -1011,9 +1079,9 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             if len(group) < 2:
                 raise AttributeError("batched RoboKots VJP group has fewer than two requests")
             ks = [int(key.k) for _index, key, _rhs, _state_ref in group]
-            motions = [self._compose_motion(p, k=k) for k in ks]
+            motions = motions_for(ks)
             self._update_batched_dynamics(
-                np.stack(motions, axis=0),
+                motions,
                 p=p,
                 time=time,
             )
@@ -1144,8 +1212,8 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         if not group_ks or any(ks != group_ks[0] for ks in group_ks[1:]):
             raise AttributeError("fused RoboKots VJP requires identical time grids for all state fields")
 
-        motions = [self._compose_motion(p, k=k) for k in group_ks[0]]
-        self._update_batched_dynamics(np.stack(motions, axis=0), p=p, time=time)
+        motions = self._compose_motions(p, ks=group_ks[0])
+        self._update_batched_dynamics(motions, p=p, time=time)
         backend_requests = []
         for group in grouped_items:
             first_ref = group[0][2]
@@ -1186,11 +1254,12 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             motion_blocks = motion_grads.reshape(len(motions), dof, used_order)
             motion_blocks[:, :, :2] += direct_power_motion_vjp.reshape(len(motions), dof, 2)
         out = np.zeros((self.trajectory_map.p_dim,), dtype=float)
-        for k, motion_grad in zip(group_ks[0], motion_grads, strict=True):
-            mapped = self._trajectory_motion_gradient_transpose_at(k=k, motion_grad=np.asarray(motion_grad, dtype=float))
-            if mapped is None:
-                raise ValueError("RoboKots fused multi-VJP motion dimension does not match trajectory chain.")
-            out += mapped
+        mapped = self._trajectory_motion_gradient_transpose_many(
+            ks=group_ks[0], motion_grads=motion_grads,
+        )
+        if mapped is None:
+            raise ValueError("RoboKots fused multi-VJP motion dimension does not match trajectory chain.")
+        out += mapped
         return out
 
     def _chain_batched_param_vjp_group(
@@ -1207,12 +1276,24 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             raise ValueError(
                 "Batched RoboKots VJP output must have one leading result per requested time step."
             )
-        for batch_index, (index, key, _rhs, _state_ref) in enumerate(group):
-            motion_grad = np.asarray(grads[batch_index], dtype=float)
-            mapped = self._trajectory_motion_gradient_transpose_at(k=int(key.k), motion_grad=motion_grad)
-            if mapped is None:
-                raise ValueError("Batched RoboKots VJP motion dimension does not match trajectory chain.")
-            out[index] = mapped
+        dof = self._model_dof()
+        if dof <= 0 or grads.ndim != 2 or grads.shape[1] % dof != 0:
+            raise ValueError("Batched RoboKots VJP motion dimension does not match trajectory chain.")
+        used_order = int(grads.shape[1] // dof)
+        ks = np.asarray([int(key.k) for _index, key, _rhs, _state_ref in group], dtype=int)
+        values = np.zeros((self.trajectory_map.p_dim, len(group)), dtype=float)
+        # Each request becomes one RHS column. This preserves IOC ownership
+        # while replacing N per-frame transpose maps by one map VJP per
+        # derivative order.
+        for derivative_order in range(used_order):
+            trajectory = self.trajectory_derivative_maps.get(derivative_order)
+            if trajectory is None:
+                continue
+            full_rhs = np.zeros((trajectory.steps, dof, len(group)), dtype=float)
+            full_rhs[ks, :, np.arange(len(group))] = grads[:, derivative_order::used_order]
+            values += trajectory.apply_transpose(full_rhs.reshape(trajectory.steps * dof, len(group)))
+        for column, (index, _key, _rhs, _state_ref) in enumerate(group):
+            out[index] = values[:, column]
 
     def _evaluate_trajectory_entry(
         self,
