@@ -11,6 +11,7 @@ from ...core.state_cache import StateKey
 from ...core.timing import Profiler, ensure_profiler
 from ...problem import LinearizedProblem, as_linearized_problem
 from ...xops import as_vec
+from ..history import BackendProgress
 from .gauss_newton import solve_gauss_newton
 from .gauss_newton_operator import solve_gauss_newton_operator
 from .gauss_newton_krylov import solve_gauss_newton_krylov
@@ -71,6 +72,7 @@ _SOLVER_REI_OPTION_KEYS: dict[str, frozenset[str]] = {
             "max_iters",
             "tol",
             "bounds",
+            "verbose",
         }
     ),
     "cyipopt": frozenset(
@@ -78,6 +80,7 @@ _SOLVER_REI_OPTION_KEYS: dict[str, frozenset[str]] = {
             "max_iters",
             "tol",
             "bounds",
+            "verbose",
         }
     ),
     "liteopt": frozenset(
@@ -288,6 +291,7 @@ def solve_scipy_minimize(
     max_iters: int | None = 200,
     tol: float | None = None,
     bounds: Any = None,
+    verbose: bool = True,
     options: Mapping[str, Any] | None = None,
     on_iter: IterCallback | None = None,
     profiler: Profiler | None = None,
@@ -312,7 +316,9 @@ def solve_scipy_minimize(
         req = linear_problem.required_list(required)
         objective = _LinearizedObjective(linear_problem, required=req)
         n_total = int(x0_init.size)
-        initial_cost, _grad0, _rnorm0 = objective.eval(x0_init)
+        initial_cost, grad0, _rnorm0 = objective.eval(x0_init)
+    progress = BackendProgress("scipy_minimize", verbose=verbose)
+    progress.initial(initial_cost, grad0 / 2)
 
     options_local: dict[str, Any] = {} if options is None else dict(options)
     if max_iters is not None and "maxiter" not in options_local:
@@ -335,9 +341,10 @@ def solve_scipy_minimize(
         x_vec = _extract_x_from_callback_arg(xk, size=n_total)
         if x_vec is None:
             return
-        _fx, _gx, rnorm = objective.eval(x_vec)
+        fx, gx, rnorm = objective.eval(x_vec)
         last_dxnorm = float(np.linalg.norm(x_vec - prev_x))
         prev_x = x_vec.copy()
+        progress.iterate(fx, last_dxnorm, gx / 2)
         if on_iter is not None:
             on_iter(iter_count, rnorm, last_dxnorm)
         iter_count += 1
@@ -356,7 +363,7 @@ def solve_scipy_minimize(
 
     with prof.span("solve.finalize"):
         x_star = as_vec(getattr(result, "x", x0_init), expected_size=n_total, name="result.x")
-        cost, _grad, rnorm = objective.eval(x_star)
+        cost, final_grad, rnorm = objective.eval(x_star)
     iters = int(getattr(result, "nit", iter_count))
     if iters <= 0:
         iters = int(iter_count)
@@ -366,7 +373,7 @@ def solve_scipy_minimize(
     status = "converged" if converged else "failed"
     message = str(getattr(result, "message", "") or "")
 
-    return SolveOutcome(
+    outcome = SolveOutcome(
         solution=x_star.copy(),
         stats=SolveStats(
             status=status,
@@ -384,6 +391,8 @@ def solve_scipy_minimize(
             "x0": x0_init.copy(),
         },
     )
+    progress.final(outcome, final_grad / 2)
+    return outcome
 
 
 def solve_cyipopt_minimize(
@@ -396,6 +405,7 @@ def solve_cyipopt_minimize(
     max_iters: int | None = 200,
     tol: float | None = None,
     bounds: Any = None,
+    verbose: bool = True,
     options: Mapping[str, Any] | None = None,
     on_iter: IterCallback | None = None,
     profiler: Profiler | None = None,
@@ -420,11 +430,14 @@ def solve_cyipopt_minimize(
         req = linear_problem.required_list(required)
         objective = _LinearizedObjective(linear_problem, required=req)
         n_total = int(x0_init.size)
-        initial_cost, _grad0, _rnorm0 = objective.eval(x0_init)
+        initial_cost, grad0, _rnorm0 = objective.eval(x0_init)
+    progress = BackendProgress("cyipopt_minimize", verbose=verbose)
+    progress.initial(initial_cost, grad0 / 2)
 
     options_local: dict[str, Any] = {} if options is None else dict(options)
     if max_iters is not None and "max_iter" not in options_local:
         options_local["max_iter"] = int(max_iters)
+    options_local.setdefault("print_level", 0)
 
     iter_count = 0
     last_dxnorm = 0.0
@@ -443,9 +456,10 @@ def solve_cyipopt_minimize(
         x_vec = _extract_x_from_callback_arg(xk, size=n_total)
         if x_vec is None:
             return
-        _fx, _gx, rnorm = objective.eval(x_vec)
+        fx, gx, rnorm = objective.eval(x_vec)
         last_dxnorm = float(np.linalg.norm(x_vec - prev_x))
         prev_x = x_vec.copy()
+        progress.iterate(fx, last_dxnorm, gx / 2)
         if on_iter is not None:
             on_iter(iter_count, rnorm, last_dxnorm)
         iter_count += 1
@@ -459,7 +473,7 @@ def solve_cyipopt_minimize(
     }
     if tol is not None:
         kwargs["tol"] = float(tol)
-    if on_iter is not None:
+    if verbose or on_iter is not None:
         kwargs["callback"] = callback
 
     with prof.span("solve.backend"):
@@ -473,7 +487,7 @@ def solve_cyipopt_minimize(
 
     with prof.span("solve.finalize"):
         x_star = as_vec(getattr(result, "x", x0_init), expected_size=n_total, name="result.x")
-        cost, _grad, rnorm = objective.eval(x_star)
+        cost, final_grad, rnorm = objective.eval(x_star)
     iters = int(getattr(result, "nit", iter_count))
     if iters <= 0:
         iters = int(iter_count)
@@ -483,7 +497,7 @@ def solve_cyipopt_minimize(
     status = "converged" if converged else "failed"
     message = str(getattr(result, "message", "") or "")
 
-    return SolveOutcome(
+    outcome = SolveOutcome(
         solution=x_star.copy(),
         stats=SolveStats(
             status=status,
@@ -500,6 +514,8 @@ def solve_cyipopt_minimize(
             "x0": x0_init.copy(),
         },
     )
+    progress.final(outcome, final_grad / 2)
+    return outcome
 
 
 def _parse_liteopt_gd_result(
@@ -589,6 +605,18 @@ def _liteopt_uses_options_api(fn: Callable[..., Any]) -> bool:
     return "options" in signature.parameters
 
 
+def _silence_liteopt_output(fn: Callable[..., Any], options: dict[str, Any]) -> None:
+    """Reserve top-level verbose for Rei while honoring explicit backend options."""
+    if "verbose" in options:
+        return
+    try:
+        parameters = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return
+    if "verbose" in parameters or "options" in parameters:
+        options["verbose"] = False
+
+
 def _call_liteopt_gd(
     liteopt: Any,
     fun: Callable[[Array], float],
@@ -623,7 +651,7 @@ def solve_liteopt_gd(
     weighted: bool | None = None,
     term_indices: Iterable[int] | None = None,
     method: str = "gd",
-    verbose: bool | None = None,
+    verbose: bool | None = True,
     max_iters: int | None = 200,
     step_size: float = 1e-3,
     tol_grad: float = 1e-4,
@@ -667,14 +695,15 @@ def solve_liteopt_gd(
         req = linear_problem.required_list(required)
         objective = _LinearizedObjective(linear_problem, required=req)
         n_total = int(x0_init.size)
-        initial_cost, _grad0, _rnorm0 = objective.eval(x0_init)
-
+        initial_cost, grad0, _rnorm0 = objective.eval(x0_init)
     method_key = str(method).strip().lower()
     if method_key not in {"gd", "gn"}:
         raise ValueError(
             "solve_liteopt_gd: liteopt method must be 'gd' or 'gn'. "
             f"Got method={method!r}."
         )
+    progress = BackendProgress(f"liteopt_{method_key}", verbose=bool(verbose))
+    progress.initial(initial_cost, grad0 / 2)
 
     iter_count = 0
     last_dxnorm = 0.0
@@ -694,8 +723,7 @@ def solve_liteopt_gd(
 
     if method_key == "gn":
         options_local: dict[str, Any] = {} if options is None else dict(options)
-        if verbose is not None and "verbose" not in options_local:
-            options_local["verbose"] = bool(verbose)
+        _silence_liteopt_output(liteopt.gn, options_local)
         if max_iters is not None and "max_iters" not in options_local:
             options_local["max_iters"] = int(max_iters)
         if tol_r is not None and "tol_r" not in options_local:
@@ -801,8 +829,9 @@ def solve_liteopt_gd(
             if iters_raw is not None:
                 iters = int(iters_raw)
         with prof.span("solve.finalize"):
+            final_gradient = None
             if bool(np.all(np.isfinite(x_star))):
-                cost_eval, _grad_eval, rnorm_eval = objective.eval(x_star)
+                cost_eval, final_gradient, rnorm_eval = objective.eval(x_star)
                 if bool(np.isfinite(cost_eval)):
                     cost = float(cost_eval)
                 if bool(np.isfinite(rnorm_eval)):
@@ -822,7 +851,7 @@ def solve_liteopt_gd(
                 "liteopt.gn returned a non-finite final objective/residual; "
                 "marking solve as failed."
             )
-        return SolveOutcome(
+        outcome = SolveOutcome(
             solution=x_star.copy(),
             stats=SolveStats(
                 status=status,
@@ -840,8 +869,11 @@ def solve_liteopt_gd(
                 "x0": x0_init.copy(),
             },
         )
+        progress.final(outcome, None if final_gradient is None else final_gradient / 2)
+        return outcome
 
     options_local = {} if options is None else dict(options)
+    _silence_liteopt_output(liteopt.gd, options_local)
     nonfinite_retries = int(options_local.pop("nonfinite_retries", nonfinite_retries))
     nonfinite_step_shrink = float(
         options_local.pop("nonfinite_step_shrink", nonfinite_step_shrink)
@@ -888,8 +920,6 @@ def solve_liteopt_gd(
 
     if "step_size" not in options_local:
         options_local["step_size"] = float(step_size)
-    if verbose is not None and "verbose" not in options_local:
-        options_local["verbose"] = bool(verbose)
     if max_iters is not None and "max_iters" not in options_local:
         options_local["max_iters"] = int(max_iters)
     if "tol_grad" not in options_local:
@@ -917,12 +947,14 @@ def solve_liteopt_gd(
         x_vec = as_vec(x, expected_size=n_total, name="x")
         if not bool(np.all(np.isfinite(x_vec))):
             raise ValueError("solve_liteopt_gd: non-finite iterate encountered.")
-        _fx, gx, rnorm = objective.eval(x_vec)
+        fx, gx, rnorm = objective.eval(x_vec)
         if not bool(np.isfinite(rnorm)):
             raise ValueError("solve_liteopt_gd: residual norm became non-finite.")
         if not bool(np.all(np.isfinite(gx))):
             raise ValueError("solve_liteopt_gd: gradient became non-finite.")
         last_dxnorm = float(np.linalg.norm(x_vec - prev_x))
+        if last_dxnorm > 0:
+            progress.iterate(fx, last_dxnorm, gx / 2)
         prev_x = x_vec.copy()
         if on_iter is not None:
             on_iter(iter_count, rnorm, last_dxnorm)
@@ -970,9 +1002,10 @@ def solve_liteopt_gd(
 
     cost = float("nan")
     rnorm = float("nan")
+    final_gradient = None
     with prof.span("solve.finalize"):
         if bool(np.all(np.isfinite(x_star))):
-            cost, _grad, rnorm = objective.eval(x_star)
+            cost, final_gradient, rnorm = objective.eval(x_star)
         else:
             failure_message = (
                 "solve_liteopt_gd: backend returned a non-finite solution vector."
@@ -1003,7 +1036,7 @@ def solve_liteopt_gd(
             "marking solve as failed."
         )
 
-    return SolveOutcome(
+    outcome = SolveOutcome(
         solution=x_star.copy(),
         stats=SolveStats(
             status=status,
@@ -1023,6 +1056,8 @@ def solve_liteopt_gd(
             "x0": x0_init.copy(),
         },
     )
+    progress.final(outcome, None if final_gradient is None else final_gradient / 2)
+    return outcome
 
 
 def solve(
@@ -1172,6 +1207,7 @@ def solve(
             max_iters=int(opts.get("max_iters", 200)),
             tol=(None if tol is None else float(tol)),
             bounds=opts.get("bounds", None),
+            verbose=bool(opts.get("verbose", True)),
             options=backend_options,
             on_iter=on_iter,
             profiler=profiler,
@@ -1188,6 +1224,7 @@ def solve(
             max_iters=int(opts.get("max_iters", 200)),
             tol=(None if tol is None else float(tol)),
             bounds=opts.get("bounds", None),
+            verbose=bool(opts.get("verbose", True)),
             options=backend_options,
             on_iter=on_iter,
             profiler=profiler,
@@ -1195,7 +1232,7 @@ def solve(
 
     if key == "liteopt":
         method_liteopt = str(opts.get("method", "gd")).strip().lower()
-        verbose_opt = opts.get("verbose", None)
+        verbose_opt = opts.get("verbose", True)
         line_search_opt = opts.get("line_search", None)
         ls_max_steps_raw = opts.get("ls_max_steps", opts.get("ls_max_iters", 12))
 

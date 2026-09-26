@@ -30,6 +30,9 @@ def build_solver_iter_logger(
 ) -> tuple[dict[str, Any], IterCallback, list[IterRow]]:
     """Build an `on_iter` callback and iteration history container.
 
+    Local verbose output uses the common solver table. ``print_prefix`` is
+    retained for call compatibility; the table itself has no prefix.
+
     Returns:
       - options_local: options dict with local verbose keys removed when configured
       - on_iter: callback compatible with `solve(..., on_iter=...)`; its
@@ -58,9 +61,10 @@ def build_solver_iter_logger(
         if every_i <= 0:
             raise ValueError(f"build_solver_iter_logger: verbose_every must be > 0, got {every_raw!r}.")
 
-        if verbose_enabled:
-            prefix = solver_key if print_prefix is None else str(print_prefix)
-            print(f"[{prefix}] {solver_key} verbose enabled (every={every_i})")
+    if verbose_enabled and strip_verbose_options:
+        # This callback owns the display; suppress the solver's live table.
+        opts["verbose"] = False
+    last_verbose_objective: float | None = None
 
     def _on_iter(
         k: int,
@@ -68,17 +72,26 @@ def build_solver_iter_logger(
         dxnorm: float,
         jt_r: np.ndarray | Sequence[float] | None = None,
     ) -> None:
+        nonlocal last_verbose_objective
         k_i = int(k)
         r_f = float(rnorm)
         dx_f = float(dxnorm)
         history.append((k_i, r_f, dx_f))
 
         if solver_key == verbose_solver_key and verbose_enabled and k_i % every_i == 0:
-            prefix = solver_key if print_prefix is None else str(print_prefix)
-            message = f"[{prefix}:{solver_key}] iter={k_i:04d} rnorm={r_f:.3e} dxnorm={dx_f:.3e}"
-            if jt_r is not None:
-                message += f" Jᵀr={format_numeric_array(jt_r)}"
-            print(message)
+            objective = r_f * r_f
+            row = {
+                "solver": solver_key,
+                "event": "initial" if last_verbose_objective is None else "iteration_end",
+                "iteration": k_i,
+                "objective": objective,
+                "delta_objective": 0.0 if last_verbose_objective is None else objective - last_verbose_objective,
+                "jt_r_inf_norm": None if jt_r is None else float(np.max(np.abs(jt_r), initial=0.0)),
+                "step_norm": dx_f,
+            }
+            print(format_solver_history([row]) if last_verbose_objective is None
+                  else format_solver_history([row]).splitlines()[1])
+            last_verbose_objective = objective
 
     return opts, _on_iter, history
 

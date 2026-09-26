@@ -154,9 +154,11 @@ class TestSolversLiteoptMock:
         )
 
         assert out.converged
-        assert calls["options"] == {"step_size": 0.2, "max_iters": 15, "tol_grad": 1e-5}
+        assert calls["options"] == {"step_size": 0.2, "max_iters": 15,
+                                     "tol_grad": 1e-5, "verbose": False}
 
-    def test_solve_liteopt_gd_accepts_line_search_option(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_solve_liteopt_gd_accepts_line_search_option(self, monkeypatch: pytest.MonkeyPatch,
+                                                         capsys: pytest.CaptureFixture[str]) -> None:
         calls: dict[str, object] = {}
         liteopt_mod = types.ModuleType("liteopt")
 
@@ -197,12 +199,14 @@ class TestSolversLiteoptMock:
         )
 
         assert out.converged
+        assert [row["event"] for row in out.history] == ["initial", "final"]
+        assert "iter event" in capsys.readouterr().out
         assert calls == {
             "step_size": 0.2,
             "max_iters": 15,
             "tol_grad": 1e-5,
             "line_search": True,
-            "verbose": True,
+            "verbose": False,
         }
 
     def test_solve_liteopt_gn_supports_line_search_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -283,7 +287,7 @@ class TestSolversLiteoptMock:
         assert calls["ls_beta"] == pytest.approx(0.5, rel=0.0, abs=0.0)
         assert calls["ls_min_step"] == pytest.approx(1e-8, rel=0.0, abs=0.0)
         assert calls["ls_max_steps"] == 12
-        assert calls["verbose"] is True
+        assert calls["verbose"] is False
 
     def test_solve_liteopt_gn_supports_options_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: dict[str, object] = {}

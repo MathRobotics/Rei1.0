@@ -634,6 +634,17 @@ cached map generation against the scalar recurrence.
 - `"cyipopt"`: requires `cyipopt`
 - `"liteopt"`: requires `liteopt`
 
+All solvers show Rei's common progress table by default. Its
+fixed columns are iteration, event, squared residual objective, objective
+change, `|Jᵀr|∞`, and step norm. Solver-specific values such as damping,
+line-search scale, and trust radius appear by name after the result. The
+structured rows are also available in `out.history`; `verbose=False` hides
+the table while retaining them. SciPy and cyipopt report accepted callback
+iterates when their interfaces provide them. Liteopt reports the initial and
+final states, and GD also reports distinct gradient-evaluation points. Backend
+native output can be requested separately through `backend_options` (for
+example, cyipopt's `print_level`).
+
 Example:
 
 ```python

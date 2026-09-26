@@ -7,6 +7,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterable
 
+import numpy as np
+
 
 def _json_safe(value: Any) -> Any:
     if isinstance(value, float) and not math.isfinite(value):
@@ -87,7 +89,7 @@ class SolverHistoryRecorder:
                 stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
         if self.enabled:
             (self.line_search_events if is_search else self.events).append(row)
-        if self.verbose and not is_search:
+        if self.verbose and event in {"initial", "iteration_end", "iteration_failed", "final"}:
             lines = format_solver_history([row]).splitlines()
             header_block = int(iteration) // 20
             if self._last_header_block is None or header_block > self._last_header_block:
@@ -96,14 +98,48 @@ class SolverHistoryRecorder:
             print(lines[1], flush=True)
 
 
+class BackendProgress:
+    """Report backend iterates through the same events as built-in solvers."""
+
+    def __init__(self, solver: str, *, verbose: bool = False):
+        self.recorder = SolverHistoryRecorder(enabled=True, verbose=verbose, solver=solver)
+        self.iteration = 0
+
+    def initial(self, objective: float, gradient: Any = None) -> None:
+        self.recorder.emit("initial", 0, **self._fields(objective, gradient), step_norm=None)
+
+    def iterate(self, objective: float, step_norm: float, gradient: Any = None) -> None:
+        self.iteration += 1
+        self.recorder.emit("iteration_end", self.iteration,
+                           **self._fields(objective, gradient), step_norm=float(step_norm))
+
+    def final(self, outcome: Any, gradient: Any = None) -> None:
+        stats = outcome.stats
+        self.recorder.emit("final", int(stats.iterations),
+                           **self._fields(stats.objective, gradient),
+                           step_norm=stats.step_norm, status=stats.status,
+                           reason=stats.status, message=stats.message)
+        outcome.history = self.recorder.events
+
+    @staticmethod
+    def _fields(objective: float | None, gradient: Any) -> dict[str, Any]:
+        norm = None
+        if gradient is not None:
+            norm = float(np.max(np.abs(np.asarray(gradient, dtype=float)), initial=0.0))
+        return {
+            "objective": None if objective is None else float(objective),
+            "residual_norm": None if objective is None else math.sqrt(max(0.0, float(objective))),
+            "jt_r_inf_norm": norm,
+        }
+
+
 def format_solver_history(
     history: Iterable[dict[str, Any]], *, include_line_search: bool = True,
+    include_diagnostics: bool = False,
 ) -> str:
-    """Show states and indented trials; unavailable numbers are shown as '-'."""
+    """Show progress and trials; opt in to inner-solve and retry diagnostics."""
     history = list(history)
-    is_lm = bool(history and history[0].get("solver") == "levenberg_marquardt")
-    is_trust = bool(history and history[0].get("solver") == "gauss_newton_krylov")
-    widths = (4, 16, 9, 9, 8, 8, 8, 6)
+    widths = (4, 16, 9, 9, 9, 9)
 
     def table_row(values: Iterable[str]) -> str:
         return " ".join(
@@ -111,31 +147,39 @@ def format_solver_history(
             for index, (value, width) in enumerate(zip(values, widths, strict=True))
         )
 
-    lines = [table_row(("iter", "event", "objective", "Δobj", "|Jᵀr|inf", "step",
-                        "λ" if is_lm else "radius" if is_trust else "scale",
-                        "ρ" if is_lm or is_trust else "trials")) + " result"]
+    lines = [table_row(("iter", "event", "objective", "Δobj", "|Jᵀr|inf", "step")) + " result"]
 
     def number(value: Any) -> str:
         return "-" if value is None else f"{value:.2e}"
 
     for row in history:
         event = row["event"]
+        if not include_diagnostics and event not in {
+            "initial", "iteration_end", "iteration_failed", "final",
+        } and not event.startswith(("line_search_", "lm_", "trust_region_")):
+            continue
         if not include_line_search and event.startswith(("line_search_", "lm_", "trust_region_")):
             continue
         label = event
         if event in {"line_search_trial", "lm_trial", "trust_region_trial"}:
             label = f"  trial {row['trial']}"
-        result = row.get("reason", row.get("acceptance_reason") or row.get("line_search_status", row.get("status", "")))
+        result = row.get("reason") or row.get("acceptance_reason") or row.get("line_search_status") or row.get("status") or ""
+        details = []
+        for key, detail_name in (("damping", "damping"), ("step_scale", "scale"),
+                           ("trust_radius", "radius"), ("gain_ratio", "rho")):
+            if row.get(key) is not None:
+                details.append(f"{detail_name}={number(row[key])}")
+        trials = row.get("line_search_trials", row.get("trials"))
+        if trials is not None:
+            details.append(f"trials={trials}")
         if event == "iteration_retry":
-            result += f" #{row['retry']} λ={row['damping']:.2e} ls={row['ls_max_iters']}"
-        trials = row.get("line_search_trials", row.get("trials", "-"))
+            details.append(f"retry={row['retry']}")
+            details.append(f"ls={row['ls_max_iters']}")
         lines.append(
             table_row((str(row["iteration"]), label,
                        number(row.get("objective")), number(row.get("delta_objective")),
-                       number(row.get("jt_r_inf_norm")), number(row.get("step_norm")),
-                       number(row.get("damping" if is_lm else "trust_radius" if is_trust else "step_scale")),
-                       number(row.get("gain_ratio")) if is_lm or is_trust else str(trials)))
-            + f" {result}"
+                       number(row.get("jt_r_inf_norm")), number(row.get("step_norm"))))
+            + " " + " ".join(part for part in (str(result), *details) if part)
         )
     return "\n".join(lines)
 

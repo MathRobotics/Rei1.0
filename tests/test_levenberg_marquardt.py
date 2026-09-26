@@ -170,7 +170,9 @@ def test_history_roundtrip_and_initial_delta(tmp_path, max_iters):
     assert not out.line_search_history
     assert out.history[-1]["variables"] == out.solution.tolist()
     assert all(row["solver"] == "levenberg_marquardt" for row in out.history + out.trial_history)
-    assert "λ" in format_solver_history(out.history) and "ρ" in format_solver_history(out.history)
+    assert "damping=" in format_solver_history(out.history)
+    if max_iters:
+        assert "rho=" in format_solver_history(out.history)
 
 
 def test_nonfinite_trial_is_rejected_and_exception_restores_point():

@@ -92,6 +92,20 @@ def test_operator_only_solve_reaches_known_optimum():
     assert result.meta["inner_solves"]
 
 
+@pytest.mark.parametrize("solver", ["gauss_newton_operator", "gauss_newton_krylov"])
+def test_product_solver_verbose_replays_from_history(capsys, solver):
+    from rei.optimize.history import format_solver_history
+
+    model = MatrixProblem(np.diag([2., 3.]), [1., 1.])
+    result = solve(model, solver=solver, options={"verbose": True, "max_iters": 1})
+    assert any(row["event"] == "linear_solve" for row in result.history)
+    output = capsys.readouterr().out
+    assert "linear_solve" not in output
+    assert output.rstrip() == format_solver_history(result.history).rstrip()
+    assert "linear_solve" not in format_solver_history(result.history)
+    assert "linear_solve" in format_solver_history(result.history, include_diagnostics=True)
+
+
 def test_inner_limit_is_reported_and_outer_loop_can_continue():
     model = MatrixProblem(np.diag([1., 2., 3.]), [1., 1., 1.])
     result = operator_solve(model, max_iters=1, inner_max_iters=1)

@@ -11,6 +11,7 @@ from rei.optimize.costs import L2Cost
 from rei.optimize.builder import compile_nls_problem
 from rei.optimize.runtime import NLSRuntime
 from rei.optimize.solvers import solve
+from rei.optimize.history import format_solver_history
 from rei.problem import NLSProblem
 
 
@@ -32,6 +33,41 @@ def _build_scalar_runtime(target: float = 0.0):
 
 
 class TestSolverDispatchOptions:
+    @pytest.mark.parametrize("solver,module_name,function_name", [
+        ("scipy_minimize", "scipy.optimize", "minimize"),
+        ("cyipopt", "cyipopt", "minimize_ipopt"),
+    ])
+    def test_external_verbose_uses_common_history(self, monkeypatch, capsys,
+                                                  solver, module_name, function_name):
+        module = types.ModuleType(module_name)
+        seen = {}
+
+        def backend(*, fun, x0, jac, options, callback=None, **kwargs):
+            del kwargs
+            seen.update(options)
+            x = np.array([1.])
+            if callback is not None:
+                callback(x)
+            return types.SimpleNamespace(x=x, success=True, nit=1, message="ok")
+
+        setattr(module, function_name, backend)
+        monkeypatch.setitem(sys.modules, module_name, module)
+        if solver == "scipy_minimize":
+            monkeypatch.setitem(sys.modules, "scipy", types.ModuleType("scipy"))
+        out = solve(_build_scalar_runtime(target=1.), solver=solver,
+                    options={"max_iters": 2})
+        assert out.converged
+        assert [row["event"] for row in out.history] == ["initial", "iteration_end", "final"]
+        assert capsys.readouterr().out.rstrip() == format_solver_history(out.history).rstrip()
+        assert "verbose" not in seen
+        if solver == "cyipopt":
+            assert seen["print_level"] == 0
+
+        silent = solve(_build_scalar_runtime(target=1.), solver=solver,
+                       options={"max_iters": 2, "verbose": False})
+        assert silent.history
+        assert capsys.readouterr().out == ""
+
     def test_solve_gauss_newton_accepts_x0_via_options(self) -> None:
         runtime = _build_scalar_runtime(target=2.0)
         out = solve(

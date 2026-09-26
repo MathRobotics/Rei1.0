@@ -56,13 +56,15 @@ def test_build_solver_iter_logger_and_compress_rows(capsys) -> None:
     rows = compress_iter_history(history)
     assert rows == [(0, 0.9, 0.2), (1, 0.5, 0.1)]
 
-    _, verbose_on_iter, _ = build_solver_iter_logger(
+    verbose_options, verbose_on_iter, _ = build_solver_iter_logger(
         "gauss_newton",
         {"verbose": True},
         print_prefix="forward",
     )
     verbose_on_iter(0, 1.0, 0.2, np.array([-2.0, 0.5]))
-    assert "Jᵀr=[-2. ,  0.5]" in capsys.readouterr().out
+    assert verbose_options["verbose"] is False
+    output = capsys.readouterr().out
+    assert "|Jᵀr|inf" in output and "2.00e+00" in output
 
 
 def test_gauss_newton_callback_receives_current_jt_r() -> None:

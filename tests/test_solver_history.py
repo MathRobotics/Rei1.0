@@ -36,7 +36,7 @@ def test_verbose_repeats_header_every_twenty_iterations(capsys, solver, trial_ki
     assert len(header_indices) == 3
     assert [int(lines[i+1].split()[0]) for i in header_indices] == [0, 20, 40]
     assert all(lines[i] == lines[0] for i in header_indices)
-    assert ("λ" in lines[0]) == (solver == "levenberg_marquardt")
+    assert lines[0].endswith("result")
     if history:
         assert all(row["event"] != "header" for row in recorder.events)
     else:
@@ -352,5 +352,27 @@ def test_compact_columns_keep_large_and_negative_values_separate():
     assert len(text.splitlines()[0]) < 95
     assert text.splitlines()[1].split() == [
         "12345", "iteration_end", "1.23e+100", "-1.23e+100",
-        "1.23e-100", "1.23e-100", "5.00e-01", "3",
+        "1.23e-100", "1.23e-100", "scale=5.00e-01", "trials=3",
     ]
+
+
+def test_common_header_and_named_solver_details():
+    headers = []
+    for solver, fields in (
+        ("gauss_newton", {"damping": .01, "step_scale": .5}),
+        ("lm-ls", {"damping": .02, "step_scale": .25}),
+        ("levenberg_marquardt", {"damping": .03, "gain_ratio": .9}),
+        ("gauss_newton_krylov", {"trust_radius": 2., "gain_ratio": .8}),
+    ):
+        formatted = format_solver_history([{
+            "solver": solver, "event": "iteration_end", "iteration": 1,
+            "objective": 1., "delta_objective": -.5,
+            "jt_r_inf_norm": .1, "step_norm": .2, **fields,
+        }])
+        header, row = formatted.splitlines()
+        headers.append(header)
+        assert all(f"{name}=" in row for name in (
+            "damping" if "damping" in fields else "radius",
+            "scale" if "step_scale" in fields else "rho",
+        ))
+    assert len(set(headers)) == 1
