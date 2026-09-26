@@ -211,9 +211,12 @@ class NullspaceReducedRuntime:
         weighted: bool,
         term_indices: Iterable[int] | None,
     ) -> Array:
-        req = self.required_list(required)
         self._sync_full_from_reduced()
         full_idxs = self._selected_full_term_indices(term_indices)
+        # Let the full runtime select value dependencies for these objective
+        # terms. Expanding None through required_list would request derivative
+        # state on every line-search trial.
+        req = None if required is None else self.required_list(required)
         eval_stacked = getattr(self.full_runtime, "eval_stacked_terms", None)
         if callable(eval_stacked):
             return np.asarray(

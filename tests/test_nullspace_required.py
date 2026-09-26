@@ -90,6 +90,24 @@ def test_no_selected_equalities_does_not_request_objective_state():
     np.testing.assert_array_equal(reduction.nullspace_basis, np.eye(2))
 
 
+def test_reduced_value_evaluation_skips_derivative_state():
+    runtime, calls = make_runtime(False)
+    reduction = build_nullspace_equality_reduction(runtime, eq_term_indices=[0])
+    reduced = reduction.runtime
+
+    calls.clear()
+    value = reduced.eval()
+    assert value.shape == (2,)
+    assert calls
+    assert {key.field for requested in calls for key in requested} == {"unused_equality", "torque"}
+
+    calls.clear()
+    residual, jacobian = reduced.linearize()
+    np.testing.assert_allclose(value, residual)
+    assert jacobian.shape == (2, reduced.pack.n_total)
+    assert any(key.field == "torque_J_x" for requested in calls for key in requested)
+
+
 def test_trajectory_q_and_qdot_boundaries_do_not_build_torque_state():
     calls = []
 
