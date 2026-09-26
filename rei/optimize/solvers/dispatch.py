@@ -114,13 +114,15 @@ _SOLVER_REI_OPTION_KEYS["gauss_newton_operator"] = (
     _SOLVER_REI_OPTION_KEYS["gauss_newton"] | {"inner_tol", "inner_max_iters"}
 )
 
-_SOLVER_REI_OPTION_KEYS["gauss_newton_krylov"] = frozenset({
-    "max_iters", "tol_grad", "initial_radius", "max_radius", "acceptance",
-    "inner_max_iters", "forcing_min", "forcing_max", "preconditioner",
-    "preconditioner_probes", "preconditioner_max_size", "preconditioner_floor",
-    "preconditioner_refresh", "seed", "history", "history_vectors", "history_path",
-    "trial_history_path", "verbose",
-})
+_SOLVER_REI_OPTION_KEYS["gauss_newton_krylov"] = frozenset(
+    _SOLVER_REI_OPTION_KEYS["gauss_newton"] | {
+        "inner_tol", "inner_max_iters", "globalization", "initial_radius", "max_radius", "acceptance",
+        "forcing_min", "forcing_max", "preconditioner",
+        "preconditioner_probes", "preconditioner_max_size", "preconditioner_floor",
+        "preconditioner_refresh", "seed", "history", "history_vectors", "history_path",
+        "line_search_history_path", "trial_history_path", "verbose",
+    }
+)
 
 _BUILTIN_NLS_SOLVERS = frozenset({
     "gauss_newton", "gauss_newton_operator", "gauss_newton_krylov",
@@ -1099,9 +1101,9 @@ def solve(
       Uses eval/jvp/vjp and damped CGLS; runtime local-block fallback supported.
 
     gauss_newton_krylov:
-      Inexact trust-region GN with PCG; no full-column damping scan.
-      initial_radius=None, inner_max_iters=50, preconditioner="auto"
-      forcing_min=1e-4, forcing_max=.1; tol_grad is the only convergence criterion.
+      Same adaptive damping and Armijo line-search algorithm as gauss_newton;
+      the damped least-squares step uses diagonally scaled CGLS with JVP/VJP.
+      globalization="trust_region" selects the legacy PCG trust-region method.
 
     scipy_minimize:
       method, max_iters, tol, bounds, backend_options

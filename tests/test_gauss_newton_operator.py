@@ -19,6 +19,7 @@ class MatrixProblem:
         self.n_total = self.A.shape[1]
         self.x = np.zeros(self.n_total)
         self.products = [0, 0]
+        self.evaluations = 0
 
     def get_point(self):
         return self.x.copy()
@@ -30,6 +31,7 @@ class MatrixProblem:
         return [] if required is None else list(required)
 
     def eval(self, *, required=None):
+        self.evaluations += 1
         return self.A @ self.x - self.b
 
     def jvp(self, v, *, required=None):
@@ -90,6 +92,14 @@ def test_operator_only_solve_reaches_known_optimum():
     assert all(model.products)
     assert result.meta["solver"] == "gauss_newton_operator"
     assert result.meta["inner_solves"]
+
+
+def test_accepted_residual_is_reused_for_next_linearization():
+    model = MatrixProblem(np.diag([2., 3.]), [1., 1.])
+    out = operator_solve(model, max_iters=1)
+    assert out.stats.objective < out.stats.initial_objective
+    # One initial evaluation and one accepted line-search trial.
+    assert model.evaluations == 2
 
 
 @pytest.mark.parametrize("solver", ["gauss_newton_operator", "gauss_newton_krylov"])
@@ -234,6 +244,14 @@ def test_column_norm_provider_avoids_basis_products():
     J = JacobianProducts(model, [], 2)
     np.testing.assert_array_equal(J.column_squared_norms(), [4., 9.])
     assert model.products == [0, 0]
+
+
+def test_column_norm_scan_uses_fewer_row_products_when_underdetermined():
+    A = np.arange(16., dtype=float).reshape(2, 8)
+    model = MatrixProblem(A, np.zeros(2))
+    J = JacobianProducts(model, [], 2)
+    np.testing.assert_allclose(J.column_squared_norms(), np.sum(A*A, axis=0))
+    assert model.products == [0, 2]
 
 
 @pytest.mark.parametrize('k', [None, 1])

@@ -9,7 +9,7 @@ import numpy as np
 from ...core.outcome import SolveOutcome, SolveStats
 from ...core.state_cache import StateKey
 from ...core.timing import Profiler, ensure_profiler
-from ._jacobian_operator import OperatorLinearizationProblem, cgls_step
+from ._jacobian_operator import JacobianProducts, OperatorLinearizationProblem, _vector, cgls_step
 from ...xops import as_vec
 from ..history import SolverHistoryRecorder
 
@@ -47,6 +47,9 @@ def solve_gauss_newton_operator(
     verbose: bool = True,
     on_iter: Callable[..., None] | None = None,
     profiler: Profiler | None = None,
+    _step_solver: Callable[[Array, Any, float], tuple[Array, dict[str, Any]]] | None = None,
+    _damping_floor_fn: Callable[[Any], float] | None = None,
+    _solver_name: str = "gauss_newton_operator",
 ) -> SolveOutcome:
     """Operator Gauss-Newton with the dense solver's globalization/history.
 
@@ -54,9 +57,10 @@ def solve_gauss_newton_operator(
     inner_tol is the relative normal-residual tolerance; inner_max_iters
     defaults to max(20, 2*n). An iteration limit retains the approximate step
     for the outer line search; inner diagnostics are recorded separately.
-    The scale-aware damping floor is exact, computed by streaming J e_i.
-    Providers can supply jacobian_column_squared_norms(required=...) to avoid
-    n JVP calls per linearization. Runtime expressions without JVP use local
+    The scale-aware damping floor is exact, computed by streaming the shorter
+    of JVP columns and VJP rows. Providers can supply
+    jacobian_column_squared_norms(required=...) to avoid this scan. Runtime
+    expressions without JVP use local
     derivative blocks; this fallback is not fully matrix-free.
 
     The outer loop intentionally mirrors gauss_newton.py, including retries,
@@ -102,7 +106,7 @@ def solve_gauss_newton_operator(
             raise ValueError("solve_gauss_newton_operator: ls_max_iters must be a positive integer.")
     recorder = SolverHistoryRecorder(enabled=history, path=history_path,
                                      line_search_path=line_search_history_path, verbose=verbose,
-                                     solver="gauss_newton_operator")
+                                     solver=_solver_name)
     with prof.span("solve.setup"):
         linear_problem = OperatorLinearizationProblem(
             problem,
@@ -117,6 +121,8 @@ def solve_gauss_newton_operator(
         req = linear_problem.required_list(eval_required)
         eval_required = req
         r_init = np.asarray(linear_problem.eval(required=eval_required), dtype=float).reshape(-1)
+        _vector(r_init, r_init.size, "residual")
+        _vector(linear_problem.get_point(), n_total, "point")
         initial_cost = float(r_init @ r_init)
 
     inner_solves: list[dict[str, Any]] = []
@@ -125,13 +131,16 @@ def solve_gauss_newton_operator(
     last_recorded_iteration = -1
     current_damping = float(damping)
     current_damping_floor = 0.0
-    pending_linearization: tuple[Array, Any] | None = None
+    pending_linearization: tuple[Array, Any] | None = (
+        r_init, JacobianProducts(linear_problem.model, tuple(req), r_init.size)
+    )
     search_summary: dict[str, Any] = {
         "line_search_trials": 0, "step_scale": None, "line_search_status": "disabled",
     }
 
-    def _point_fields(r: Array, J: Any) -> dict[str, Any]:
-        jt_r = np.asarray(J.T @ r, dtype=float).reshape(-1)
+    def _point_fields(r: Array, J: Any, jt_r: Array | None = None) -> dict[str, Any]:
+        if jt_r is None:
+            jt_r = np.asarray(J.T @ r, dtype=float).reshape(-1)
         fields: dict[str, Any] = {
             "objective": float(r @ r),
             "residual_norm": float(np.linalg.norm(r)),
@@ -144,6 +153,8 @@ def solve_gauss_newton_operator(
 
     def _damping_floor(J: Any) -> float:
         """Return a scale-aware numerical lower bound for LM regularization."""
+        if _damping_floor_fn is not None:
+            return float(_damping_floor_fn(J))
         with np.errstate(over="ignore", invalid="ignore"):
             diagonal = J.column_squared_norms()
         max_diagonal = float(np.max(diagonal, initial=0.0))
@@ -155,7 +166,10 @@ def solve_gauss_newton_operator(
             )
         return floor
 
-    def _record_point(k: int, r: Array, J: Any, step_norm: float) -> None:
+    def _record_point(
+        k: int, r: Array, J: Any, step_norm: float,
+        fields: dict[str, Any] | None = None,
+    ) -> None:
         nonlocal last_recorded_iteration
         if recorder.active and k > last_recorded_iteration:
             metadata = {} if k else {
@@ -176,7 +190,8 @@ def solve_gauss_newton_operator(
             }
             recorder.emit(
                 "initial" if k == 0 else "iteration_end", k,
-                **_point_fields(r, J), step_norm=None if k == 0 else step_norm,
+                **(_point_fields(r, J) if fields is None else fields),
+                step_norm=None if k == 0 else step_norm,
                 **metadata,
                 **(search_summary if k else {}),
                 damping=current_damping,
@@ -222,12 +237,16 @@ def solve_gauss_newton_operator(
                     if final_linearization is None else final_linearization
                 )
                 r_final = np.asarray(r_final, dtype=float).reshape(-1)
-                current_damping_floor = _damping_floor(J_final)
+                final_gradient = np.asarray(J_final.T @ r_final, dtype=float).reshape(-1)
+                final_stationary = bool(np.all(np.isfinite(final_gradient)) and
+                    np.max(np.abs(final_gradient), initial=0.0) <= tol_grad)
+                if not final_stationary:
+                    current_damping_floor = _damping_floor(J_final)
                 current_damping = max(current_damping, current_damping_floor)
-                fields = _point_fields(r_final, J_final)
+                fields = _point_fields(r_final, J_final, final_gradient)
                 cost = fields["objective"]
                 rnorm_local = fields["residual_norm"]
-                _record_point(iters, r_final, J_final, dxnorm_local)
+                _record_point(iters, r_final, J_final, dxnorm_local, fields)
                 recorder.emit("final", iters, **fields, step_norm=dxnorm_local,
                               damping=current_damping, damping_min=current_damping_floor,
                               status=status, reason=reason or status, message=message)
@@ -244,7 +263,7 @@ def solve_gauss_newton_operator(
             ),
             timing=prof.snapshot(),
             meta={
-                "solver": "gauss_newton_operator",
+                "solver": _solver_name,
                 "inner_solves": inner_solves,
                 "x0": x0_start.copy(),
             },
@@ -258,8 +277,11 @@ def solve_gauss_newton_operator(
 
     def _direction(r: Array, J: Any, damp: float) -> Array:
         with prof.span("solve.iter.step"):
-            dx, info = cgls_step(J, r, damp, tolerance=inner_tol,
-                                 max_iters=inner_max_iters)
+            if _step_solver is None:
+                dx, info = cgls_step(J, r, damp, tolerance=inner_tol,
+                                     max_iters=inner_max_iters)
+            else:
+                dx, info = _step_solver(r, J, damp)
             inner_solves.append(info)
             recorder.emit("linear_solve", k, **info, damping=damp)
             return dx
@@ -271,9 +293,6 @@ def solve_gauss_newton_operator(
             pending_linearization = None
         rnorm = float(np.linalg.norm(r_all))
         jt_r = np.asarray(J_all.T @ r_all, dtype=float).reshape(-1)
-        current_damping_floor = _damping_floor(J_all)
-        current_damping = max(current_damping, current_damping_floor)
-        _record_point(k, r_all, J_all, dxnorm)
 
         if _stationary(jt_r):
             _emit_iteration(k, rnorm, 0.0, jt_r)
@@ -287,6 +306,11 @@ def solve_gauss_newton_operator(
                 reason="residual_tolerance" if rnorm < tol_r else "gradient_tolerance",
                 final_linearization=(r_all, J_all),
             )
+
+        current_damping_floor = _damping_floor(J_all)
+        current_damping = max(current_damping, current_damping_floor)
+        if recorder.active:
+            _record_point(k, r_all, J_all, dxnorm, _point_fields(r_all, J_all, jt_r))
 
         cost_cur = float(r_all @ r_all)
         # Damped CGLS uses only Jv and J.T v.
@@ -354,7 +378,7 @@ def solve_gauss_newton_operator(
                                           accepted=False, reason="evaluation_error")
                             linear_problem.set_point(x_cur)
                             recorder.emit("iteration_failed", k + 1,
-                                          **_point_fields(r_all, J_all), step_norm=0.0,
+                                          **_point_fields(r_all, J_all, jt_r), step_norm=0.0,
                                           line_search_trials=total_trials, step_scale=None,
                                           line_search_status="evaluation_error", **settings)
                             raise
@@ -413,7 +437,9 @@ def solve_gauss_newton_operator(
                             best_x = x_trial.copy()
                             accepted = True
                             search_reason = "accepted"
-                            pending_linearization = trial_linearization
+                            pending_linearization = trial_linearization or (
+                                r_trial, JacobianProducts(linear_problem.model, tuple(req), r_trial.size)
+                            )
                             break
                         if (np.isfinite(cost_trial) and trial_step_norm <= tol_dx
                                 and abs(reduction) <= noise_floor):
@@ -492,7 +518,7 @@ def solve_gauss_newton_operator(
             }
             recorder.emit("line_search_retry", k + 1, **retry_fields)
             recorder.emit("iteration_retry", k + 1,
-                          **_point_fields(r_all, J_all), step_norm=0.0, **retry_fields)
+                          **_point_fields(r_all, J_all, jt_r), step_norm=0.0, **retry_fields)
             if retry_reason in {"increase_damping", "decrease_damping"}:
                 dx = _direction(r_all, J_all, current_damping)
 
@@ -508,7 +534,7 @@ def solve_gauss_newton_operator(
 
         if not accepted:
             recorder.emit("iteration_failed", k + 1,
-                          **_point_fields(r_all, J_all), step_norm=0.0, **search_summary)
+                          **_point_fields(r_all, J_all, jt_r), step_norm=0.0, **search_summary)
             return _outcome(
                 status="converged" if stationary else "stalled",
                 iters=k,

@@ -42,7 +42,8 @@ class Nonlinear(DiagonalProblem):
 
 
 def run(model, **options):
-    return solve(model, solver='gauss_newton_krylov', options={'verbose':False, **options})
+    return solve(model, solver='gauss_newton_krylov',
+                 options={'verbose': False, 'globalization': 'trust_region', **options})
 
 
 @pytest.mark.parametrize('n', [1, 4, 10])
@@ -98,7 +99,7 @@ def test_nonlinear_rejection_history_and_state_restoration(tmp_path):
     path=tmp_path/'states.jsonl'
     callbacks=[]
     out=solve_gauss_newton_krylov(model,history_vectors=True,history_path=path,verbose=False,
-        on_iter=lambda k,r,dx,g:callbacks.append((k,g.copy())))
+        globalization='trust_region', on_iter=lambda k,r,dx,g:callbacks.append((k,g.copy())))
     assert out.converged
     assert any(not e['accepted'] for e in out.trial_history)
     assert out.line_search_history==[]
@@ -137,8 +138,7 @@ def test_nonfinite_trials_are_rejected_and_recover():
 @pytest.mark.parametrize('options',[{'inner_max_iters':0},{'max_iters':1.5},
     {'forcing_min':0},{'forcing_max':1},{'initial_radius':-1},{'max_radius':0},
     {'preconditioner_probes':0},{'preconditioner':'bad'},{'preconditioner_floor':0},
-    {'preconditioner_max_size':-1},{'seed':-1},{'acceptance':.25},{'tol_grad':np.nan},
-    {'damping':1.},{'line_search':True}])
+    {'preconditioner_max_size':-1},{'seed':-1},{'acceptance':.25},{'tol_grad':np.nan}])
 def test_invalid_options_checked_before_x0_change(options):
     model=Nonlinear(1.)
     with pytest.raises(ValueError):
@@ -223,3 +223,25 @@ def test_preconditioner_size_cap_avoids_provider_allocation():
     model=DiagonalProblem(20)
     model.linear_residual_gram=lambda **kw: (_ for _ in ()).throw(AssertionError('size cap ignored'))
     assert run(model,preconditioner_max_size=5).converged
+
+
+def test_default_line_search_matches_dense_gauss_newton():
+    model = Nonlinear()
+    dense = Nonlinear()
+    dense.linearize = lambda **kw: (dense.eval(), np.diag(2*dense.x))
+    baseline = solve(dense, solver='gauss_newton', options={'verbose': False})
+    out = solve(model, solver='gauss_newton_krylov', options={'verbose': False})
+    assert out.converged and out.iterations == baseline.iterations
+    np.testing.assert_allclose(out.solution, baseline.solution, atol=1e-10)
+    assert out.line_search_history and not out.trial_history
+    assert out.meta['solver'] == 'gauss_newton_krylov'
+
+
+def test_default_line_search_has_bounded_preconditioner_products():
+    model = DiagonalProblem(2000)
+    out = solve(model, solver='gauss_newton_krylov', options={
+        'verbose': False, 'max_iters': 1, 'preconditioner_probes': 4,
+        'inner_max_iters': 2,
+    })
+    assert out.stats.objective < 1e-12 * out.stats.initial_objective
+    assert model.calls[0] < 10 and model.calls[1] < 15

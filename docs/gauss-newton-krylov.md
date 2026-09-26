@@ -1,7 +1,10 @@
 # Krylov Gauss–Newton
 
-`gauss_newton_krylov` is a separate NumPy solver designed for residual JVP/VJP
-products. Existing Gauss–Newton and CGLS operator solvers are unchanged.
+`gauss_newton_krylov` follows the same outer algorithm as `gauss_newton`:
+adaptive damping, Armijo backtracking, retry handling, roundoff-aware
+acceptance, and the `tol_grad` convergence check. It replaces only the dense
+linear least-squares solve with a diagonally scaled CGLS iteration using JVP
+and VJP products.
 
 ```python
 from rei import solve
@@ -14,75 +17,42 @@ out = solve(runtime, solver="gauss_newton_krylov", options={
 })
 ```
 
-Each outer trial approximately minimizes `||r + J h||²` inside a Euclidean
-trust region. Preconditioned Steihaug CG applies `J.T @ (J @ p)` through
-products, stops on the trust boundary or its residual tolerance, and permits
-inexact steps at the iteration limit. The forcing tolerance tightens as the
-outer gradient decreases. Actual versus predicted reduction controls acceptance
-and the radius. Near floating-point objective resolution, an independently
-computed gradient must converge or decrease by at least a factor of two before
-a trial is accepted. Rejected trials and evaluation exceptions restore the
-accepted point.
+The scale is estimated from the diagonal of an available affine-residual Gram
+matrix or from a fixed number of Rademacher VJP probes. Affine curvature is
+constant and reused; probe estimates refresh every `preconditioner_refresh`
+linearizations (default 5). It changes the coordinates used by CGLS, not the damped least-squares
+problem being solved. The numerical damping floor uses the corresponding
+diagonal scale estimate, avoiding an exact column scan. Inner solves report
+their convergence status; when `inner_max_iters` is reached, the approximate
+step is still passed to the common outer line search.
 
-There is no damping-floor column scan. Convergence means only
-`max(abs(J.T @ r)) <= tol_grad`; a tiny radius or unrepresentable step reports
-`stalled`, never success. `max_iters` counts all trials, including rejections.
+For comparison or compatibility with earlier behavior, set
+`globalization="trust_region"` to use the previous Steihaug PCG trust-region
+algorithm. Its `initial_radius`, `max_radius`, `acceptance`, `forcing_min`, and
+`forcing_max` options apply only in that mode.
 
-## Preconditioning
+## Options
 
-- `auto` (default): use constant affine-residual curvature when available and
-  within the size budget; otherwise estimate a diagonal with VJP probes.
-- `linear`: require the affine-residual preconditioner.
-- `diagonal`: average `(J.T @ w)**2` for independent Rademacher residual vectors.
-- `identity`: no preconditioning or probes.
-
-The affine path recognizes built-in variable/trajectory expressions, constants,
-subtraction, stacking, components and time differences with constant built-in
-weights. It excludes state expressions, hinges and robust costs. DOC velocity
-and acceleration penalties therefore supply curvature without differentiating
-dynamics. Nullspace reduction projects this curvature into reduced coordinates.
-It builds dense **affine-only** derivative blocks and a Gram matrix, then caches
-its regularized eigendecomposition. This path is not entirely matrix-free;
-`preconditioner_max_size=512` bounds the variable dimension in both the full and
-reduced runtime. Larger problems fall back to the diagonal estimate. The
-complete nonlinear Jacobian and its normal matrix are never requested by the
-solver. Expression-level fallback derivatives can still be dense if an
-expression has no product implementation.
-
-The diagonal estimate is only a preconditioner, not a certified norm bound or
-convergence test. Its default eight probes do not grow with variable count.
-`seed=0` makes them reproducible. Weak affine curvature or poor diagonal
-estimates can require many products; speedups are problem dependent.
-
-## Options and output
+All `gauss_newton` options are supported, including damping, tolerances,
+line-search controls, history output and callbacks. Krylov-specific options:
 
 | Option | Default | Meaning |
 |---|---:|---|
-| `max_iters` | 200 | All outer trials |
-| `tol_grad` | 1e-8 | Infinity norm of `J.T r` |
-| `inner_max_iters` | 50 | Maximum CG steps per trial |
-| `forcing_min`, `forcing_max` | 1e-4, 0.1 | Relative inner residual tolerance range |
-| `initial_radius` | `None` | Automatic scale from preconditioned gradient |
-| `max_radius` | 1e8 | Radius upper bound |
-| `acceptance` | 0.1 | Minimum gain ratio away from roundoff |
-| `preconditioner_probes` | 8 | VJP probes per diagonal estimate |
-| `preconditioner_max_size` | 512 | Affine Gram variable budget |
-| `preconditioner_floor` | 1e-10 | Relative eigenvalue/diagonal floor |
-| `preconditioner_refresh` | 5 | Accepted steps between diagonal refreshes |
+| `inner_tol` | 1e-10 | Relative scaled normal-residual tolerance for CGLS |
+| `inner_max_iters` | `None` | Maximum CGLS iterations; defaults to `max(20, 2*n)` |
+| `preconditioner` | `auto` | `auto`, `linear`, `diagonal`, or `identity` |
+| `preconditioner_probes` | 8 | VJP probes for the diagonal estimate |
+| `preconditioner_max_size` | 512 | Variable dimension limit for affine Gram matrices |
+| `preconditioner_floor` | 1e-10 | Relative floor for small diagonal entries |
+| `preconditioner_refresh` | 5 | Linearizations between VJP estimate refreshes |
+| `seed` | 0 | Seed for reproducible diagonal probes |
+| `globalization` | `line_search` | `line_search` or legacy `trust_region` |
 
-The existing `x0`, `required`, `weighted`, `term_indices`, `on_iter`, `profiler`,
-`history`, `history_vectors`, `history_path` and `verbose` interfaces are
-supported. Generic models need point/state methods and `eval`, `jvp`, `vjp`;
-they need no `linearize` method. They may optionally provide a constant,
-positive-semidefinite `linear_residual_gram(max_size=...)` in their solver
-coordinates. Weighting and selection must already be reflected in that matrix.
-
-Use `trial_history_path` for trust-region trials. Its automatic filename is
-`<history stem>.trust_region_trials.jsonl`. `out.trial_history` contains rejected
-and accepted trials; `out.meta["inner_solves"]` contains CG diagnostics and
-`out.meta["preconditioner"]` records the selected preconditioner. Inner boundary
-and iteration-limit exits are explicitly distinguished from inner convergence.
-Old damping, line-search, `inner_tol` and `tol_dx` options are rejected.
+The affine Gram path may construct dense affine-only derivative blocks, but the
+complete nonlinear Jacobian and its normal matrix are never assembled.
+Expression-level fallback derivatives can still be dense if an expression
+does not implement products. Probe-based scaling is an estimate, so its
+effectiveness and runtime depend on the problem.
 
 See the [measured RoboKots DOC comparison](../developer/benchmarks/kots_doc_krylov.md).
 

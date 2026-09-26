@@ -56,13 +56,23 @@ class JacobianProducts:
                 if np.any(diagonal < 0):
                     raise ValueError("Jacobian column squared norms must be nonnegative.")
             else:
-                diagonal = np.empty(self.shape[1])
-                basis = np.zeros(self.shape[1])
-                for i in range(self.shape[1]):
-                    basis[i] = 1.
-                    column = self @ basis
-                    diagonal[i] = column @ column
-                    basis[i] = 0.
+                rows, columns = self.shape
+                if rows < columns:
+                    diagonal = np.zeros(columns)
+                    basis = np.zeros(rows)
+                    for i in range(rows):
+                        basis[i] = 1.
+                        row = self.T @ basis
+                        diagonal += row * row
+                        basis[i] = 0.
+                else:
+                    diagonal = np.empty(columns)
+                    basis = np.zeros(columns)
+                    for i in range(columns):
+                        basis[i] = 1.
+                        column = self @ basis
+                        diagonal[i] = column @ column
+                        basis[i] = 0.
             self._diagonal = diagonal.copy()
         return self._diagonal
 
@@ -116,7 +126,7 @@ class OperatorLinearizationProblem:
         return r, JacobianProducts(self.model, req, r.size)
 
 
-def cgls_step(J, r, damping, *, tolerance, max_iters):
+def cgls_step(J, r, damping, *, tolerance, max_iters, coordinate_scale=None):
     """Solve min ||J h+r||²+lambda||h||² with augmented CGLS.
 
     Keep the residual of both augmented blocks, avoiding J.T J formation.
@@ -125,10 +135,14 @@ def cgls_step(J, r, damping, *, tolerance, max_iters):
     n = J.shape[1]
     limit = max(20, 2 * n) if max_iters is None else int(max_iters)
     root = np.sqrt(damping)
-    h = np.zeros(n)
+    scale = (np.ones(n) if coordinate_scale is None else
+             _vector(coordinate_scale, n, "CGLS coordinate scale"))
+    if np.any(scale <= 0):
+        raise ValueError("CGLS coordinate scale must be strictly positive.")
+    y = np.zeros(n)
     data_residual = -np.asarray(r, dtype=float).copy()
     regularization_residual = np.zeros(n)
-    s = J.T @ data_residual
+    s = scale * (J.T @ data_residual)
     initial = float(np.linalg.norm(s))
     threshold = tolerance * initial
     p = s.copy()
@@ -139,21 +153,22 @@ def cgls_step(J, r, damping, *, tolerance, max_iters):
         if initial == 0:
             iteration = 0
             break
-        q = J @ p
-        t = root * p
+        q = J @ (scale * p)
+        t = root * scale * p
         denominator = float(q @ q + t @ t)
         if not np.isfinite(denominator) or denominator <= 0 or not np.isfinite(gamma):
             raise ValueError("CGLS breakdown: non-finite or nonpositive curvature; rescale the problem.")
         alpha = gamma / denominator
-        h += alpha * p
+        y += alpha * p
         data_residual -= alpha * q
         regularization_residual -= alpha * t
-        s = J.T @ data_residual + root * regularization_residual
+        s = scale * (J.T @ data_residual + root * regularization_residual)
         new_gamma = float(s @ s)
         if np.sqrt(new_gamma) <= threshold or iteration == limit:
+            h = scale * y
             data_residual = -(r + J @ h)
             regularization_residual = -root * h
-            s = J.T @ data_residual + root * regularization_residual
+            s = scale * (J.T @ data_residual + root * regularization_residual)
             new_gamma = float(s @ s)
             if np.sqrt(new_gamma) <= threshold:
                 status = "converged"
@@ -163,6 +178,7 @@ def cgls_step(J, r, damping, *, tolerance, max_iters):
         else:
             p = s + (new_gamma / gamma) * p
         gamma = new_gamma
+    h = scale * y
     _vector(h, n, "CGLS step")
     _vector(s, n, "CGLS normal residual")
     norm = float(np.linalg.norm(s))
