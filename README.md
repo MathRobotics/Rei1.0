@@ -629,7 +629,7 @@ cached map generation against the scalar recurrence.
 - `"lm-ls"`: LM directions with Armijo line search; gradient-only convergence
 - `"gauss_newton"`: previous adaptive Gauss-Newton solver (preserved)
 - `"gauss_newton_operator"`: JVP/VJP-based Gauss-Newton with damped CGLS (NumPy only)
-- `"gauss_newton_krylov"`: JVP/VJP GN using the same adaptive damping and line search as `gauss_newton`, with a diagonally scaled CGLS step
+- `"gauss_newton_krylov"`: JVP/VJP GN using the same adaptive damping and line search as `gauss_newton`, with preconditioned CGLS and optional adaptive inner accuracy
 - `"scipy_minimize"`: requires `scipy`
 - `"cyipopt"`: requires `cyipopt`
 - `"liteopt"`: requires `liteopt`
@@ -667,7 +667,7 @@ The Gauss–Newton variants serve different purposes:
 |---|---|---|---|
 | `gauss_newton` | Dense Jacobian and linear solve | Adaptive damping and line search | Existing baseline |
 | `gauss_newton_operator` | JVP/VJP with damped CGLS | Existing GN damping and line search | [Options and limits](docs/gauss-newton-operator.md) |
-| `gauss_newton_krylov` | JVP/VJP with diagonally scaled CGLS | Same adaptive damping and line search as `gauss_newton` | [Options and limits](docs/gauss-newton-krylov.md) |
+| `gauss_newton_krylov` | JVP/VJP with preconditioned CGLS | Same adaptive damping and line search as `gauss_newton` | [Options and limits](docs/gauss-newton-krylov.md) |
 
 Both product-based variants support initial points, residual weighting, term
 selection, nullspace reduction, callbacks and JSONL histories. Generic models
@@ -676,10 +676,12 @@ Expression products fall back to local derivative blocks where necessary, so
 not every expression is fully matrix-free.
 
 The operator CGLS variant retains an exact damping-floor column scan. Krylov
-uses affine-residual diagonal curvature when available, otherwise a fixed
-number of VJP probes every `preconditioner_refresh` linearizations, both to
-scale its CGLS coordinates and estimate the damping floor. The optional affine Gram is limited by `preconditioner_max_size`;
-only its diagonal is used for scaling. Inner diagnostics are in
+uses full affine-residual curvature when available, otherwise a fixed number
+of VJP probes every `preconditioner_refresh` linearizations for diagonal
+preconditioning. The optional affine Gram is limited by `preconditioner_max_size`;
+its eigendecomposition is cached. The default retains fixed inner accuracy;
+`inner_tol=None` opts into adaptive accuracy with an initial 50-step budget
+that grows only after limit exits. Inner diagnostics are in
 `out.meta["inner_solves"]`. Use `line_search_history_path` for line-search
 trials and `trial_history_path` with the legacy trust-region globalization.
 
