@@ -134,6 +134,7 @@ class NLSRuntime:
     problem: NLSProblem
     ctx: RuntimeContext
     required: list[StateKey] = field(default_factory=list)
+    solver_config: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.required = _dedupe_required(self.required)

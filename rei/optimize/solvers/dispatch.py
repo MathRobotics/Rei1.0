@@ -1065,7 +1065,7 @@ def solve_liteopt_gd(
 def solve(
     problem: Any,
     *,
-    solver: str = "levenberg_marquardt",
+    solver: str | None = None,
     x0: Array | Any = None,
     required: Iterable[StateKey] | None = None,
     on_iter: IterCallback | None = None,
@@ -1077,6 +1077,9 @@ def solve(
     Returns:
       SolveOutcome(solution, stats, timing, meta)
 
+    Compiled TOML/DSL solver defaults are used when solver is omitted.
+    Explicit options override configured options by key. Selecting a different
+    solver discards configured options. With no configuration, the default is LM.
     Solver parameters are provided via `options`.
     `x0` may be passed directly or as `options["x0"]` (but not both).
 
@@ -1128,16 +1131,24 @@ def solve(
       (unknown top-level keys are forwarded to the selected liteopt backend API)
     """
 
-    key = str(solver).strip().lower()
+    from ..solver_config import normalize_solver_config
+
+    raw_config = getattr(problem, "solver_config", None)
+    config = normalize_solver_config(raw_config) if raw_config else {}
+    selected = solver if solver is not None else config.get("name", "levenberg_marquardt")
+    key = str(selected).strip().lower()
     if key not in _SOLVER_REI_OPTION_KEYS:
         raise ValueError(
             "Unknown solver. Use one of: "
             "'levenberg_marquardt', 'lm-ls', 'gauss_newton', 'gauss_newton_operator', 'gauss_newton_krylov', 'scipy_minimize', 'cyipopt', 'liteopt'. "
             "Solver aliases are not supported. "
-            f"Got solver={solver!r}."
+            f"Got solver={selected!r}."
         )
 
-    opts = _merge_options(options)
+    # A different explicit solver starts with its own defaults; do not leak
+    # incompatible TOML options such as Krylov preconditioning into LM.
+    configured_options = config.get("options") if key == config.get("name") else None
+    opts = _merge_options(configured_options, options)
     if x0 is not None and "x0" in opts:
         raise ValueError("solve: pass x0 either as keyword argument or options['x0'], not both.")
     x0_override = opts.get("x0", x0)

@@ -164,9 +164,14 @@ def compile_nls_problem(
 
     problem, time = build_nls_problem(dsl, expr_register=expr_register,
                                     trajectory_maps=trajectory_maps, derivative_wrt=derivative_wrt)
+    from .solver_config import normalize_solver_config
+
+    config = normalize_solver_config(dsl.get("solver"))
     cache = StateCache(build_state=build_state)
     required = collect_required_state_keys(problem)
-    return NLSRuntime.from_problem(problem, state=cache, time=time, required=required)
+    runtime = NLSRuntime.from_problem(problem, state=cache, time=time, required=required)
+    runtime.solver_config = config
+    return runtime
 
 
 def compile_nls_problem_spec(

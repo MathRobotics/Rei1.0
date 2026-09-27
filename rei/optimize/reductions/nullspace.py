@@ -88,6 +88,10 @@ class NullspaceReducedRuntime:
         self._sync_full_from_reduced()
 
     @property
+    def solver_config(self):
+        return self.full_runtime.solver_config
+
+    @property
     def pack(self) -> VariablePack:
         return self._pack
 

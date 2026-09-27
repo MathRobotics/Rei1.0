@@ -29,6 +29,10 @@ class NLSRuntimeLinearProblem:
             )
 
     @property
+    def solver_config(self):
+        return getattr(self.runtime, "solver_config", {})
+
+    @property
     def n_total(self) -> int:
         return runtime_n_total(self.runtime, adapter_name="NLSRuntimeLinearProblem")
 

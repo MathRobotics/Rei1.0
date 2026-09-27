@@ -3,6 +3,58 @@
 `rei` の設定は TOML または同じ構造の Python `dict` で書けます。
 通常は簡潔な Problem Spec を使います。後半では、その変換先となる低レベル DSL を説明します。
 
+## ソルバーの指定
+
+TOMLのルートにソルバー名とオプションを指定できます。
+
+```toml
+[solver]
+name = "gauss_newton_krylov"
+
+[solver.options]
+preconditioner = "normal"
+max_iters = 200
+tol_grad = 1e-8
+verbose = true
+```
+
+コンパイル後はソルバーをPython側で指定せずに実行します。
+
+```python
+from rei import compile_nls_problem_spec_toml, solve
+
+runtime = compile_nls_problem_spec_toml("problem.toml", build_state=build_state)
+result = solve(runtime)
+```
+
+軌道バックエンドでも `load_problem_spec_toml()` → compile →
+`solve(compiled.runtime)` の順で設定を引き継ぎます。
+等式制約削減後の `solve(reduction.runtime)` でも同じ設定を使います。
+低レベルDSLのルートにも同じ `solver` テーブルを指定できます。
+
+優先順位は次のとおりです。
+
+- ソルバー名：`solve(..., solver=...)` → TOML → `levenberg_marquardt`。
+- 同じソルバーのオプション：Pythonの `options` がTOMLをキー単位で上書きします。
+- 別のソルバーをPythonで指定すると、TOMLのオプションは引き継ぎません。
+  例えばKrylov用の `preconditioner` をLMへ渡すことを防ぎます。
+- 設定はruntimeに保持され、呼び出し時の上書きでは変更されません。
+- `solver.options` のキーは `solve(..., options=...)` と共通です。
+  不明なソルバー名や組み込みソルバーで非対応のオプションは実行時にエラーになります。
+
+```python
+# TOMLのソルバーと設定を使い、反復数だけ変更
+result = solve(runtime, options={"max_iters": 50})
+
+# ソルバーを切り替え、そのソルバーの既定値と明示オプションを使う
+result = solve(runtime, solver="levenberg_marquardt", options={"verbose": False})
+```
+
+既存のスクリプトが `solver=args.solver` を常に渡す場合は、その値が優先されます。
+TOMLへ選択を委ねる場合、CLI引数の既定値を `None` にするか、`solver` 引数を省略してください。
+CLIオプションも、ユーザーが明示した値だけを `options` に渡すとTOML設定を保持できます。
+設定はこのTOMLファイルに記述します。パッケージ設定用の `pyproject.toml` ではありません。
+
 ## Problem Spec の書き方
 
 最適化変数ごとにテーブルを作り、初期値を指定します。

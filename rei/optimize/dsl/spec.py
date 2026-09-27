@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ...core.mapping import mapping_as_dict
+from ..solver_config import normalize_solver_config
 from .spec_reserved import resolve_opt_vals, resolve_quantity
 
 
@@ -41,6 +42,8 @@ def problem_spec_to_dsl(spec: Mapping[str, Any]) -> dict[str, Any]:
 
     spec_dict = mapping_as_dict(spec, where="spec")
     dsl: dict[str, Any] = {}
+    if "solver" in spec_dict:
+        dsl["solver"] = normalize_solver_config(spec_dict["solver"])
 
     for key in ("time", "trajectory", "vision"):
         value = spec_dict.get(key, None)
