@@ -364,6 +364,9 @@ def solve_gauss_newton_krylov(
     tolerance tightens from forcing_max toward forcing_min as the gradient
     decreases. A numerical inner_tol explicitly selects fixed accuracy.
     ``globalization='trust_region'`` retains the previous PCG solver.
+    ``preconditioner='normal'`` explicitly builds a small dense normal matrix
+    using n JVP/VJP pairs at each point, bounded by preconditioner_max_size.
+    It preserves the auto mode's damping floor and the inner accuracy.
     """
     if globalization == 'trust_region':
         return _solve_gauss_newton_krylov_trust_region(
@@ -386,8 +389,8 @@ def solve_gauss_newton_krylov(
     if not (np.isfinite(forcing_min) and np.isfinite(forcing_max) and
             0 < forcing_min <= forcing_max < 1):
         raise ValueError('Require 0 < forcing_min <= forcing_max < 1.')
-    if preconditioner not in ('auto', 'linear', 'diagonal', 'identity'):
-        raise ValueError('preconditioner must be auto, linear, diagonal or identity.')
+    if preconditioner not in ('auto', 'linear', 'diagonal', 'identity', 'normal'):
+        raise ValueError('preconditioner must be auto, linear, diagonal, identity or normal.')
     if not np.isfinite(preconditioner_probes) or int(preconditioner_probes) != preconditioner_probes or preconditioner_probes <= 0:
         raise ValueError('preconditioner_probes must be a positive integer.')
     if not np.isfinite(preconditioner_floor) or not 0 < preconditioner_floor <= 1:
@@ -408,6 +411,7 @@ def solve_gauss_newton_krylov(
     initial_gradient_norm: float | None = None
     adaptive_budget = inner_tol is None and inner_max_iters is None
     inner_limit = 50 if adaptive_budget else inner_max_iters
+    normal_cache = None
 
     def estimate(J):
         nonlocal shared_estimate, estimated_linearizations
@@ -426,7 +430,7 @@ def solve_gauss_newton_krylov(
         n = J.shape[1]
         diagonal = None
         kind = 'identity'
-        if preconditioner in ('auto', 'linear'):
+        if preconditioner in ('auto', 'linear', 'normal'):
             provider = getattr(J.model, 'linear_residual_gram', None)
             gram = (provider(max_size=int(preconditioner_max_size))
                     if callable(provider) and n <= preconditioner_max_size else None)
@@ -476,9 +480,45 @@ def solve_gauss_newton_krylov(
         cache[key] = (J, *shared_estimate)
         return shared_estimate
 
+    def normal_inverse_factory(J):
+        # Explicit small-problem option: store n*n curvature, never m*n J.
+        # Retain the auto mode's damping floor so only preconditioning changes.
+        nonlocal normal_cache
+        if normal_cache is not None:
+            cached, factory = normal_cache
+            if (cached.model is J.model and cached.required == J.required
+                    and np.array_equal(cached.point, J.point)):
+                return factory
+        n = J.shape[1]
+        if n > preconditioner_max_size:
+            raise ValueError('Normal preconditioner exceeds the size budget.')
+        gram = np.empty((n, n))
+        basis = np.zeros(n)
+        for column in range(n):
+            basis[column] = 1.
+            gram[:, column] = J.T @ (J @ basis)
+            basis[column] = 0.
+        if not np.all(np.isfinite(gram)):
+            raise ValueError('Normal preconditioner curvature must be finite.')
+        values, vectors = np.linalg.eigh((gram + gram.T) * .5)
+        largest = float(np.max(values, initial=0.))
+        if np.min(values, initial=0.) < -1e-10*largest:
+            raise ValueError('Normal preconditioner curvature must be positive semidefinite.')
+        if largest == 0:
+            factory = lambda damp: lambda v: v.copy()
+        else:
+            spectrum = np.maximum(values, preconditioner_floor*largest)
+            def factory(damp):
+                return lambda v: vectors @ ((vectors.T @ v) / (spectrum + damp))
+        normal_cache = (J, factory)
+        return factory
+
     def step_solver(r, J, damp, gradient):
         nonlocal initial_gradient_norm, inner_limit
         inverse_factory, _, kind = estimate(J)
+        if preconditioner == 'normal':
+            inverse_factory = normal_inverse_factory(J)
+            kind = 'normal'
         gradient_norm = float(np.linalg.norm(gradient))
         if initial_gradient_norm is None:
             initial_gradient_norm = gradient_norm

@@ -325,3 +325,54 @@ def test_linear_preconditioner_enforces_budget_without_allocating_gram():
         solve_gauss_newton_krylov(model, verbose=False, preconditioner='linear',
                                  preconditioner_max_size=1)
     assert model.gram_calls == 0
+
+
+def test_normal_preconditioner_handles_curvature_missing_from_affine_terms():
+    class Curved(DiagonalProblem):
+        def __init__(self):
+            super().__init__(24)
+            rng = np.random.default_rng(441)
+            q, _ = np.linalg.qr(rng.normal(size=(24, 24)))
+            self.A = np.logspace(0, 3, 24)[:, None] * q
+            self.target = rng.normal(size=24)
+        def eval(self, **kw):
+            return np.r_[self.x, self.A @ self.x + .1*np.sin(self.x) - self.target]
+        def jvp(self, v, **kw):
+            self.calls[0] += 1
+            return np.r_[v, self.A @ v + .1*np.cos(self.x)*v]
+        def vjp(self, w, **kw):
+            self.calls[1] += 1
+            return w[:24] + self.A.T @ w[24:] + .1*np.cos(self.x)*w[24:]
+        def linear_residual_gram(self, **kw):
+            return np.eye(24)
+    model = Curved()
+    J = np.vstack([np.eye(24), model.A + .1*np.eye(24)])
+    r = model.eval()
+    damping = .01
+    out = solve_gauss_newton_krylov(model, preconditioner='normal', max_iters=1,
+                                  damping=damping, line_search=False, verbose=False)
+    expected = np.linalg.lstsq(np.vstack([J, np.sqrt(damping)*np.eye(24)]),
+                              np.r_[-r, np.zeros(24)], rcond=None)[0]
+    np.testing.assert_allclose(out.solution, expected, atol=1e-9)
+    info = out.meta['inner_solves'][0]
+    assert info['status'] == 'converged' and info['iterations'] <= 3
+    assert info['preconditioner'] == 'normal'
+    assert model.calls[0] < 30
+    assert out.history[0]['damping'] == damping
+    with pytest.raises(ValueError, match='size budget'):
+        solve_gauss_newton_krylov(Curved(), preconditioner='normal',
+                                 preconditioner_max_size=1, verbose=False)
+
+
+def test_normal_preconditioner_reuses_curvature_on_damping_retries(monkeypatch):
+    original = np.linalg.eigh
+    builds = []
+    def counted(matrix):
+        builds.append(matrix.copy())
+        return original(matrix)
+    monkeypatch.setattr(np.linalg, 'eigh', counted)
+    out = solve_gauss_newton_krylov(Nonlinear(), preconditioner='normal',
+                                  max_iters=1, damping=.01, ls_min_step=1.,
+                                  ls_max_iters=1, ls_max_retries=2, verbose=False)
+    assert len(out.meta['inner_solves']) > 1
+    assert len(builds) == 1
