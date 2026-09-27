@@ -235,6 +235,7 @@ def test_default_line_search_matches_dense_gauss_newton():
     np.testing.assert_allclose(out.solution, baseline.solution, atol=1e-10)
     assert out.line_search_history and not out.trial_history
     assert out.meta['solver'] == 'gauss_newton_krylov'
+    assert all(info['tolerance'] == 1e-10 for info in out.meta['inner_solves'])
 
 
 def test_default_line_search_has_bounded_preconditioner_products():
@@ -245,3 +246,82 @@ def test_default_line_search_has_bounded_preconditioner_products():
     })
     assert out.stats.objective < 1e-12 * out.stats.initial_objective
     assert model.calls[0] < 10 and model.calls[1] < 15
+
+
+class CorrelatedProblem(DiagonalProblem):
+    """Affine curvature with rotated coordinates and a small nonlinear term."""
+
+    def __init__(self):
+        super().__init__(96)
+        rng = np.random.default_rng(93)
+        q, _ = np.linalg.qr(rng.normal(size=(96, 96)))
+        self.A = np.logspace(0., 2., 96)[:, None] * q
+        self.target = rng.normal(scale=.2, size=96)
+        self.gram_calls = 0
+
+    def eval(self, **kw):
+        return np.r_[self.A @ (self.x-self.target), .1*np.sin(self.x)]
+
+    def jvp(self, v, **kw):
+        return np.r_[self.A @ v, .1*np.cos(self.x)*v]
+
+    def vjp(self, w, **kw):
+        return self.A.T @ w[:96] + .1*np.cos(self.x)*w[96:]
+
+    def linear_residual_gram(self, **kw):
+        self.gram_calls += 1
+        return self.A.T @ self.A
+
+
+@pytest.mark.parametrize('inner_tol', [1e-10, None])
+def test_affine_correlations_are_preserved_at_fixed_and_adaptive_accuracy(inner_tol):
+    model = CorrelatedProblem()
+    out = solve_gauss_newton_krylov(model, verbose=False, tol_grad=1e-8, inner_tol=inner_tol)
+    assert out.converged
+    assert np.max(np.abs(model.vjp(model.eval()))) <= 1e-8
+    inner = out.meta['inner_solves']
+    # Diagonalizing this Gram used to exhaust 192 steps at every iteration.
+    assert sum(i['iterations'] for i in inner) < 20
+    assert model.gram_calls == 1
+    assert all(i['preconditioner'] == 'linear' for i in inner)
+    if inner_tol is None:
+        assert inner[0]['tolerance'] == pytest.approx(.1)
+        assert inner[-1]['tolerance'] < inner[0]['tolerance']
+    else:
+        assert all(i['tolerance'] == inner_tol for i in inner)
+    assert out.history[0]['settings']['inner_tol'] == inner_tol
+
+
+def test_auto_budget_expands_only_after_inner_limit_and_reaches_stationarity():
+    model = CorrelatedProblem()
+    out = solve_gauss_newton_krylov(model, verbose=False, tol_grad=1e-8,
+                                  preconditioner='diagonal', inner_tol=None)
+    assert out.converged
+    inner = out.meta['inner_solves']
+    assert inner[0]['max_iters'] == 50
+    assert any(i['max_iters'] > 50 for i in inner)
+    for previous, current in zip(inner, inner[1:]):
+        if current['max_iters'] > previous['max_iters']:
+            assert previous['status'] == 'max_iters'
+    assert all(i['max_iters'] <= 2*model.n_total for i in inner)
+    assert np.max(np.abs(model.vjp(model.eval()))) <= 1e-8
+
+
+def test_explicit_inner_accuracy_and_budget_are_preserved():
+    model = CorrelatedProblem()
+    out = solve_gauss_newton_krylov(model, verbose=False, max_iters=3,
+                                  preconditioner='diagonal', inner_tol=1e-9, inner_max_iters=2)
+    assert not out.converged
+    for info in out.meta['inner_solves']:
+        assert info['tolerance'] == 1e-9 and info['max_iters'] == 2
+        assert info['iterations'] <= 2
+        assert info['tolerance_mode'] == info['budget_mode'] == 'fixed'
+    assert out.stats.objective < out.stats.initial_objective
+
+
+def test_linear_preconditioner_enforces_budget_without_allocating_gram():
+    model = CorrelatedProblem()
+    with pytest.raises(ValueError, match='size budget'):
+        solve_gauss_newton_krylov(model, verbose=False, preconditioner='linear',
+                                 preconditioner_max_size=1)
+    assert model.gram_calls == 0

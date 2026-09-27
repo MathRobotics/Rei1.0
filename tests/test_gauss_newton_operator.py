@@ -94,6 +94,26 @@ def test_operator_only_solve_reaches_known_optimum():
     assert result.meta["inner_solves"]
 
 
+@pytest.mark.parametrize('damping', [0.01, 1.])
+def test_full_preconditioned_cgls_matches_dense_damped_step(damping):
+    rng = np.random.default_rng(63)
+    A = rng.normal(size=(20, 6))
+    b = rng.normal(size=20)
+    B = rng.normal(size=(6, 6))
+    M = B.T @ B + np.eye(6)
+    model = MatrixProblem(A, b)
+    J = JacobianProducts(model, [], 20)
+    h, info = cgls_step(J, -b, damping, tolerance=1e-10, max_iters=100,
+                        apply_inverse=lambda v: np.linalg.solve(M, v), gradient=-A.T @ b)
+    expected = np.linalg.lstsq(np.vstack([A, np.sqrt(damping)*np.eye(6)]),
+                               np.r_[b, np.zeros(6)], rcond=None)[0]
+    np.testing.assert_allclose(h, expected, atol=1e-9)
+    actual_normal = A.T @ (A @ h-b) + damping*h
+    assert info['status'] == 'converged'
+    assert np.linalg.norm(actual_normal) <= 1e-10*np.linalg.norm(A.T @ b)
+    assert info['normal_residual_norm'] == pytest.approx(np.linalg.norm(actual_normal), abs=1e-13)
+
+
 def test_accepted_residual_is_reused_for_next_linearization():
     model = MatrixProblem(np.diag([2., 3.]), [1., 1.])
     out = operator_solve(model, max_iters=1)
@@ -309,6 +329,20 @@ def test_direct_callback_local_blocks_and_custom_expression_fallback(monkeypatch
     result = operator_solve(runtime)
     assert result.converged
     np.testing.assert_allclose(result.solution, [0., 0.], atol=1e-8)
+
+
+def test_cgls_small_gradient_with_nonzero_residual():
+    # Repeatedly forming J.T @ (r + J h) loses the tiny normal residual
+    # through cancellation, even though this scalar system needs one step.
+    A = np.array([[1.], [-1.]])
+    r = np.array([1., 1. + 1e-8])
+    damping = .7
+    h, info = cgls_step(A, r, damping, tolerance=1e-10, max_iters=20)
+    expected = -(A.T @ r) / (2. + damping)
+    np.testing.assert_allclose(h, expected, rtol=1e-10, atol=0.)
+    assert info['status'] == 'converged'
+    assert info['iterations'] == 1
+    assert info['relative_normal_residual'] <= 1e-10
 
 
 def test_roundoff_acceptance_requires_and_makes_gradient_progress():

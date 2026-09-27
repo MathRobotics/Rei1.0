@@ -126,11 +126,16 @@ class OperatorLinearizationProblem:
         return r, JacobianProducts(self.model, req, r.size)
 
 
-def cgls_step(J, r, damping, *, tolerance, max_iters, coordinate_scale=None):
+def cgls_step(J, r, damping, *, tolerance, max_iters, coordinate_scale=None,
+              apply_inverse=None, gradient=None):
     """Solve min ||J h+r||²+lambda||h||² with augmented CGLS.
 
-    Keep the residual of both augmented blocks, avoiding J.T J formation.
-    Verify the true normal residual before declaring inner convergence.
+    Keep the correction residual of both augmented blocks, avoiding J.T J
+    formation. Separate J.T @ r from J.T @ (J h) to avoid repeatedly cancelling
+    large residual components near a nonzero-residual stationary point.
+    An optional SPD inverse preconditions the normal equations. The stopping
+    test uses the original (unscaled) normal residual, independently recomputed
+    before declaring convergence. ``gradient`` can reuse an existing J.T @ r.
     """
     n = J.shape[1]
     limit = max(20, 2 * n) if max_iters is None else int(max_iters)
@@ -139,46 +144,55 @@ def cgls_step(J, r, damping, *, tolerance, max_iters, coordinate_scale=None):
              _vector(coordinate_scale, n, "CGLS coordinate scale"))
     if np.any(scale <= 0):
         raise ValueError("CGLS coordinate scale must be strictly positive.")
-    y = np.zeros(n)
-    data_residual = -np.asarray(r, dtype=float).copy()
+    if coordinate_scale is not None and apply_inverse is not None:
+        raise ValueError("Pass either coordinate_scale or apply_inverse, not both.")
+
+    def precondition(v):
+        return (scale * (scale * v) if apply_inverse is None else
+                _vector(apply_inverse(v), n, "CGLS preconditioner output"))
+
+    h = np.zeros(n)
+    data_residual = np.zeros_like(r, dtype=float)
     regularization_residual = np.zeros(n)
-    s = scale * (J.T @ data_residual)
+    rhs = (-(J.T @ np.asarray(r, dtype=float)) if gradient is None else
+         -_vector(gradient, n, "CGLS initial gradient"))
+    s = rhs.copy()
     initial = float(np.linalg.norm(s))
     threshold = tolerance * initial
-    p = s.copy()
-    gamma = float(s @ s)
+    z = precondition(s)
+    p = z.copy()
+    gamma = float(s @ z)
     status = "converged" if initial == 0 else "max_iters"
     iteration = 0
     for iteration in range(1, limit + 1):
         if initial == 0:
             iteration = 0
             break
-        q = J @ (scale * p)
-        t = root * scale * p
+        q = J @ p
+        t = root * p
         denominator = float(q @ q + t @ t)
-        if not np.isfinite(denominator) or denominator <= 0 or not np.isfinite(gamma):
+        if not np.isfinite(denominator) or denominator <= 0 or not np.isfinite(gamma) or gamma <= 0:
             raise ValueError("CGLS breakdown: non-finite or nonpositive curvature; rescale the problem.")
         alpha = gamma / denominator
-        y += alpha * p
+        h += alpha * p
         data_residual -= alpha * q
         regularization_residual -= alpha * t
-        s = scale * (J.T @ data_residual + root * regularization_residual)
-        new_gamma = float(s @ s)
-        if np.sqrt(new_gamma) <= threshold or iteration == limit:
-            h = scale * y
-            data_residual = -(r + J @ h)
+        s = rhs + J.T @ data_residual + root * regularization_residual
+        checked = np.linalg.norm(s) <= threshold or iteration == limit
+        if checked:
+            data_residual = -(J @ h)
             regularization_residual = -root * h
-            s = scale * (J.T @ data_residual + root * regularization_residual)
-            new_gamma = float(s @ s)
-            if np.sqrt(new_gamma) <= threshold:
+            s = rhs + J.T @ data_residual + root * regularization_residual
+            if np.linalg.norm(s) <= threshold:
                 status = "converged"
                 break
-            # Restart after replacing the recursively updated residual.
-            p = s.copy()
-        else:
-            p = s + (new_gamma / gamma) * p
+        if iteration == limit:
+            break
+        z = precondition(s)
+        new_gamma = float(s @ z)
+        # Restart after replacing the recursively updated residual.
+        p = z.copy() if checked else z + (new_gamma / gamma) * p
         gamma = new_gamma
-    h = scale * y
     _vector(h, n, "CGLS step")
     _vector(s, n, "CGLS normal residual")
     norm = float(np.linalg.norm(s))

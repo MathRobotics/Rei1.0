@@ -1102,7 +1102,9 @@ def solve(
 
     gauss_newton_krylov:
       Same adaptive damping and Armijo line-search algorithm as gauss_newton;
-      the damped least-squares step uses diagonally scaled CGLS with JVP/VJP.
+      the damped least-squares step uses preconditioned CGLS with JVP/VJP.
+      inner_tol=1e-10 by default; None opts into adaptive accuracy and an initial
+      50-step budget that grows on limit exits. Numeric budgets are fixed caps.
       globalization="trust_region" selects the legacy PCG trust-region method.
 
     scipy_minimize:

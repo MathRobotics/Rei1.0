@@ -47,9 +47,10 @@ def solve_gauss_newton_operator(
     verbose: bool = True,
     on_iter: Callable[..., None] | None = None,
     profiler: Profiler | None = None,
-    _step_solver: Callable[[Array, Any, float], tuple[Array, dict[str, Any]]] | None = None,
+    _step_solver: Callable[[Array, Any, float, Array], tuple[Array, dict[str, Any]]] | None = None,
     _damping_floor_fn: Callable[[Any], float] | None = None,
     _solver_name: str = "gauss_newton_operator",
+    _solver_settings: dict[str, Any] | None = None,
 ) -> SolveOutcome:
     """Operator Gauss-Newton with the dense solver's globalization/history.
 
@@ -186,6 +187,7 @@ def solve_gauss_newton_operator(
                     "damping_decrease": damping_decrease,
                     "damping_min_factor": damping_min_factor,
                     "c_armijo": c_armijo,
+                    **(_solver_settings or {}),
                 },
             }
             recorder.emit(
@@ -275,13 +277,13 @@ def solve_gauss_newton_operator(
         return bool(np.all(np.isfinite(gradient))
                     and float(np.max(np.abs(gradient), initial=0.0)) <= tol_grad)
 
-    def _direction(r: Array, J: Any, damp: float) -> Array:
+    def _direction(r: Array, J: Any, damp: float, gradient: Array) -> Array:
         with prof.span("solve.iter.step"):
             if _step_solver is None:
                 dx, info = cgls_step(J, r, damp, tolerance=inner_tol,
-                                     max_iters=inner_max_iters)
+                                     max_iters=inner_max_iters, gradient=gradient)
             else:
-                dx, info = _step_solver(r, J, damp)
+                dx, info = _step_solver(r, J, damp, gradient)
             inner_solves.append(info)
             recorder.emit("linear_solve", k, **info, damping=damp)
             return dx
@@ -314,7 +316,7 @@ def solve_gauss_newton_operator(
 
         cost_cur = float(r_all @ r_all)
         # Damped CGLS uses only Jv and J.T v.
-        dx = _direction(r_all, J_all, current_damping)
+        dx = _direction(r_all, J_all, current_damping, jt_r)
         dxnorm = float(np.linalg.norm(dx))
 
         if not bool(line_search):
@@ -520,7 +522,7 @@ def solve_gauss_newton_operator(
             recorder.emit("iteration_retry", k + 1,
                           **_point_fields(r_all, J_all, jt_r), step_norm=0.0, **retry_fields)
             if retry_reason in {"increase_damping", "decrease_damping"}:
-                dx = _direction(r_all, J_all, current_damping)
+                dx = _direction(r_all, J_all, current_damping, jt_r)
 
         dxnorm = dxnorm_eff
         search_summary = {

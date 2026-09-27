@@ -1,4 +1,4 @@
-"""Inexact Gauss-Newton with a trust region and preconditioned truncated CG.
+"""Inexact Gauss-Newton with preconditioned products and adaptive accuracy.
 
 All nonlinear curvature products use JVP/VJP. No column-norm scan or normal
 matrix is needed. A small affine-residual Gram matrix may precondition DOC.
@@ -332,7 +332,7 @@ def solve_gauss_newton_krylov(
     required: Iterable[StateKey] | None = None, weighted: bool | None = None,
     term_indices: Iterable[int] | None = None,
     tol_r: float = 1e-10, tol_dx: float = 1e-12, tol_grad: float = 1e-10,
-    damping: float = 1e-8, inner_tol: float = 1e-10,
+    damping: float = 1e-8, inner_tol: float | None = 1e-10,
     inner_max_iters: int | None = None, line_search: bool = True,
     ls_beta: float = .5, ls_min_step: float = 1e-8, ls_max_iters: int = 12,
     ls_max_retries: int = 3, damping_increase: float = 10., damping_max: float = 1e12,
@@ -341,7 +341,7 @@ def solve_gauss_newton_krylov(
     preconditioner: str = 'auto', preconditioner_probes: int = 8,
     preconditioner_max_size: int = 512, preconditioner_floor: float = 1e-10,
     seed: int = 0,
-    # Legacy trust-region controls are used only with globalization="trust_region".
+    # Radius and acceptance controls apply only to the legacy trust-region mode.
     initial_radius: float | None = None, max_radius: float = 1e8,
     acceptance: float = .1, forcing_min: float = 1e-4, forcing_max: float = .1,
     preconditioner_refresh: int = 5,
@@ -352,11 +352,17 @@ def solve_gauss_newton_krylov(
     verbose: bool = True, on_iter: Callable[..., None] | None = None,
     profiler: Profiler | None = None,
 ) -> SolveOutcome:
-    """Gauss-Newton globalization with a diagonally scaled Krylov CGLS step.
+    """Gauss-Newton globalization with an inexact preconditioned CGLS step.
 
     The default uses the same damping, Armijo search, retry policy and
     convergence test as ``gauss_newton``. Only the linear least-squares step
-    differs: it uses JVP/VJP products and a probe-estimated right scaling.
+    differs: it uses JVP/VJP products, full affine or diagonal preconditioning,
+    with fixed accuracy by default. Setting inner_tol=None enables adaptive
+    accuracy and an initial budget of 50 inner iterations. This budget grows
+    only after a limit exit, up to max(50, 2*n); an explicit inner_max_iters is
+    a fixed cap. In adaptive mode the relative
+    tolerance tightens from forcing_max toward forcing_min as the gradient
+    decreases. A numerical inner_tol explicitly selects fixed accuracy.
     ``globalization='trust_region'`` retains the previous PCG solver.
     """
     if globalization == 'trust_region':
@@ -375,6 +381,11 @@ def solve_gauss_newton_krylov(
             verbose=verbose, on_iter=on_iter, profiler=profiler)
     if globalization != 'line_search':
         raise ValueError("globalization must be 'line_search' or 'trust_region'.")
+    if inner_tol is not None and (not np.isfinite(inner_tol) or not 0 < inner_tol < 1):
+        raise ValueError('inner_tol must be None or finite and in (0, 1).')
+    if not (np.isfinite(forcing_min) and np.isfinite(forcing_max) and
+            0 < forcing_min <= forcing_max < 1):
+        raise ValueError('Require 0 < forcing_min <= forcing_max < 1.')
     if preconditioner not in ('auto', 'linear', 'diagonal', 'identity'):
         raise ValueError('preconditioner must be auto, linear, diagonal or identity.')
     if not np.isfinite(preconditioner_probes) or int(preconditioner_probes) != preconditioner_probes or preconditioner_probes <= 0:
@@ -387,15 +398,16 @@ def solve_gauss_newton_krylov(
         raise ValueError('seed must be a nonnegative integer.')
     if not np.isfinite(preconditioner_refresh) or int(preconditioner_refresh) != preconditioner_refresh or preconditioner_refresh < 1:
         raise ValueError('preconditioner_refresh must be a positive integer.')
-    if globalization == 'line_search':
-        if initial_radius is not None or max_radius != 1e8 or acceptance != .1 or \
-                forcing_min != 1e-4 or forcing_max != .1:
-            raise ValueError('Trust-region options require globalization="trust_region".')
+    if initial_radius is not None or max_radius != 1e8 or acceptance != .1:
+        raise ValueError('Trust-region options require globalization="trust_region".')
 
     rng = np.random.default_rng(int(seed))
-    cache: dict[int, tuple[Any, np.ndarray, float, str]] = {}
-    shared_estimate: tuple[np.ndarray, float, str] | None = None
+    cache: dict[int, tuple[Any, Callable, float, str]] = {}
+    shared_estimate: tuple[Callable, float, str] | None = None
     estimated_linearizations = 0
+    initial_gradient_norm: float | None = None
+    adaptive_budget = inner_tol is None and inner_max_iters is None
+    inner_limit = 50 if adaptive_budget else inner_max_iters
 
     def estimate(J):
         nonlocal shared_estimate, estimated_linearizations
@@ -404,7 +416,7 @@ def solve_gauss_newton_krylov(
             return cache[key][1:]
         cache.clear()
         should_refresh = shared_estimate is None or (
-            shared_estimate[2] not in ('linear_diagonal', 'identity')
+            shared_estimate[2] not in ('linear', 'identity')
             and estimated_linearizations % int(preconditioner_refresh) == 0
         )
         estimated_linearizations += 1
@@ -414,17 +426,35 @@ def solve_gauss_newton_krylov(
         n = J.shape[1]
         diagonal = None
         kind = 'identity'
-        if preconditioner in ('auto', 'linear') and n <= preconditioner_max_size:
+        if preconditioner in ('auto', 'linear'):
             provider = getattr(J.model, 'linear_residual_gram', None)
-            gram = provider(max_size=int(preconditioner_max_size)) if callable(provider) else None
+            gram = (provider(max_size=int(preconditioner_max_size))
+                    if callable(provider) and n <= preconditioner_max_size else None)
             if gram is not None:
                 gram = np.asarray(gram, dtype=float)
                 if gram.shape != (n, n) or not np.all(np.isfinite(gram)):
                     raise ValueError('Linear residual Gram must be finite and n_total by n_total.')
-                diagonal = np.maximum(np.diag(gram), 0.)
-                kind = 'linear_diagonal'
-            elif preconditioner == 'linear':
-                raise ValueError('No affine-residual preconditioner within the size budget.')
+                magnitude = float(np.max(np.abs(gram), initial=0.))
+                if np.max(np.abs(gram-gram.T), initial=0.) > 1e-10*magnitude:
+                    raise ValueError('Linear residual Gram must be symmetric.')
+                eigenvalues, vectors = np.linalg.eigh((gram+gram.T)*.5)
+                largest = float(np.max(eigenvalues, initial=0.))
+                if np.min(eigenvalues, initial=0.) < -1e-10*largest:
+                    raise ValueError('Linear residual Gram must be positive semidefinite.')
+                if largest > 0:
+                    spectrum = np.maximum(eigenvalues, preconditioner_floor*largest)
+
+                    def inverse_factory(damp):
+                        denominator = spectrum + damp
+                        return lambda v: vectors @ ((vectors.T @ v) / denominator)
+
+                    floor = float(damping_min_factor * np.finfo(float).eps *
+                                  np.max(np.diag(gram), initial=0.))
+                    shared_estimate = (inverse_factory, floor, 'linear')
+                    cache[key] = (J, *shared_estimate)
+                    return shared_estimate
+            if preconditioner == 'linear':
+                raise ValueError('No nonzero affine-residual preconditioner within the size budget.')
         if diagonal is None and preconditioner != 'identity':
             diagonal = np.zeros(n)
             for _ in range(int(preconditioner_probes)):
@@ -433,24 +463,38 @@ def solve_gauss_newton_krylov(
                 diagonal += product * product / int(preconditioner_probes)
             kind = 'diagonal'
         if diagonal is None or not np.any(diagonal):
-            scale = np.ones(n)
+            inverse_factory = lambda damp: lambda v: v.copy()
             max_diagonal = 0.
         else:
             max_diagonal = float(np.max(diagonal, initial=0.))
             if not np.isfinite(max_diagonal):
                 raise ValueError('Preconditioner estimate overflow; rescale the problem.')
-            relative_diagonal = np.maximum(diagonal / max_diagonal, preconditioner_floor)
-            scale = 1. / np.sqrt(relative_diagonal)
+            bounded_diagonal = np.maximum(diagonal, preconditioner_floor*max_diagonal)
+            inverse_factory = lambda damp: lambda v: v / (bounded_diagonal + damp)
         floor = float(damping_min_factor * np.finfo(float).eps * max_diagonal)
-        shared_estimate = (scale, floor, kind)
+        shared_estimate = (inverse_factory, floor, kind)
         cache[key] = (J, *shared_estimate)
         return shared_estimate
 
-    def step_solver(r, J, damp):
-        scale, _, kind = estimate(J)
-        dx, info = cgls_step(J, r, damp, tolerance=inner_tol,
-                             max_iters=inner_max_iters, coordinate_scale=scale)
-        info['preconditioner'] = kind
+    def step_solver(r, J, damp, gradient):
+        nonlocal initial_gradient_norm, inner_limit
+        inverse_factory, _, kind = estimate(J)
+        gradient_norm = float(np.linalg.norm(gradient))
+        if initial_gradient_norm is None:
+            initial_gradient_norm = gradient_norm
+        eta = inner_tol
+        if eta is None:
+            ratio = min(1., gradient_norm / initial_gradient_norm) if initial_gradient_norm else 0.
+            eta = max(forcing_min, forcing_max * np.sqrt(ratio))
+        dx, info = cgls_step(J, r, damp, tolerance=eta,
+                             max_iters=inner_limit, apply_inverse=inverse_factory(damp),
+                             gradient=gradient)
+        info.update(preconditioner=kind,
+                    tolerance_mode='adaptive' if inner_tol is None else 'fixed',
+                    budget_mode=('adaptive' if adaptive_budget else
+                                 'dimension' if inner_max_iters is None else 'fixed'))
+        if adaptive_budget and info['status'] == 'max_iters':
+            inner_limit = min(max(50, 2*J.shape[1]), 2*inner_limit)
         return dx, info
 
     def damping_floor(J):
@@ -459,7 +503,8 @@ def solve_gauss_newton_krylov(
     return solve_gauss_newton_operator(
         problem, max_iters=max_iters, x0=x0, required=required, weighted=weighted,
         term_indices=term_indices, tol_r=tol_r, tol_dx=tol_dx, tol_grad=tol_grad,
-        damping=damping, inner_tol=inner_tol, inner_max_iters=inner_max_iters,
+        damping=damping, inner_tol=forcing_min if inner_tol is None else inner_tol,
+        inner_max_iters=inner_limit,
         line_search=line_search, ls_beta=ls_beta, ls_min_step=ls_min_step,
         ls_max_iters=ls_max_iters, ls_max_retries=ls_max_retries,
         damping_increase=damping_increase, damping_max=damping_max,
@@ -469,7 +514,15 @@ def solve_gauss_newton_krylov(
         line_search_history_path=line_search_history_path or trial_history_path,
         verbose=verbose, on_iter=on_iter, profiler=profiler,
         _step_solver=step_solver, _damping_floor_fn=damping_floor,
-        _solver_name='gauss_newton_krylov')
+        _solver_name='gauss_newton_krylov', _solver_settings={
+            'globalization': globalization, 'inner_tol': inner_tol,
+            'inner_max_iters': inner_max_iters,
+            'forcing_min': forcing_min, 'forcing_max': forcing_max,
+            'preconditioner': preconditioner, 'preconditioner_probes': int(preconditioner_probes),
+            'preconditioner_refresh': int(preconditioner_refresh),
+            'preconditioner_max_size': int(preconditioner_max_size),
+            'preconditioner_floor': preconditioner_floor, 'seed': int(seed),
+        })
 
 
 __all__ = ['solve_gauss_newton_krylov']
