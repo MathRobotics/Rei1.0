@@ -83,6 +83,12 @@ Jᵀv側は既存の `vjp(ctx, rhs)` を使用します。
   `jacobian_mul` に渡します。ヤコビアン全列ではなく1方向のバッチです。
   既定の状態依存は値だけを要求し、非対応バックエンドは必要時に局所微分を取得します。
 - 既存GNと同じ下限 `damping_min_factor * eps * max(diag(JᵀJ))` を使います。
+  `damping_min_factor=0` を指定すると、この下限と列ノルム計算を無効化します。
+  例えば `options={"damping_min_factor": 0, "damping": 1e-8}` で、
+  初期ダンピングとラインサーチ時の増減を使いながら、走査を省略できます。
+  行列のスケールに応じた下限がなくなるため、通常版の既定設定と更新方向が
+  異なる場合があります。`damping=0` も同時に指定すると、乗算による増加では
+  正のダンピングを導入できません。同じ設定は密行列GNとKrylovのラインサーチ版でも使えます。
   通常は列ごとのJVPと行ごとのVJPのうち、積の回数が少ない方を使います。
   全列は保存しません。汎用問題が `jacobian_column_squared_norms(required=...)` を
   提供すると、この計算を省略できます。返り値は長さ `n_total` の有限・非負ベクトルです。
@@ -95,3 +101,19 @@ RoboKotsの2関節・7自由度DOCを実測したところ、専用の積への�
 実装は `rei/optimize/solvers/gauss_newton_operator.py`、積とCGLSは
 `rei/optimize/solvers/_jacobian_operator.py` に分離しています。
 外側のループは密行列版を基にしており、共通の挙動を修正する際は両方の回帰確認が必要です。
+
+## RoboKots local motion derivative cache
+
+Repeated torque products at one trajectory point can reuse small, exact
+per-time derivatives with respect to local motion coordinates. After
+`DoF * used_order` native JVP calls with the same fields, the backend builds
+these blocks with a matrix RHS and uses them for JVPs and summed VJPs.
+It never assembles the full residual-by-optimization-variable Jacobian.
+The cache is bounded to 32 MiB per trajectory builder and is invalidated with
+the outward dynamics state (point, time grid, gravity, and model order).
+Providers without matrix RHS support continue using vector products.
+This automatic backend optimization leaves tolerances and preconditioning
+unchanged. Floating-point differences can change steps in ill-conditioned
+inner solves that hit their iteration cap.
+
+See the [FR3 local derivative cache measurements](../developer/benchmarks/krylov_fr3_motion_cache.md).
