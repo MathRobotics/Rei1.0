@@ -258,6 +258,33 @@ def test_runtime_term_selection_is_inherited_and_does_not_mutate_view():
     assert view.term_indices == (1,) and view.weighted is False
 
 
+@pytest.mark.parametrize('damping', [0., .5])
+def test_disabled_damping_floor_skips_scan_and_preserves_dense_step(monkeypatch, damping):
+    A = np.diag([2., 3., 4.])
+    b = np.array([1., -2., 3.])
+    def forbidden(*args, **kwargs):
+        pytest.fail('Disabled damping floor must not request column norms')
+    monkeypatch.setattr(JacobianProducts, 'column_squared_norms', forbidden)
+    model = MatrixProblem(A, b)
+    out = operator_solve(model, damping=damping, damping_min_factor=0.,
+                         max_iters=1, line_search=False, inner_tol=1e-12)
+    dense = MatrixProblem(A, b)
+    dense.linearize = lambda **kwargs: (dense.eval(), A)
+    baseline = solve(dense, solver='gauss_newton', options={
+        'damping': damping, 'damping_min_factor': 0.,
+        'max_iters': 1, 'line_search': False, 'verbose': False,
+    })
+    np.testing.assert_allclose(out.solution, baseline.solution, atol=1e-12)
+    assert out.history[0]['damping'] == damping
+    assert all(e['damping_min'] == 0 for e in out.history if 'damping_min' in e)
+    scanned = MatrixProblem(A, b)
+    monkeypatch.undo()
+    operator_solve(scanned, damping=damping, max_iters=1,
+                   line_search=False, inner_tol=1e-12)
+    # Scan-free solves eliminate basis products, including the final point scan.
+    assert sum(model.products) < sum(scanned.products)
+
+
 def test_column_norm_provider_avoids_basis_products():
     model = MatrixProblem(np.diag([2., 3.]), [1., 1.])
     model.jacobian_column_squared_norms = lambda **kwargs: np.array([4., 9.])

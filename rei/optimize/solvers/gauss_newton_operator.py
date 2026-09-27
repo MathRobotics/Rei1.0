@@ -60,8 +60,9 @@ def solve_gauss_newton_operator(
     for the outer line search; inner diagnostics are recorded separately.
     The scale-aware damping floor is exact, computed by streaming the shorter
     of JVP columns and VJP rows. Providers can supply
-    jacobian_column_squared_norms(required=...) to avoid this scan. Runtime
-    expressions without JVP use local
+    jacobian_column_squared_norms(required=...) to avoid this scan.
+    Set damping_min_factor=0 to disable the floor and scan.
+    Runtime expressions without JVP use local
     derivative blocks; this fallback is not fully matrix-free.
 
     The outer loop intentionally mirrors gauss_newton.py, including retries,
@@ -82,9 +83,9 @@ def solve_gauss_newton_operator(
                         ("tol_grad", tol_grad), ("damping", damping)):
         if not np.isfinite(value) or value < 0:
             raise ValueError(f"solve_gauss_newton_operator: {name} must be finite and >= 0.")
-    if not np.isfinite(damping_min_factor) or damping_min_factor <= 0:
+    if not np.isfinite(damping_min_factor) or damping_min_factor < 0:
         raise ValueError(
-            "solve_gauss_newton_operator: damping_min_factor must be finite and > 0."
+            "solve_gauss_newton_operator: damping_min_factor must be finite and >= 0."
         )
     if not np.isfinite(max_iters) or int(max_iters) != max_iters or max_iters < 0:
         raise ValueError("solve_gauss_newton_operator: max_iters must be a nonnegative integer.")
@@ -153,7 +154,9 @@ def solve_gauss_newton_operator(
         return fields
 
     def _damping_floor(J: Any) -> float:
-        """Return a scale-aware numerical lower bound for LM regularization."""
+        """Return a scale-aware numerical lower bound, or skip it when disabled."""
+        if damping_min_factor == 0:
+            return 0.0
         if _damping_floor_fn is not None:
             return float(_damping_floor_fn(J))
         with np.errstate(over="ignore", invalid="ignore"):

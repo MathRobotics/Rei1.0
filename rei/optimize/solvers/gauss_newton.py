@@ -73,9 +73,9 @@ def solve_gauss_newton(
                         ("tol_grad", tol_grad), ("damping", damping)):
         if not np.isfinite(value) or value < 0:
             raise ValueError(f"solve_gauss_newton: {name} must be finite and >= 0.")
-    if not np.isfinite(damping_min_factor) or damping_min_factor <= 0:
+    if not np.isfinite(damping_min_factor) or damping_min_factor < 0:
         raise ValueError(
-            "solve_gauss_newton: damping_min_factor must be finite and > 0."
+            "solve_gauss_newton: damping_min_factor must be finite and >= 0."
         )
     if not np.isfinite(max_iters) or int(max_iters) != max_iters or max_iters < 0:
         raise ValueError("solve_gauss_newton: max_iters must be a nonnegative integer.")
@@ -136,7 +136,9 @@ def solve_gauss_newton(
         return fields
 
     def _damping_floor(J: Array) -> float:
-        """Return a scale-aware numerical lower bound for LM regularization."""
+        """Return a scale-aware numerical lower bound, or skip it when disabled."""
+        if damping_min_factor == 0:
+            return 0.0
         with np.errstate(over="ignore", invalid="ignore"):
             diagonal = np.sum(np.square(np.asarray(J, dtype=float)), axis=0)
         max_diagonal = float(np.max(diagonal, initial=0.0))

@@ -133,7 +133,7 @@ def test_damping_cap_stops_retries_without_changing_point():
     {"damping_increase": 1.}, {"damping_increase": np.nan},
     {"damping_max": 0.}, {"damping_max": np.inf},
     {"damping_decrease": 0.}, {"damping_decrease": 1.}, {"damping_decrease": np.nan},
-    {"damping_min_factor": 0.}, {"damping_min_factor": np.nan},
+    {"damping_min_factor": -1.}, {"damping_min_factor": np.nan},
     {"c_armijo": 0.}, {"c_armijo": 1.}, {"c_armijo": np.nan},
 ])
 def test_retry_options_validated_before_evaluation(options):
