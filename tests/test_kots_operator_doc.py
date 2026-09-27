@@ -1,5 +1,6 @@
 """Real Rust DOC product routing, plus reduced and fallback product contracts."""
 from pathlib import Path
+import copy
 import numpy as np
 import pytest
 
@@ -25,7 +26,11 @@ def kots_doc(request):
     spec['time'].update(N=20, dt=.1)
     spec['trajectory']['num_ctrl_points'] = 8
     field, order = getattr(request, 'param', ('torque', 3))
-    spec['terms'][-1]['expr']['inner']['key']['field'] = field
+    template = spec['terms'].pop()
+    for selected in (field if isinstance(field, tuple) else (field,)):
+        term = copy.deepcopy(template)
+        term['expr']['inner']['key']['field'] = selected
+        spec['terms'].append(term)
     model = Kots.from_urdf_file(str(root/'examples/models/planar2.urdf'), order=order)
     compiled = compile_kots_trajectory_problem(spec, model=model, kots_backend='rust',
         jacobian_strategy='mul', gravity=(0., 0., -9.81))
@@ -50,7 +55,7 @@ def test_rust_doc_reduced_products_are_adjoint_and_avoid_dense_jacobians(kots_do
     native_jvp, native_vjp = model.jacobian_mul, model.jacobian_transpose_mul
     calls = []
     def jvp(ref, rhs, *args, **kwargs):
-        assert rhs.ndim == 3 and rhs.shape[-1] == 1
+        assert rhs.ndim == 3 and rhs.shape[-1] in (1, rhs.shape[1])
         calls.append('jvp')
         return native_jvp(ref, rhs, *args, **kwargs)
     def vjp(*args, **kwargs):
@@ -60,6 +65,12 @@ def test_rust_doc_reduced_products_are_adjoint_and_avoid_dense_jacobians(kots_do
         raise AssertionError('dense Jacobian generation forbidden')
     monkeypatch.setattr(model, 'jacobian_mul', jvp)
     monkeypatch.setattr(model, 'jacobian_transpose_mul', vjp)
+    native_many = getattr(model, 'jacobian_transpose_mul_many', None)
+    if callable(native_many):
+        def vjp_many(*args, **kwargs):
+            calls.append('vjp')
+            return native_many(*args, **kwargs)
+        monkeypatch.setattr(model, 'jacobian_transpose_mul_many', vjp_many)
     monkeypatch.setattr(model, 'jacobian', forbidden)
     monkeypatch.setattr(compiled.runtime, '_assemble_global_jacobian', forbidden)
     monkeypatch.setattr(GetStateExpr, 'eval', forbidden)
@@ -95,6 +106,49 @@ def test_batched_jvp_keeps_request_order_and_independent_directions(kots_doc):
     np.testing.assert_allclose(products, expected, rtol=2e-10, atol=1e-8)
 
 
+@pytest.mark.parametrize('kots_doc', [(('torque_d2', 'torque', 'torque_d1'), 5)], indirect=True)
+@pytest.mark.parametrize('weighted', [False, True])
+@pytest.mark.parametrize('subset', [False, True])
+def test_three_torque_fields_share_one_native_jvp(kots_doc, monkeypatch, weighted, subset):
+    compiled, reduction, model = kots_doc
+    runtime = reduction.runtime
+    rng = np.random.default_rng(87)
+    runtime.pack.set(rng.normal(size=runtime.pack.n_total)*.01)
+    selection = list(reversed(runtime.objective_term_indices[-2:])) if subset else None
+    _, J = runtime.linearize_stacked_terms(weighted=weighted, term_indices=selection)
+    v = rng.normal(size=J.shape[1])
+    original = model.jacobian_mul
+    calls = []
+    reject_shared = False
+    def counted(*args, **kwargs):
+        calls.append(1)
+        if reject_shared and len(args[0]) > 2:  # planar2: two rows per field
+            raise NotImplementedError('Single field only')
+        return original(*args, **kwargs)
+    monkeypatch.setattr(model, 'jacobian_mul', counted)
+    actual = runtime.residual_jvp(v, weighted=weighted, term_indices=selection)
+    np.testing.assert_allclose(actual, J @ v, rtol=2e-10, atol=1e-8)
+    assert len(calls) == 1
+    reject_shared = True
+    calls.clear()
+    fallback = runtime.residual_jvp(v, weighted=weighted, term_indices=selection)
+    np.testing.assert_allclose(fallback, J @ v, rtol=2e-10, atol=1e-8)
+    assert len(calls) == (3 if subset else 4)
+    reject_shared = False
+    # Different directions at matching frames must not be merged.
+    full = compiled.runtime
+    builder = full.state.build_state.__self__
+    keys = [k for k in full.operator_required_list() if k.dtype == 'dynamics' and k.k == 0]
+    directions = rng.normal(size=(len(keys), full.pack.n_total))
+    requests = list(zip(keys, directions))
+    expected = [builder.param_jacobian_mul_many(full.pack.get(), [request], pack=full.pack,
+                                              time=full.time)[0] for request in requests]
+    calls.clear()
+    actual = builder.param_jacobian_mul_many(full.pack.get(), requests, pack=full.pack, time=full.time)
+    np.testing.assert_allclose(actual, expected, rtol=2e-10, atol=1e-8)
+    assert len(calls) == len(keys)
+
+
 def test_operator_value_dependencies_allow_dense_backend_fallback():
     x = Variable('x', np.array([.5]))
     pack = VariablePack([x])
@@ -113,3 +167,38 @@ def test_operator_value_dependencies_allow_dense_backend_fallback():
     assert result.solution == pytest.approx([1.])
     assert requested[0] == {key}
     assert any(jac in keys for keys in requested)
+
+
+@pytest.mark.parametrize('kots_doc', [(('torque_d2', 'torque', 'torque_d1'), 5)], indirect=True)
+@pytest.mark.parametrize('matrix_rhs', [True, False])
+def test_local_motion_cache_preserves_products_and_invalidates(kots_doc, monkeypatch, matrix_rhs):
+    compiled, reduction, model = kots_doc
+    runtime = reduction.runtime
+    builder = compiled.runtime.state.build_state.__self__
+    rng = np.random.default_rng(734)
+    runtime.pack.set(rng.normal(size=runtime.pack.n_total)*.03)
+    _, J = runtime.linearize()
+    v, w = rng.normal(size=J.shape[1]), rng.normal(size=J.shape[0])
+    original = model.jacobian_mul
+    calls = []
+    def counted(refs, rhs):
+        calls.append(rhs.shape[-1])
+        if not matrix_rhs and rhs.shape[-1] != 1:
+            raise NotImplementedError('Vector RHS only')
+        return original(refs, rhs)
+    monkeypatch.setattr(model, 'jacobian_mul', counted)
+    width = builder._model_dof()*builder._model_order()
+    for _ in range(width + 2):
+        np.testing.assert_allclose(runtime.residual_jvp(v), J @ v, rtol=2e-10, atol=1e-8)
+    before = len(calls)
+    actual = runtime.residual_jvp(v)
+    np.testing.assert_allclose(actual, J @ v, rtol=2e-10, atol=1e-8)
+    np.testing.assert_allclose(runtime.residual_vjp(w), J.T @ w, rtol=2e-10, atol=1e-8)
+    assert sum(n > 1 for n in calls) == 1
+    assert len(calls) == before + (0 if matrix_rhs else 1)
+    assert bool(builder._motion_product_cache) == matrix_rhs
+    runtime.pack.set(runtime.pack.get() + rng.normal(size=runtime.pack.n_total)*.01)
+    actual = runtime.residual_jvp(v)
+    assert not builder._motion_product_cache
+    _, new_J = runtime.linearize()
+    np.testing.assert_allclose(actual, new_J @ v, rtol=2e-10, atol=1e-8)

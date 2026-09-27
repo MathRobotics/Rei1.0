@@ -219,6 +219,7 @@ class NLSRuntime:
             raise ValueError("residual_jvp: direction must match the variable pack size.")
         idxs = self._normalize_term_indices(term_indices)
         self.update_state_if_needed(required=self.operator_required_list(required, term_indices=idxs))
+        shared_products = self._shared_dynamics_jvp(idxs, direction)
         products = []
         for idx in idxs:
             expr, cost = self.problem.terms[idx]
@@ -229,7 +230,10 @@ class NLSRuntime:
                     raise ValueError(f"residual_jvp: variable size mismatch for {var.name!r}.")
                 tangents.append(direction[start:stop])
             jvp = getattr(expr, "jvp", None)
-            if callable(jvp):
+            if idx in shared_products:
+                raw = np.asarray(expr.eval_value(self.ctx), dtype=float).reshape(-1)
+                product = shared_products[idx]
+            elif callable(jvp):
                 raw = np.asarray(expr.eval_value(self.ctx), dtype=float).reshape(-1)
                 product = np.asarray(jvp(self.ctx, tangents), dtype=float)
             else:
@@ -254,6 +258,40 @@ class NLSRuntime:
                 product = column[:, 0]
             products.append(product)
         return np.concatenate(products) if products else np.zeros(0)
+
+    def _shared_dynamics_jvp(self, indices, direction):
+        """Send compatible dynamics stacks together so backends can share tangents."""
+        batch = getattr(self.state, 'jacobian_mul_many', None)
+        if not callable(batch):
+            return {}
+        requests, selections = [], []
+        for idx in indices:
+            expr, _ = self.problem.terms[idx]
+            if not isinstance(expr, StackExpr) or not expr.parts:
+                continue
+            if not all(isinstance(p, GetStateExpr) and p.key_value.dtype == 'dynamics'
+                       and len(p.vars) == len(p.key_jacs) == 1 for p in expr.parts):
+                continue
+            start = len(requests)
+            for part in expr.parts:
+                lo, hi = self.pack.slices[part.vars[0].name]
+                if hi-lo != part.vars[0].dim():
+                    raise ValueError('Shared JVP: variable size mismatch.')
+                requests.append((part.key_value, part.key_jacs[0], direction[lo:hi]))
+            selections.append((idx, start, len(requests)))
+        if len(selections) < 2:
+            return {}
+        try:
+            values = batch(requests)
+        except (AttributeError, NotImplementedError):
+            return {}
+        if len(values) != len(requests):
+            raise ValueError('Shared JVP: wrong number of products.')
+        values = [np.asarray(v, dtype=float) for v in values]
+        if any(v.ndim != 1 for v in values):
+            raise ValueError('Shared JVP: expected vector products.')
+        return {idx: np.concatenate(values[start:stop])
+                for idx, start, stop in selections}
 
     def residual_vjp(
         self,
@@ -438,10 +476,10 @@ class NLSRuntime:
                 continue
             candidates.append({"idx": idx, "parts": parts, "vars": vars_list})
 
-        # A single StackExpr already has its own batch path.  This helper is
-        # specifically for heterogeneous terms, which require cross-term
-        # request collection to expose one RoboKots multi-VJP call.
-        if (len(candidates) < 2 and len(power_candidates) == 0) or reference_vars is None:
+        # Summed VJP also avoids per-time parameter gradients for one stack.
+        # Keep its existing batch route when the backend cannot return a sum.
+        minimum_candidates = 1 if callable(fused_vjp) else 2
+        if (len(candidates) < minimum_candidates and len(power_candidates) == 0) or reference_vars is None:
             return {}, zero, set()
 
         try:

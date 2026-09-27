@@ -294,6 +294,28 @@ def test_residual_vjp_fuses_weighted_dynamics_terms_and_preserves_term_rhs() -> 
         atol=0.0,
     )
 
+    # A selected single stack must also use the sum, with correct weighting.
+    for idx, expr in enumerate((torque, torque_d1)):
+        for weighted in (True, False):
+            local_rhs = rhs[4*idx:4*idx+4]
+            transformed = weighted_rhs[idx] if weighted else local_rhs
+            expected_single = sum(
+                (jacobians[part.key_value, part.key_jacs[0]].T @ transformed[2*k:2*k+2]
+                 for k, part in enumerate(expr.parts)), np.zeros(2))
+            before = len(state.fused_calls)
+            actual = runtime.residual_vjp(local_rhs, term_indices=[idx], weighted=weighted)
+            np.testing.assert_allclose(actual, expected_single, atol=0., rtol=0.)
+            assert len(state.fused_calls) == before + 1
+
+    # Backends without the summed API retain the single-stack batch fallback.
+    state.jacobian_transpose_mul_many_fused = None
+    actual = runtime.residual_vjp(rhs[:4], term_indices=[0])
+    expected_single = sum(
+        (jacobians[part.key_value, part.key_jacs[0]].T @ weighted_rhs[0][2*k:2*k+2]
+         for k, part in enumerate(torque.parts)), np.zeros(2))
+    np.testing.assert_allclose(actual, expected_single, atol=0., rtol=0.)
+    assert state.calls
+
 
 def test_bspline_trajectory_map_uses_block_sparse_apply_and_vjp(monkeypatch) -> None:
     steps, q_dim, degree, controls = 509, 69, 5, 30

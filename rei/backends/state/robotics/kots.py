@@ -335,6 +335,8 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         # exact batch signature that was loaded so value/JVP/VJP phases of one
         # IOC evaluation can share it without another import+dynamics pass.
         self._batched_dynamics_cache_key: tuple[Any, ...] | None = None
+        self._motion_product_cache = {}
+        self._motion_product_calls = {}
         self._batched_dynamics_cache_hits = 0
         self._batched_dynamics_cache_misses = 0
         # None means unprobed.  Older RoboKots returns one fused VJP, whereas
@@ -500,8 +502,78 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         self.model.import_motions(np.asarray(motions, dtype=float))
         if self._needs_dynamics_update and not self.adapter.update_dynamics_if_available():
             raise AttributeError("RoboKots model does not expose a usable batched dynamics method.")
+        self._motion_product_cache.clear()
+        self._motion_product_calls.clear()
         self._batched_dynamics_cache_key = key
         self._batched_dynamics_cache_misses += 1
+
+    @staticmethod
+    def _motion_product_signature(key):
+        return (key.owner, key.field, key.frame, key.rel_frame)
+
+    def _torque_motion_product(self, refs, direction, keys):
+        """Amortize repeated products using time-local motion derivatives.
+
+        Cache only after a motion dimension's worth of native calls. Small
+        inner solves retain the native product path. The outward-state cache
+        invalidates these exact derivatives whenever point/grid/gravity changes.
+        """
+        if not all(key.owner.owner_type == 'total_joint'
+                   and torque_derivative_order(key.field) is not None for key in keys):
+            return self.model.jacobian_mul(refs, direction)
+        width = direction.shape[1]
+        signatures = [(self._motion_product_signature(key), width) for key in keys]
+        cached = [self._motion_product_cache.get(sig) for sig in signatures]
+        if all(block is not None for block in cached):
+            return np.concatenate([block @ direction for block in cached], axis=1)
+        count_key = tuple(signatures)
+        previous_calls = self._motion_product_calls.get(count_key, 0)
+        if previous_calls is None:
+            return self.model.jacobian_mul(refs, direction)
+        calls = previous_calls + 1
+        self._motion_product_calls[count_key] = calls
+        dof = self._model_dof()
+        needed = len(direction) * dof * len(keys) * width * 8
+        stored = sum(block.nbytes for block in self._motion_product_cache.values())
+        if calls >= width and needed + stored <= 32 * 1024**2:
+            basis = np.broadcast_to(np.eye(width), (len(direction), width, width))
+            try:
+                matrix = np.asarray(self.model.jacobian_mul(refs, basis), dtype=float)
+                if matrix.shape != (len(direction), dof*len(keys), width):
+                    raise ValueError('Unexpected local torque derivative shape.')
+            except (AttributeError, NotImplementedError, TypeError, ValueError):
+                # Providers supporting only a vector RHS keep their old path.
+                self._motion_product_calls[count_key] = None
+            else:
+                for i, sig in enumerate(signatures):
+                    self._motion_product_cache[sig] = matrix[:, i*dof:(i+1)*dof].copy()
+                return matrix @ direction
+        return self.model.jacobian_mul(refs, direction)
+
+    def _cached_torque_motion_vjp(self, groups):
+        """Use JVP-built blocks for a sum of torque cotangents when available."""
+        blocks = []
+        for group in groups:
+            key = group[0][0]
+            signature = self._motion_product_signature(key)
+            choices = [(width, block) for (sig, width), block in self._motion_product_cache.items()
+                       if sig == signature]
+            if not choices:
+                return None
+            width, block = max(choices, key=lambda item: item[0])
+            rhs = np.stack([rhs for _key, rhs, _ref in group])
+            if rhs.shape != block.shape[:2]:
+                return None
+            blocks.append((width, np.einsum('trc,tr->tc', block, rhs)))
+        if not blocks:
+            return None
+        dof = self._model_dof()
+        order = max(width for width, _ in blocks) // dof
+        result = np.zeros((blocks[0][1].shape[0], dof, order))
+        for width, product in blocks:
+            used_order = width // dof
+            result[:, :, :used_order] += product.reshape(-1, dof, used_order)
+        return result.reshape(len(result), dof*order)
 
     def _batched_dynamics_value(self, state_ref: Any) -> Array:
         total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(state_ref)
@@ -942,14 +1014,43 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             groups.setdefault(signature, []).append((index, key, direction, entry))
         out = [None] * len(requests)
         dof, order = self._model_dof(), self._model_order()
+        # Fields sharing frames and parameter directions can use one tangent
+        # evaluation. Different directions or frame order must stay separate.
+        bundles = []
         for group in groups.values():
+            key = group[0][1]
+            for bundle in bundles:
+                reference = bundle[0]
+                other = reference[0][1]
+                if (key.owner.owner_type == 'total_joint'
+                        and torque_derivative_order(key.field) is not None
+                        and torque_derivative_order(other.field) is not None
+                        and (key.owner, key.frame, key.rel_frame) ==
+                            (other.owner, other.frame, other.rel_frame)
+                        and len(group) == len(reference)
+                        and all(a[1].k == b[1].k and np.array_equal(a[2], b[2])
+                                for a, b in zip(group, reference, strict=True))):
+                    bundle.append(group)
+                    break
+            else:
+                bundles.append([group])
+        for bundle in bundles:
+            group = bundle[0]
             ks = [int(key.k) for _, key, _, _ in group]
             key, entry = group[0][1], group[0][3]
             state_ref = self._state_ref(key, state_ref_field=entry.state_ref_field)
             total_ref = self.adapter.as_total_joint_dynamics_state_ref(state_ref)
             refs = state_ref if total_ref is None else list(total_ref.refs)
+            if len(bundle) > 1:
+                refs = []
+                for field_group in bundle:
+                    field_key, field_entry = field_group[0][1], field_group[0][3]
+                    ref = self._state_ref(field_key, state_ref_field=field_entry.state_ref_field)
+                    total = self.adapter.as_total_joint_dynamics_state_ref(ref)
+                    refs.extend([ref] if total is None else total.refs)
             directions = np.stack([v for _, _, v, _ in group])
-            used_order = self._preferred_motion_jacobian_used_order(key) or order
+            used_order = max(self._preferred_motion_jacobian_used_order(g[0][1]) or order
+                             for g in bundle)
             motion_direction = np.zeros((len(ks), dof, used_order))
             for derivative, trajectory in self.trajectory_derivative_maps.items():
                 if int(derivative) >= used_order:
@@ -963,12 +1064,28 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                                        for k, v in zip(ks, directions, strict=True)])
                 motion_direction[:, :, int(derivative)] = values
             self._update_batched_dynamics(self._compose_motions(p, ks=ks), p=p, time=time)
-            product = np.asarray(self.model.jacobian_mul(
-                refs, motion_direction.reshape(len(ks), dof*used_order, 1)), dtype=float)
-            if product.ndim != 3 or product.shape[0] != len(ks) or product.shape[-1] != 1:
-                raise ValueError(f"RoboKots batched JVP returned unexpected shape {product.shape}.")
-            for row, (index, _, _, _) in enumerate(group):
-                out[index] = product[row, :, 0].copy()
+            try:
+                product = np.asarray(self._torque_motion_product(
+                    refs, motion_direction.reshape(len(ks), dof*used_order, 1),
+                    [g[0][1] for g in bundle]), dtype=float)
+                if product.ndim != 3 or product.shape[0] != len(ks) or product.shape[-1] != 1:
+                    raise ValueError(f"RoboKots batched JVP returned unexpected shape {product.shape}.")
+                if len(bundle) > 1 and product.shape[1] != dof * len(bundle):
+                    raise ValueError('RoboKots shared torque JVP returned an invalid row count.')
+            except (AttributeError, NotImplementedError, TypeError, ValueError):
+                if len(bundle) == 1:
+                    raise
+                # Older providers may accept one field per call only.
+                for field_group in bundle:
+                    values = self.param_jacobian_mul_many(
+                        x_all, [(key, v) for _, key, v, _ in field_group], pack=pack, time=time)
+                    for (index, _, _, _), value in zip(field_group, values, strict=True):
+                        out[index] = value
+                continue
+            for field_index, field_group in enumerate(bundle):
+                for row, (index, _, _, _) in enumerate(field_group):
+                    out[index] = (product[row, :, 0].copy() if len(bundle) == 1 else
+                                  product[row, field_index*dof:(field_index+1)*dof, 0].copy())
         return out
 
     def param_jacobian_transpose_mul(
@@ -1398,7 +1515,9 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             backend_requests.append(power_terms["torque_request"])
             direct_power_motion_vjp = np.asarray(power_terms["motion_vjp_order2"], dtype=float)
 
-        motion_grads = np.asarray(multi_vjp(backend_requests), dtype=float)
+        motion_grads = None if power_group else self._cached_torque_motion_vjp(grouped_items)
+        if motion_grads is None:
+            motion_grads = np.asarray(multi_vjp(backend_requests), dtype=float)
         if motion_grads.ndim < 2 or int(motion_grads.shape[0]) != len(motions):
             raise ValueError("RoboKots fused multi-VJP output must have one leading result per time step.")
         if direct_power_motion_vjp is not None:
