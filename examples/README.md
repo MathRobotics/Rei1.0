@@ -77,6 +77,9 @@ RoboKots / Pinocchio の軌道最適化例は LM が既定です。
 
 ## Problem Spec / モデルファイル
 
+固定した関節を最適化変数から除外する方法と、hand付きFR3 Duoの実行例は
+[固定関節を持つモデルでの最適化](../docs/locked-joints.md) を参照してください。
+
 TOML spec の書き方は [DSL ガイド](../docs/dsl.md#problem-spec-の書き方) を参照してください。
 軌道の例は、境界条件・全時刻の関節角制限・全時刻の正則化の順に並べています。
 両バックエンドの spec は同じ条件で、`at` が指定点、`over = "all"` が全評価点を表します。
@@ -85,6 +88,7 @@ TOML spec の書き方は [DSL ガイド](../docs/dsl.md#problem-spec-の書き�
 - `spec/ik_pos.toml`: IK 用 TOML spec
 - `spec/pinocchio_traj_dynamics.toml`: Pinocchio 軌道 + dynamics 用 TOML spec
 - `spec/robokots_traj_dynamics_d12.toml`: RoboKots 軌道 + dynamics 用 TOML spec
+- `spec/franka_fr3_duo_doc.toml`: 両ハンドを固定したFR3 Duo（14自由度）のDOC用spec
 - `models/planar2.urdf`: Pinocchio 用 2 自由度平面アーム
 - `models/planar2.json`: RoboKots 用 2 自由度平面アーム
 - `models/sample_robot.json`: RoboKots 用 3 自由度サンプルロボット

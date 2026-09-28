@@ -19,8 +19,12 @@ from .provider import (
     robot_field_bindings_from_table,
 )
 from ..trajectory import TrajectoryStateBuilderMixin
+from .urdf import ReducedUrdf, load_joint_locks_toml, lock_urdf_joints
 
 __all__ = [
+    "ReducedUrdf",
+    "load_joint_locks_toml",
+    "lock_urdf_joints",
     "spatial",
     "motion",
     "binding_table",
