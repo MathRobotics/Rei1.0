@@ -42,6 +42,10 @@ class KotsTrajectoryCompiledProblem:
     state_builder: KotsTrajectoryStateBuilder | None = None
     perturbation_report: Any = None
 
+    @property
+    def derivative_settings(self) -> dict[str, Any]:
+        return {} if self.state_builder is None else self.state_builder.derivative_settings
+
 
 @dataclass
 class KotsTrajectoryProblemTemplate:
@@ -490,6 +494,7 @@ class _KotsTrajectoryCompileAdapter:
     prefer_matvec_jacobian: bool = False
     jacobian_strategy: str | None = None
     jacobian_method: str = "analytic"
+    jacobian_options: Mapping[str, Any] | None = None
     kots_backend: str | None = None
     gravity: Sequence[float] | None = None
     batch_trajectory: bool = True
@@ -572,6 +577,7 @@ class _KotsTrajectoryCompileAdapter:
             prefer_matvec_jacobian=self.prefer_matvec_jacobian,
             jacobian_strategy=self.jacobian_strategy,
             jacobian_method=self.jacobian_method,
+            jacobian_options=self.jacobian_options,
             kots_backend=self.kots_backend,
             gravity=self.gravity,
             batch_trajectory=self.batch_trajectory,
@@ -620,6 +626,7 @@ def compile_kots_trajectory_problem(
     prefer_matvec_jacobian: bool = False,
     jacobian_strategy: str | None = None,
     jacobian_method: str = "analytic",
+    jacobian_options: Mapping[str, Any] | None = None,
     trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
     kots_backend: str | None = None,
     gravity: Sequence[float] | None = None,
@@ -660,6 +667,11 @@ def compile_kots_trajectory_problem(
         extra_supported_dynamics_owner_fields={"total_body": ("kinetic_energy",)},
         unsupported_action=("skipped" if unsupported_policy == "warn_skip" else "error"),
     )
+    if jacobian_method != "analytic" and diagnostics.unsupported_terms:
+        raise NotImplementedError(
+            f"{jacobian_method} comparison cannot skip unsupported terms: "
+            + "; ".join(item.reason for item in diagnostics.unsupported_terms)
+        )
     if unsupported_policy == "error":
         dsl_use: Mapping[str, Any] = dsl
     else:
@@ -681,6 +693,7 @@ def compile_kots_trajectory_problem(
         prefer_matvec_jacobian=prefer_matvec_jacobian,
         jacobian_strategy=jacobian_strategy,
         jacobian_method=jacobian_method,
+        jacobian_options=jacobian_options,
         kots_backend=kots_backend,
         gravity=gravity,
         batch_trajectory=batch_trajectory,

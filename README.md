@@ -265,30 +265,53 @@ compiled = compile_kots_trajectory_problem(
 ```
 
 `jacobian_method` accepts `"analytic"` (default), `"numerical"` (RoboKots finite
-differences), or `"autodiff"` (RoboKots JAX forward-mode AD). The same option is
+differences), or `"autodiff"` (RoboKots JAX AD). The same option is
 available on both Kots state builders and `compile_trajectory_ioc_problem`
 with `backend="kots"`; it applies to DOC Jacobians and IOC gradient products.
 The trajectory example also accepts `--jacobian-method`.
+
+Pass public RoboKots settings through `jacobian_options`: `{"eps": 1e-5}` for
+numerical differences, or `{"mode": "reverse", "jit": True}` for AD. Defaults
+are `eps=1e-8`, `mode="forward"`, and `jit=True`; invalid or method-inapplicable
+options raise errors. `compiled.derivative_settings` records method, options,
+batch selection, requested strategy, effective state-Jacobian construction,
+backend selection and float64 precision. IOC reports include these settings.
 
 AD requires JAX and supports rigid-body momentum, force, torque, and their time
 derivatives for fixed/revolute/prismatic models; it does not support kinematic
 outputs or kinetic energy. Numerical kinetic-energy derivatives are also
 unsupported by RoboKots. Unsupported requests raise errors, without switching
-to analytic derivatives. AD calls `jacobian_autodiff(..., jit=True)` in a local
-float64 context. With `batch_trajectory=True`, supported dynamics outputs use
+to analytic derivatives. AD calls `jacobian_autodiff(...)` in a local float64
+context; numerical differentiation calls `jacobian(..., numerical=True, eps=...)`.
+With `batch_trajectory=True`, supported dynamics outputs use
 time batches and output lists (including all joint torques). The returned
 state Jacobians are chained with each time's trajectory derivatives, including
 when an output uses fewer motion orders than the model. DOC, IOC/KKT and
-JVP/VJP products preserve the selected differentiation method.
+JVP/VJP products preserve the selected differentiation method. Numerical/AD
+construct one dense state Jacobian for all RHS columns in a product call;
+the difference scheme and JIT compilation remain inside RoboKots. `dense` and
+`mul` strategies share this construction for numerical/AD. Analytic `dense`
+requests state Jacobians; analytic `mul` retains native product optimizations.
 
-RoboKots owns the JIT function cache. Rei does not reuse AD batch states or
-evaluated AD Jacobians across calls; gravity, physical-model edits, motion
+RoboKots owns the JIT function cache. Rei does not reuse numerical/AD batch states or
+evaluated numerical/AD Jacobians across calls; gravity, physical-model edits, motion
 order and output selection are evaluated afresh. As with other runtime state
 changes, invalidate `compiled.runtime.state` after external model/gravity edits.
 Changing robot topology requires a new builder. `batch_trajectory=False` keeps
-the single-time AD path; numerical differentiation remains single-time.
-Initial JIT compilation can dominate the first evaluation. Compare cold and
-warm timings with `developer/benchmarks/kots_autodiff_batch.py`.
+the single-time path for each method. Non-finite derivatives raise
+`FloatingPointError`; numerical/AD compilation refuses unsupported terms even
+with `unsupported="warn_skip"`, so a comparison cannot silently lose terms.
+
+The tested dynamics scope includes total-joint torque, `torque_d1` through
+`torque_d3`, force and momentum. Torque time derivative N needs model order
+N + 3 and the corresponding spline derivatives. Kinetic energy is unsupported
+by numerical/AD. Kinematic AD outputs remain unsupported; kinematic batching
+is not enabled by this change.
+
+Initial JIT compilation can dominate the first evaluation. The two-stage
+[comparison benchmark](developer/benchmarks/kots_derivative_comparison.md)
+measures fixed-trajectory Jacobians first, then DOC→IOC under identical TOML,
+initial values and solver settings, recording evaluation counts and KKT results.
 
 The Kots trajectory backend uses RoboKots multiply APIs by default for
 trajectory-parameter dynamics Jacobians:

@@ -1,4 +1,4 @@
-"""Real JIT AD through trajectory, DOC and IOC products, without analytic AD fallback."""
+"""Numerical and JIT AD trajectory/DOC/IOC products without analytic fallback."""
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +13,7 @@ from rei.optimize_backends.trajectory_ioc import estimate_ioc_weights
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def compile_problem(method="autodiff", batch=True, backend="numpy"):
+def compile_problem(method="autodiff", batch=True, backend="numpy", options=None):
     Kots = pytest.importorskip("robokots.kots").Kots
     pytest.importorskip("jax")
     spec = load_problem_spec_toml(ROOT / "examples/spec/robokots_traj_dynamics_d12.toml")
@@ -23,35 +23,45 @@ def compile_problem(method="autodiff", batch=True, backend="numpy"):
     return compile_kots_trajectory_problem(
         spec, model=model, jacobian_method=method, batch_trajectory=batch,
         kots_backend=backend, gravity=(0., -9.81, 0.), max_derivative_order=4,
+        jacobian_options=options,
     )
 
 
-def forbid_analytic(monkeypatch, model):
+def forbid_analytic(monkeypatch, model, method="autodiff"):
     def forbidden(*args, **kwargs):
         raise AssertionError("Autodiff must not call analytic derivative APIs")
+    native = model.jacobian
     for name in ("jacobian", "jacobian_mul", "jacobian_transpose_mul", "jacobian_transpose_mul_many",
                  "squared_power_torque_vjp_terms"):
         if hasattr(model, name):
             monkeypatch.setattr(model, name, forbidden)
+    if method == "numerical":
+        def numerical(*args, **kwargs):
+            assert kwargs.get("numerical") is True
+            return native(*args, **kwargs)
+        monkeypatch.setattr(model, "jacobian", numerical)
 
 
 @pytest.mark.parametrize("backend", ["numpy", "rust"])
-def test_batch_doc_ioc_products_and_mutations(monkeypatch, backend):
-    batch = compile_problem(backend=backend)
-    single = compile_problem(batch=False, backend=backend)
+@pytest.mark.parametrize("method", ["autodiff", "numerical"])
+def test_batch_doc_ioc_products_and_mutations(monkeypatch, backend, method):
+    options = {"eps": 1e-5} if method == "numerical" else None
+    batch = compile_problem(method=method, backend=backend, options=options)
+    single = compile_problem(method=method, batch=False, backend=backend, options=options)
     analytic = compile_problem(method="analytic", backend=backend)
     builder = batch.state_builder
-    forbid_analytic(monkeypatch, builder.model)
+    forbid_analytic(monkeypatch, builder.model, method)
     calls = []
-    native = builder.model.jacobian_autodiff
+    api = "jacobian_autodiff" if method == "autodiff" else "jacobian"
+    native = getattr(builder.model, api)
 
     def watched(refs, **kwargs):
         result = native(refs, **kwargs)
         calls.append((len(refs) if isinstance(refs, list) else 1, result.shape))
-        assert kwargs["jit"]
+        assert kwargs["jit"] if method == "autodiff" else kwargs["eps"] == 1e-5
         return result
 
-    monkeypatch.setattr(builder.model, "jacobian_autodiff", watched)
+    monkeypatch.setattr(builder.model, api, watched)
     rng = np.random.default_rng(73)
     for scale, gravity in ((1e-12, (0., -9.81, 0.)), (0.2, (0., 0., 0.))):
         point = rng.normal(scale=scale, size=batch.runtime.pack.n_total)
@@ -83,10 +93,13 @@ def test_batch_doc_ioc_products_and_mutations(monkeypatch, backend):
         point, key, rhs, pack=single.runtime.pack, time=single.runtime.time,
     ) for key, rhs in requests]
     np.testing.assert_allclose(actual, expected, atol=1e-8)
+    before_columns = len(calls)
     columns = builder.param_jacobian_transpose_mul_many_fused_columns(
         point, [requests[:2], requests[2:]], pack=batch.runtime.pack, time=batch.runtime.time,
     )
     np.testing.assert_allclose(columns, np.stack([sum(expected[:2]), expected[2]], axis=1), atol=1e-8)
+    assert len(calls) == before_columns + 1
+    assert calls[-1][1][0] == len({key for key, _ in requests})
     matrix_requests = [(key, np.stack([rhs, -2 * rhs], axis=1)) for key, rhs in requests]
     matrix_products = builder.param_jacobian_transpose_mul_many(
         point, matrix_requests, pack=batch.runtime.pack, time=batch.runtime.time,
@@ -142,9 +155,11 @@ def test_output_and_model_changes_are_not_cached(monkeypatch):
             np.testing.assert_allclose(actual, expected, atol=1e-8, rtol=1e-8)
 
 
-def test_doc_to_ioc_completes_without_analytic(monkeypatch):
-    compiled = compile_problem()
-    forbid_analytic(monkeypatch, compiled.state_builder.model)
+@pytest.mark.parametrize("method", ["autodiff", "numerical"])
+def test_doc_to_ioc_completes_without_analytic(monkeypatch, method):
+    from rei.optimize.kkt import check_kkt_conditions
+    compiled = compile_problem(method=method, backend="rust")
+    forbid_analytic(monkeypatch, compiled.state_builder.model, method)
     reduction = build_nullspace_equality_reduction(
         compiled.runtime, eq_selector_attr="enforce", eq_selector_value="nullspace",
     )
@@ -153,3 +168,74 @@ def test_doc_to_ioc_completes_without_analytic(monkeypatch):
     result = estimate_ioc_weights(compiled, p=reduction.lift(outcome.solution))
     assert np.all(np.isfinite(result["weights"]))
     assert np.isfinite(result["stationarity"]["ikkt_residual_norm"])
+    assert result["derivative_settings"]["jacobian_method"] == method
+    kkt = check_kkt_conditions(compiled.runtime)
+    assert np.isfinite(kkt.stationarity_inf)
+
+
+@pytest.mark.parametrize("method", ["numerical", "autodiff"])
+def test_unsupported_outputs_are_not_silently_skipped(method):
+    Kots = pytest.importorskip("robokots.kots").Kots
+    spec = load_problem_spec_toml(ROOT / "examples/spec/robokots_traj_dynamics_d12.toml")
+    spec["terms"][-1]["expr"]["inner"]["key"]["field"] = "torque_d99"
+    with pytest.raises(NotImplementedError, match="cannot skip"):
+        compile_kots_trajectory_problem(
+            spec, model=Kots.from_urdf_file(str(ROOT / "examples/models/planar2.urdf")),
+            jacobian_method=method, unsupported="warn_skip",
+        )
+
+
+@pytest.mark.parametrize("jit,mode", [(False, "forward"), (True, "reverse")])
+def test_public_autodiff_options_match_analytic(jit, mode):
+    compiled = compile_problem(options={"jit": jit, "mode": mode}, backend="rust")
+    reference = compile_problem(method="analytic", backend="rust")
+    point = np.random.default_rng(6).normal(scale=.1, size=compiled.runtime.pack.n_total)
+    compiled.runtime.pack.set(point)
+    reference.runtime.pack.set(point)
+    np.testing.assert_allclose(compiled.runtime.linearize()[1], reference.runtime.linearize()[1], atol=1e-8)
+    assert compiled.derivative_settings["jacobian_options"] == {"jit": jit, "mode": mode}
+
+
+@pytest.mark.parametrize("method", ["numerical", "autodiff"])
+@pytest.mark.parametrize("field", ["torque_d1", "torque_d2", "torque_d3"])
+def test_torque_time_derivative_scope(monkeypatch, method, field):
+    Kots = pytest.importorskip("robokots.kots").Kots
+    spec = load_problem_spec_toml(ROOT / "examples/spec/robokots_traj_dynamics_d12.toml")
+    spec["time"].update(N=3, dt=.3)
+    spec["trajectory"]["num_ctrl_points"] = 6
+    spec["terms"][-1]["expr"]["inner"]["key"]["field"] = field
+    results = []
+    for selected, batch in (("analytic", True), (method, False), (method, True)):
+        compiled = compile_kots_trajectory_problem(
+            spec, model=Kots.from_urdf_file(str(ROOT / "examples/models/planar2.urdf"), backend="rust"),
+            jacobian_method=selected, batch_trajectory=batch, kots_backend="rust",
+            jacobian_options={"eps": 1e-5} if selected == "numerical" else None,
+            gravity=(0., -9.81, 0.),
+        )
+        if selected != "analytic":
+            forbid_analytic(monkeypatch, compiled.state_builder.model, selected)
+        point = np.random.default_rng(6).normal(scale=.1, size=compiled.runtime.pack.n_total)
+        keys = [key for key in compiled.runtime.required_list() if key.dtype == "dynamics" and "_J_" in key.field]
+        matrices = compiled.state_builder.build_state(point, required=keys, pack=compiled.runtime.pack, time=compiled.runtime.time)
+        results.append(np.stack([matrices[key] for key in keys]))
+    for result in results[1:]:
+        np.testing.assert_allclose(result, results[0], atol=1e-4, rtol=2e-6)
+
+
+@pytest.mark.parametrize("method", ["numerical", "autodiff"])
+def test_runtime_nonfinite_derivative_is_an_error(monkeypatch, method):
+    compiled = compile_problem(method=method, backend="rust")
+    name = "jacobian" if method == "numerical" else "jacobian_autodiff"
+    native = getattr(compiled.state_builder.model, name)
+    calls = []
+
+    def nonfinite(*args, **kwargs):
+        calls.append(1)
+        return np.full_like(native(*args, **kwargs), np.nan)
+
+    monkeypatch.setattr(compiled.state_builder.model, name, nonfinite)
+    terms = len(compiled.runtime.problem.terms)
+    with pytest.raises(FloatingPointError, match="non-finite"):
+        compiled.runtime.linearize()
+    assert len(compiled.runtime.problem.terms) == terms
+    assert calls == [1]

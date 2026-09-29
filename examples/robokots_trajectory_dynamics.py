@@ -27,6 +27,11 @@ _KOTS_BACKEND = "rust"
 def main() -> None:
     parser = argparse.ArgumentParser(description="RoboKots trajectory dynamics example.")
     parser.add_argument("--jacobian-method", choices=("analytic", "numerical", "autodiff"), default="analytic")
+    parser.add_argument("--jacobian-strategy", choices=("dense", "mul"), default="mul")
+    parser.add_argument("--batch-trajectory", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--numerical-eps", type=float, default=1e-8)
+    parser.add_argument("--autodiff-mode", choices=("forward", "reverse"), default="forward")
+    parser.add_argument("--autodiff-jit", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--history", type=Path, help="Stream history to a new JSONL file.")
     parser.add_argument("--solver", choices=("levenberg_marquardt", "gauss_newton", "gauss_newton_operator", "gauss_newton_krylov", "lm-ls"), default="levenberg_marquardt")
     parser.add_argument("--trial-history", type=Path, help="LM or Krylov trust-region trial JSONL path.")
@@ -61,6 +66,11 @@ def main() -> None:
         model=kots,
         kots_backend=_KOTS_BACKEND,
         jacobian_method=args.jacobian_method,
+        jacobian_options=({"eps": args.numerical_eps} if args.jacobian_method == "numerical" else
+                          {"mode": args.autodiff_mode, "jit": args.autodiff_jit}
+                          if args.jacobian_method == "autodiff" else None),
+        jacobian_strategy=args.jacobian_strategy,
+        batch_trajectory=args.batch_trajectory,
     )
     runtime = compiled.runtime
 
@@ -102,6 +112,7 @@ def main() -> None:
         print(format_solver_history(out.trial_history))
 
     print("=== robokots_trajectory_dynamics ===")
+    print(f"derivatives={compiled.derivative_settings}")
     print(f"spec={_SPEC_PATH}")
     print(f"model={_MODEL_PATH} (order={_ORDER}, kots_backend={_KOTS_BACKEND})")
     print(

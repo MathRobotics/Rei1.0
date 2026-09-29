@@ -237,6 +237,7 @@ def estimate_ioc_weights(
 
     return {
         "backend": str(backend),
+        "derivative_settings": getattr(compiled_obj, "derivative_settings", {}),
         "requested_terms": []
         if diagnostics is None
         else [dict(t) for t in diagnostics.requested_terms],

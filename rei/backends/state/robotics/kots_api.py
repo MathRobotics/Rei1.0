@@ -268,15 +268,40 @@ class RoboKotsJacobianOperator:
     stays private in this module.
     """
 
-    def __init__(self, model: Any, *, jacobian_method: str = "analytic") -> None:
+    def __init__(self, model: Any, *, jacobian_method: str = "analytic",
+                 jacobian_options: Mapping[str, Any] | None = None) -> None:
         if jacobian_method not in ("analytic", "numerical", "autodiff"):
             raise ValueError("jacobian_method must be 'analytic', 'numerical', or 'autodiff'.")
         self.model = model
         self.jacobian_method = jacobian_method
+        defaults = {"analytic": {}, "numerical": {"eps": 1e-8},
+                    "autodiff": {"mode": "forward", "jit": True}}[jacobian_method]
+        supplied = dict(jacobian_options or {})
+        if supplied.keys() - defaults.keys():
+            raise ValueError(f"Unsupported {jacobian_method} jacobian_options: {sorted(supplied.keys() - defaults.keys())}")
+        self.options = defaults | supplied
+        if jacobian_method == "numerical":
+            eps = float(self.options["eps"])
+            if not np.isfinite(eps) or eps <= 0:
+                raise ValueError("Numerical eps must be positive and finite.")
+            self.options["eps"] = eps
+        if jacobian_method == "autodiff":
+            if self.options["mode"] not in ("forward", "reverse"):
+                raise ValueError("Autodiff mode must be 'forward' or 'reverse'.")
+            if not isinstance(self.options["jit"], bool):
+                raise ValueError("Autodiff jit must be a bool.")
+
+    @staticmethod
+    def _finite(value: Any) -> Array:
+        result = np.asarray(value, dtype=float)
+        if not np.all(np.isfinite(result)):
+            # ArithmeticError is deliberately not a capability/fallback error.
+            raise FloatingPointError("RoboKots returned a non-finite derivative.")
+        return result
 
     def dense(self, state_ref: Any) -> Array:
         if self.jacobian_method == "numerical":
-            return np.asarray(self.model.jacobian(state_ref, numerical=True), dtype=float)
+            return self._finite(self.model.jacobian(state_ref, numerical=True, **self.options))
         if self.jacobian_method == "autodiff":
             # Keep double precision local: do not change the application's JAX config.
             try:
@@ -285,8 +310,8 @@ class RoboKotsJacobianOperator:
                 from jax.experimental import enable_x64
 
             with enable_x64():
-                return np.asarray(self.model.jacobian_autodiff(state_ref, jit=True), dtype=float)
-        return jacobian(self.model, state_ref)
+                return self._finite(self.model.jacobian_autodiff(state_ref, **self.options))
+        return self._finite(jacobian(self.model, state_ref))
 
     def dense_list(self, refs: tuple[Any, ...]) -> Array | None:
         if self.jacobian_method != "analytic":
@@ -295,10 +320,8 @@ class RoboKotsJacobianOperator:
 
     def jvp(self, state_ref: Any, cols: Array, *, value_size: int | None = None) -> Array:
         C = np.asarray(cols, dtype=float)
-        if self.jacobian_method == "numerical":
-            return np.asarray(self.model.jacobian_mul(state_ref, C, numerical=True), dtype=float)
-        if self.jacobian_method == "autodiff":
-            return self.dense(state_ref) @ C
+        if self.jacobian_method != "analytic":
+            return self._finite(self.dense(state_ref) @ C)
         if C.ndim == 1:
             return _fallback_jacobian_vec_mul(self.model, state_ref, C)
         if value_size is None:
@@ -309,15 +332,36 @@ class RoboKotsJacobianOperator:
         return _fallback_jacobian_from_vec_mul(self.model, state_ref, C, value_size=int(value_size))
 
     def vjp(self, state_ref: Any, rhs: Array) -> Array:
-        if self.jacobian_method == "numerical":
-            return np.asarray(self.model.jacobian_transpose_mul(state_ref, rhs, numerical=True), dtype=float)
-        if self.jacobian_method == "autodiff":
+        if self.jacobian_method != "analytic":
             matrix = self.dense(state_ref).swapaxes(-1, -2)
             values = np.asarray(rhs, dtype=float)
             if matrix.ndim == 3 and values.ndim == 2:
-                return (matrix @ values[..., None])[..., 0]
-            return matrix @ values
+                return self._finite((matrix @ values[..., None])[..., 0])
+            return self._finite(matrix @ values)
         return _fallback_jacobian_transpose_mul(self.model, state_ref, rhs)
+
+    def batched_jvp(self, refs: Any, columns: Array, *, dof: int) -> Array:
+        """One derivative evaluation for all time samples and RHS columns."""
+        if self.jacobian_method == "analytic":
+            return self._finite(self.model.jacobian_mul(refs, columns))
+        matrix = self.dense(refs)
+        used_order = matrix.shape[-1] // dof
+        input_order = columns.shape[1] // dof
+        if matrix.shape[-1] % dof or columns.shape[1] % dof or used_order > input_order:
+            raise ValueError("Jacobian motion columns do not match the trajectory derivatives.")
+        selected = columns.reshape(len(columns), dof, input_order, -1)
+        selected = selected[:, :, :used_order, :].reshape(len(columns), dof * used_order, -1)
+        return self._finite(matrix @ selected)
+
+    def batched_vjp(self, refs: Any, rhs: Array) -> Array:
+        if self.jacobian_method == "analytic":
+            return self._finite(self.model.jacobian_transpose_mul(refs, rhs))
+        return self.vjp(refs, rhs)
+
+    def analytic_vjp_many(self, requests: Any) -> Any:
+        if self.jacobian_method != "analytic":
+            raise NotImplementedError("Native fused VJP is analytic-only; use the selected dense derivative.")
+        return self.model.jacobian_transpose_mul_many(requests)
 
 
 def jacobian_vec_mul(model: Any, state_ref: Any, vec: Array) -> Array:

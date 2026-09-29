@@ -47,7 +47,7 @@ def test_explicit_jacobian_method_never_uses_analytic(method):
     matrix = np.array([[1., 2., 3.], [4., 5., 6.]])
 
     class Model:
-        def jacobian(self, ref, *, numerical=False):
+        def jacobian(self, ref, *, numerical=False, eps=1e-8):
             assert numerical
             return matrix
 
@@ -59,7 +59,7 @@ def test_explicit_jacobian_method_never_uses_analytic(method):
             assert numerical
             return matrix.T @ rhs
 
-        def jacobian_autodiff(self, ref, *, jit):
+        def jacobian_autodiff(self, ref, *, jit, mode):
             assert jit
             return matrix
 
@@ -83,11 +83,11 @@ def test_unsupported_derivative_does_not_fall_back(method):
         pytest.importorskip("jax")
 
     class Model:
-        def jacobian(self, ref, *, numerical=False):
+        def jacobian(self, ref, *, numerical=False, eps=1e-8):
             assert numerical, "must not fall back to analytic"
             raise NotImplementedError("unsupported state")
 
-        def jacobian_autodiff(self, ref, *, jit):
+        def jacobian_autodiff(self, ref, *, jit, mode):
             assert jit
             raise NotImplementedError("unsupported state")
 
@@ -100,7 +100,7 @@ def test_autodiff_uses_local_double_precision():
     jax = pytest.importorskip("jax")
 
     class Model:
-        def jacobian_autodiff(self, ref, *, jit):
+        def jacobian_autodiff(self, ref, *, jit, mode):
             assert jit
             assert jax.config.x64_enabled
             return np.eye(2)
@@ -108,6 +108,66 @@ def test_autodiff_uses_local_double_precision():
     before = jax.config.x64_enabled
     kots_api.RoboKotsJacobianOperator(Model(), jacobian_method="autodiff").dense(object())
     assert jax.config.x64_enabled == before
+
+
+@pytest.mark.parametrize("method,options", [
+    ("numerical", {"eps": 2e-5}),
+    ("autodiff", {"jit": False, "mode": "reverse"}),
+])
+def test_derivative_options_and_one_construction_for_all_rhs(method, options):
+    pytest.importorskip("jax")
+    calls = []
+    matrix = np.arange(24.).reshape(2, 2, 6)
+
+    class Model:
+        def jacobian(self, refs, *, numerical, **kwargs):
+            assert numerical
+            calls.append(kwargs)
+            return matrix
+
+        def jacobian_autodiff(self, refs, **kwargs):
+            calls.append(kwargs)
+            return matrix
+
+    op = kots_api.RoboKotsJacobianOperator(Model(), jacobian_method=method, jacobian_options=options)
+    columns = np.arange(80.).reshape(2, 10, 4)
+    reduced = columns.reshape(2, 2, 5, 4)[:, :, :3].reshape(2, 6, 4)
+    np.testing.assert_array_equal(op.batched_jvp([object()], columns, dof=2), matrix @ reduced)
+    assert calls == [options]
+    rhs = np.ones((2, 2, 4))
+    np.testing.assert_array_equal(op.batched_vjp([object()], rhs), matrix.swapaxes(-1, -2) @ rhs)
+    assert calls == [options, options]
+
+
+@pytest.mark.parametrize("method,options", [
+    ("numerical", {"eps": 0}), ("numerical", {"eps": float("nan")}),
+    ("autodiff", {"mode": "invalid"}), ("autodiff", {"jit": "false"}),
+    ("analytic", {"eps": 1e-5}), ("numerical", {"jit": True}),
+])
+def test_invalid_derivative_options_fail(method, options):
+    with pytest.raises(ValueError):
+        kots_api.RoboKotsJacobianOperator(object(), jacobian_method=method, jacobian_options=options)
+
+
+@pytest.mark.parametrize("method", ["numerical", "autodiff"])
+def test_nonfinite_derivatives_fail_without_retry(method):
+    pytest.importorskip("jax")
+    calls = []
+
+    class Model:
+        def jacobian(self, refs, **kwargs):
+            assert kwargs["numerical"]
+            calls.append(1)
+            return np.array([[np.nan]])
+
+        def jacobian_autodiff(self, refs, **kwargs):
+            calls.append(1)
+            return np.array([[np.inf]])
+
+    op = kots_api.RoboKotsJacobianOperator(Model(), jacobian_method=method)
+    with pytest.raises(FloatingPointError, match="non-finite"):
+        op.jvp([object()], np.ones((1, 5)))
+    assert calls == [1]
 
 
 class _StrictStateType:

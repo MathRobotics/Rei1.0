@@ -19,6 +19,7 @@ uv.lock
 !developer/benchmarks/kots_doc_krylov_results.json
 !developer/benchmarks/kots_doc_operator_results.json
 !developer/benchmarks/kots_doc_torque_derivative_results.json
+!developer/benchmarks/kots_derivative_comparison_results.json
 *.txt
 *.stl
 *.dae

@@ -36,8 +36,8 @@ where = ["."]
 include = ["rei*"]
 
 [tool.uv.sources]
-# Includes cached JIT autodiff Jacobians with batched output lists.
-robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "125c8703407fc2863d78df7ad39f5877eefa9de3" }
+# Includes Rust numerical Jacobians and cached JIT autodiff output lists.
+robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "acb2a041453d7c4d3170050e98a1ead81c1897ba" }
 
 [dependency-groups]
 dev = [
