@@ -290,6 +290,15 @@ RoboKots owns its state internally. `KotsStateBuilder`,
 `KotsTrajectoryStateBuilder`, and `compile_kots_trajectory_problem` accept
 `data=None` (the default); do not access the removed `kots.state_dict_` attribute.
 
+Trajectory compilation automatically calls `model.set_order(...)` before
+building derivative maps, using the highest motion order required by the
+problem, `dynamics_fields`, and `max_derivative_order`. Position requires order
+1, velocity 2, torque 3, and `torque_dN` requires N + 3. Existing gravity is
+preserved, and an unchanged order does not reset the model. This can raise or
+lower the supplied model's order: use separate models for simultaneously live
+compiled problems with different orders. Custom providers without `set_order`
+keep their configured order.
+
 Dense Jacobian assembly is still available by passing
 `jacobian_strategy="dense"` to `compile_kots_trajectory_problem`; otherwise the
 default strategy is `"mul"`. The older `prefer_matvec_jacobian` option is kept

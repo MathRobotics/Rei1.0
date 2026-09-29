@@ -10,6 +10,7 @@ from ..backends.state.robotics.kots import KotsTrajectoryStateBuilder
 from ..core.expr.nodes import ConstantExpr, RepeatConstantExpr, TrajectoryVarDerivativesExpr, TrajectoryVarExpr
 from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
+from ..optimize.dsl.dsl_ops import iter_nodes
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl
 from ..optimize.runtime import NLSRuntime
 from ._state_field_utils import (
@@ -358,6 +359,63 @@ def _infer_model_order(model: Any) -> int:
         return 1
 
 
+def _required_model_order(
+    dsl: Mapping[str, Any],
+    *,
+    dynamics_fields: Sequence[str] | None,
+    max_derivative_order: int | None,
+) -> int:
+    """Count motion slots (q through the highest requested time derivative)."""
+    order = 1
+    if max_derivative_order is not None:
+        if int(max_derivative_order) < 0:
+            raise ValueError("max_derivative_order must be >= 0.")
+        order = max(order, int(max_derivative_order) + 1)
+
+    def field_order(field: str) -> int:
+        field = base_field_name(field)
+        derivative = torque_derivative_order(field)
+        if derivative is not None:
+            return derivative + 3
+        return {
+            "vel": 2,
+            "momentum": 2,
+            "kinetic_energy": 2,
+            "acc": 3,
+            "force": 3,
+        }.get(field, 1)
+
+    for field in dynamics_fields or ():
+        order = max(order, field_order(str(field)))
+    for node in iter_nodes(dict(dsl)):
+        if node.get("type") == "get_state":
+            key = node.get("key")
+            if isinstance(key, Mapping) and key.get("dtype") in ("kinematics", "dynamics"):
+                order = max(order, field_order(str(key.get("field", ""))))
+        elif node.get("type") == "get_traj_var":
+            derivative = node.get(
+                "max_derivative_order",
+                node.get("derivative_order_max", node.get("max_deriv_order")),
+            )
+            if derivative is None:
+                derivative = node.get("derivative_order", node.get("deriv_order", 0))
+            order = max(order, int(derivative) + 1)
+    return order
+
+
+def _set_model_order(model: Any, order: int) -> None:
+    # Older/custom providers without set_order retain their existing behavior.
+    setter = getattr(model, "set_order", None)
+    if not callable(setter) or _infer_model_order(model) == order:
+        return
+    gravity = getattr(model, "gravity_", None)
+    if gravity is not None:
+        gravity = np.array(gravity, copy=True)
+    setter(order)
+    if gravity is not None:
+        model.gravity_ = gravity
+
+
 def _canonicalize_dynamics_fields(
     dynamics_fields: Sequence[str] | None,
 ) -> tuple[str, ...] | None:
@@ -574,8 +632,23 @@ def compile_kots_trajectory_problem(
     or TOML file path. Sampling occurs once when the state builder is created;
     values and all derivatives use that same model, including template windows.
     The realized changes are available as ``perturbation_report``.
+
+    Model motion order is inferred from the problem and explicit derivative/
+    dynamics options, and set before preparing trajectory maps. This mutates
+    the supplied model (preserving gravity); use separate models for live
+    compiled problems requiring different orders. Providers without set_order
+    retain their configured order.
     """
+    required_order = _required_model_order(
+        dsl,
+        dynamics_fields=dynamics_fields,
+        max_derivative_order=max_derivative_order,
+    )
+    # Diagnose against the planned order before mutating the model.
+    can_set_order = callable(getattr(model, "set_order", None))
     model_order = _infer_model_order(model)
+    if can_set_order:
+        model_order = required_order
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
     unsupported_policy = normalize_unsupported_policy(unsupported)
     diagnostics = inspect_trajectory_problem_backend(
@@ -591,6 +664,15 @@ def compile_kots_trajectory_problem(
         dsl_use: Mapping[str, Any] = dsl
     else:
         dsl_use = filter_unsupported_terms_from_dsl(dsl, diagnostics)
+
+    if can_set_order:
+        if unsupported_policy != "error":
+            required_order = _required_model_order(
+                dsl_use,
+                dynamics_fields=dynamics_fields,
+                max_derivative_order=max_derivative_order,
+            )
+        _set_model_order(model, required_order)
 
     adapter = _KotsTrajectoryCompileAdapter(
         fields=fields,
