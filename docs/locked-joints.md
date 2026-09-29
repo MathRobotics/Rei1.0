@@ -56,8 +56,11 @@ right_fr3v2_finger_joint1 = 0.02
 
 Pythonでは `load_joint_locks_toml(path)` でこの設定を読み取り、
 `lock_urdf_joints(xml, positions)` に渡します。この読み込みAPIは単独のTOMLでも
-使えます。`load_problem_spec_toml()` は最適化DSLのみを作成するため、
-モデルの固定はモデル読み込み時に別途適用してください。
+使えます。TOMLに `[model] file = "../models/robot.urdf"` も指定した場合は、
+`load_problem_spec_toml()` がTOMLの位置を基準にファイルパスを解決し、
+モデル設定をDSLに保持します。RoboKots／Pinocchioの軌道コンパイル関数へ
+`model=` を渡さなければ、モデル読み込みと固定関節の適用を自動で行います。
+`model=` を明示した場合は、そのモデルを優先し、TOMLの固定設定も適用しません。
 
 hand付きの `examples/model/robots/franka_fr3_duo.urdf` を用意し、
 リポジトリルートから実行します。

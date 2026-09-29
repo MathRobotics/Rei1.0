@@ -48,8 +48,8 @@ def compile_trajectory_ioc_problem(
     dsl: Mapping[str, Any],
     *,
     backend: str,
-    model: Any,
-    data: Any,
+    model: Any = None,
+    data: Any = None,
     unsupported: str = "warn_skip",
     **kwargs: Any,
 ) -> TrajectoryIocCompiledProblem:

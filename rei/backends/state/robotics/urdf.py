@@ -10,6 +10,8 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from ....core.model_config import normalize_model_config
+
 
 @dataclass(frozen=True)
 class ReducedUrdf:
@@ -27,24 +29,7 @@ def load_joint_locks_toml(path: str | Path) -> dict[str, float]:
     """
     with Path(path).open('rb') as stream:
         config = tomllib.load(stream)
-    model = config.get('model', {})
-    if not isinstance(model, dict):
-        raise ValueError('model must be a TOML table')
-    unknown = model.keys() - {'locked_joints'}
-    if unknown:
-        raise ValueError(f'Unknown model configuration keys: {sorted(unknown)}')
-    locks = model.get('locked_joints', {})
-    if not isinstance(locks, dict):
-        raise ValueError('model.locked_joints must be a TOML table')
-    result = {}
-    for name, value in locks.items():
-        if not name.strip() or isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f'model.locked_joints.{name} must be a numeric joint position')
-        position = float(value)
-        if not math.isfinite(position):
-            raise ValueError(f'model.locked_joints.{name} must be finite')
-        result[name] = position
-    return result
+    return normalize_model_config(config.get('model', {})).get('locked_joints', {})
 
 
 def _vector(text: str | None, default: tuple[float, float, float]) -> np.ndarray:

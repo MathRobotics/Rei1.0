@@ -244,6 +244,40 @@ Each helper returns a compile result whose main entry point is
 `compiled.runtime`. Some helpers also return backend-specific metadata such as
 trajectory maps or prepared DSL data.
 
+The problem TOML may also select the robot file:
+
+```toml
+[model]
+file = "../models/planar2.urdf"
+
+# Optional: fixed joint positions (rad or metres), URDF only.
+[model.locked_joints]
+joint2 = 0.2
+```
+
+```python
+from rei import load_problem_spec_toml
+from rei.optimize_backends.kots import compile_kots_trajectory_problem
+
+problem = load_problem_spec_toml("examples/spec/robokots_traj_dynamics_d12.toml")
+compiled = compile_kots_trajectory_problem(problem, kots_backend="rust")
+```
+
+Relative `model.file` paths are resolved against the TOML's directory, not the
+process working directory. Reading TOML only validates and preserves metadata;
+the compile helper creates the model. RoboKots accepts `.urdf` and `.json`;
+Pinocchio accepts `.urdf` and creates its associated data automatically. Both
+apply `model.locked_joints` when loading URDFs. JSON with nonempty joint locks,
+unsupported formats and missing files raise explicit errors at model loading.
+RoboKots motion order is still inferred from the compiled problem.
+
+Passing `model=` explicitly takes precedence over the entire model-loading
+configuration, including joint locks. Existing calls without `[model]` remain
+valid when they supply a model. The same optional loading works for Kots
+templates and `compile_trajectory_ioc_problem(..., backend="kots")` or
+`backend="pinocchio"`. Direct dictionary specs have no source directory;
+use absolute model paths there, or resolve relative paths before changing CWD.
+
 ### IOC weight interpretation
 
 `estimate_ioc_weights()` returns `weights` in the original, unweighted

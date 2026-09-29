@@ -8,19 +8,8 @@ from rei.optimize_backends.kots import compile_kots_trajectory_problem
 from rei.optimize.reductions import build_nullspace_equality_reduction
 from rei.optimize.history import format_solver_history
 
-try:
-    from robokots.kots import Kots
-except ImportError as e:  # pragma: no cover
-    raise SystemExit(
-        "This example requires RoboKots.\n"
-        "Install dependencies (e.g. `uv sync --group kots`) and re-run:\n"
-        "  PYTHONPATH=. python examples/robokots_trajectory_dynamics.py"
-    ) from e
-
 _EXAMPLES_DIR = Path(__file__).resolve().parent
-_MODEL_PATH = _EXAMPLES_DIR / "models" / "planar2.json"
 _SPEC_PATH = _EXAMPLES_DIR / "spec" / "robokots_traj_dynamics_d12.toml"
-_ORDER = 5
 _KOTS_BACKEND = "rust"
 
 
@@ -53,17 +42,13 @@ def main() -> None:
     if not trust_solver and (args.trial_history or args.show_trials):
         parser.error("--trial-history/--show-trials require --solver levenberg_marquardt or gauss_newton_krylov")
 
-    if not _MODEL_PATH.is_file():
-        raise SystemExit(f"Model file not found: {_MODEL_PATH}")
     if not _SPEC_PATH.is_file():
         raise SystemExit(f"TOML spec file not found: {_SPEC_PATH}")
 
     problem = load_problem_spec_toml(_SPEC_PATH)
-    kots = Kots.from_json_file(str(_MODEL_PATH), order=_ORDER)
 
     compiled = compile_kots_trajectory_problem(
         problem,
-        model=kots,
         kots_backend=_KOTS_BACKEND,
         jacobian_method=args.jacobian_method,
         jacobian_options=({"eps": args.numerical_eps} if args.jacobian_method == "numerical" else
@@ -114,7 +99,7 @@ def main() -> None:
     print("=== robokots_trajectory_dynamics ===")
     print(f"derivatives={compiled.derivative_settings}")
     print(f"spec={_SPEC_PATH}")
-    print(f"model={_MODEL_PATH} (order={_ORDER}, kots_backend={_KOTS_BACKEND})")
+    print(f"model={problem['model']['file']} (order={compiled.model_order}, kots_backend={_KOTS_BACKEND})")
     print(
         "nullspace="
         f"rank={reduction.rank} "

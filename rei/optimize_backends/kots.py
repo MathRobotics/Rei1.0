@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..backends.state.robotics.kots import KotsTrajectoryStateBuilder
+from ..backends.state.robotics.model_loading import load_kots_model
 from ..core.expr.nodes import ConstantExpr, RepeatConstantExpr, TrajectoryVarDerivativesExpr, TrajectoryVarExpr
 from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
@@ -611,7 +612,7 @@ class _KotsTrajectoryCompileAdapter:
 def compile_kots_trajectory_problem(
     dsl: Mapping[str, Any],
     *,
-    model: Any,
+    model: Any = None,
     data: Any = None,
     p_var: str | None = None,
     max_derivative_order: int | None = None,
@@ -645,7 +646,13 @@ def compile_kots_trajectory_problem(
     the supplied model (preserving gravity); use separate models for live
     compiled problems requiring different orders. Providers without set_order
     retain their configured order.
+
+    If model is omitted, load dsl['model']['file']; explicit model objects take
+    precedence over all file/locking metadata. TOML loaders resolve relative
+    paths against the TOML directory, without importing a robotics backend.
     """
+    if model is None:
+        model = load_kots_model(dsl, backend=kots_backend)
     required_order = _required_model_order(
         dsl,
         dynamics_fields=dynamics_fields,
