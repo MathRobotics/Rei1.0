@@ -36,8 +36,8 @@ where = ["."]
 include = ["rei*"]
 
 [tool.uv.sources]
-# Includes reproducible model perturbations and TOML configuration support.
-robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "3703e91697c737d4ce1e91ef025c9f580ef45e9b" }
+# Includes cached JIT autodiff Jacobians with batched output lists.
+robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "125c8703407fc2863d78df7ad39f5877eefa9de3" }
 
 [dependency-groups]
 dev = [

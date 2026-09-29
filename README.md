@@ -274,11 +274,21 @@ AD requires JAX and supports rigid-body momentum, force, torque, and their time
 derivatives for fixed/revolute/prismatic models; it does not support kinematic
 outputs or kinetic energy. Numerical kinetic-energy derivatives are also
 unsupported by RoboKots. Unsupported requests raise errors, without switching
-to analytic derivatives. AD runs without JIT, in a local float64 context, and
-forms a dense Jacobian before multiplying. Numerical/AD methods currently use
-per-time-step evaluation even when `batch_trajectory=True`; analytic mode keeps
-the batched fast paths. These alternatives are primarily useful for validation
-and can be much slower than the default.
+to analytic derivatives. AD calls `jacobian_autodiff(..., jit=True)` in a local
+float64 context. With `batch_trajectory=True`, supported dynamics outputs use
+time batches and output lists (including all joint torques). The returned
+state Jacobians are chained with each time's trajectory derivatives, including
+when an output uses fewer motion orders than the model. DOC, IOC/KKT and
+JVP/VJP products preserve the selected differentiation method.
+
+RoboKots owns the JIT function cache. Rei does not reuse AD batch states or
+evaluated AD Jacobians across calls; gravity, physical-model edits, motion
+order and output selection are evaluated afresh. As with other runtime state
+changes, invalidate `compiled.runtime.state` after external model/gravity edits.
+Changing robot topology requires a new builder. `batch_trajectory=False` keeps
+the single-time AD path; numerical differentiation remains single-time.
+Initial JIT compilation can dominate the first evaluation. Compare cold and
+warm timings with `developer/benchmarks/kots_autodiff_batch.py`.
 
 The Kots trajectory backend uses RoboKots multiply APIs by default for
 trajectory-parameter dynamics Jacobians:

@@ -59,7 +59,8 @@ def test_explicit_jacobian_method_never_uses_analytic(method):
             assert numerical
             return matrix.T @ rhs
 
-        def jacobian_autodiff(self, ref):
+        def jacobian_autodiff(self, ref, *, jit):
+            assert jit
             return matrix
 
     op = kots_api.RoboKotsJacobianOperator(Model(), jacobian_method=method)
@@ -86,7 +87,8 @@ def test_unsupported_derivative_does_not_fall_back(method):
             assert numerical, "must not fall back to analytic"
             raise NotImplementedError("unsupported state")
 
-        def jacobian_autodiff(self, ref):
+        def jacobian_autodiff(self, ref, *, jit):
+            assert jit
             raise NotImplementedError("unsupported state")
 
     op = kots_api.RoboKotsJacobianOperator(Model(), jacobian_method=method)
@@ -98,7 +100,8 @@ def test_autodiff_uses_local_double_precision():
     jax = pytest.importorskip("jax")
 
     class Model:
-        def jacobian_autodiff(self, ref):
+        def jacobian_autodiff(self, ref, *, jit):
+            assert jit
             assert jax.config.x64_enabled
             return np.eye(2)
 

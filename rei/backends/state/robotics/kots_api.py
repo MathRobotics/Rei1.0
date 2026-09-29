@@ -285,7 +285,7 @@ class RoboKotsJacobianOperator:
                 from jax.experimental import enable_x64
 
             with enable_x64():
-                return np.asarray(self.model.jacobian_autodiff(state_ref), dtype=float)
+                return np.asarray(self.model.jacobian_autodiff(state_ref, jit=True), dtype=float)
         return jacobian(self.model, state_ref)
 
     def dense_list(self, refs: tuple[Any, ...]) -> Array | None:
@@ -312,7 +312,11 @@ class RoboKotsJacobianOperator:
         if self.jacobian_method == "numerical":
             return np.asarray(self.model.jacobian_transpose_mul(state_ref, rhs, numerical=True), dtype=float)
         if self.jacobian_method == "autodiff":
-            return self.dense(state_ref).T @ np.asarray(rhs, dtype=float)
+            matrix = self.dense(state_ref).swapaxes(-1, -2)
+            values = np.asarray(rhs, dtype=float)
+            if matrix.ndim == 3 and values.ndim == 2:
+                return (matrix @ values[..., None])[..., 0]
+            return matrix @ values
         return _fallback_jacobian_transpose_mul(self.model, state_ref, rhs)
 
 

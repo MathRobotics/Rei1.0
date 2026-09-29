@@ -136,7 +136,7 @@ class KotsAdapter:
         return int(dof)
 
     def model_order(self) -> int:
-        if self._model_order_cache is not None:
+        if self._model_order_cache is not None and getattr(self.builder, "jacobian_method", "analytic") != "autodiff":
             return int(self._model_order_cache)
         order = infer_robot_model_order(self.model)
         self._model_order_cache = int(order)
