@@ -81,6 +81,9 @@ class GetStateExpr:
     key_value: StateKey
     key_jacs: Sequence[StateKey]
 
+    def children(self):
+        return ()
+
     def jvp(self, ctx: RuntimeContext, tangents):
         requests = [(self.key_value, key, v)
                     for key, v in zip(self.key_jacs, tangents, strict=True)]
@@ -185,6 +188,9 @@ class GetVarExpr:
     name: str
     vars: Sequence[Variable]
     k: int | None = None
+
+    def children(self):
+        return ()
 
     def jvp(self, ctx: RuntimeContext, tangents):
         # The value operation is linear and already validates time slicing.
@@ -325,6 +331,9 @@ class TrajectoryVarExpr:
     trajectory: TrajectoryMap
     k: int | None = None
 
+    def children(self):
+        return ()
+
     def jvp(self, ctx: RuntimeContext, tangents):
         tangent, = tangents
         return _trajectory_jvp(self.trajectory, tangent, self.k)
@@ -415,6 +424,9 @@ class TrajectoryVarDerivativesExpr:
     vars: Sequence[Variable]
     trajectories: Sequence[TrajectoryMap]
     k: int | None = None
+
+    def children(self):
+        return ()
 
     def jvp(self, ctx: RuntimeContext, tangents):
         tangent, = tangents
@@ -572,6 +584,9 @@ class TimeDiffExpr:
     scale: float = 1.0
     use_time_dt: bool = False
     dt: float | None = None
+
+    def children(self):
+        return (self.base,)
 
     def jvp(self, ctx: RuntimeContext, tangents):
         self.eval_value(ctx)  # Preserve shape/time validation of value evaluation.
@@ -732,6 +747,9 @@ class ConstantExpr:
     value: np.ndarray
     vars: Sequence[Variable] = ()
 
+    def children(self):
+        return ()
+
     def deps(self):
         return []
 
@@ -767,6 +785,9 @@ class RepeatConstantExpr:
     value: np.ndarray
     repeats: int
     vars: Sequence[Variable] = ()
+
+    def children(self):
+        return ()
 
     def deps(self):
         return []
@@ -804,6 +825,9 @@ class SubExpr:
     name: str
     a: Expr
     b: Expr
+
+    def children(self):
+        return (self.a, self.b)
 
     def jvp(self, ctx: RuntimeContext, tangents):
         by_name = dict(zip((v.name for v in self.vars), tangents, strict=True))
@@ -870,6 +894,9 @@ class JointPowerExpr:
     name: str
     torque: Expr
     velocity: Expr
+
+    def children(self):
+        return (self.torque, self.velocity)
 
     @property
     def vars(self):
@@ -958,6 +985,9 @@ class JointPowerSquaredExpr:
     torque: Expr
     velocity: Expr
 
+    def children(self):
+        return (self.torque, self.velocity)
+
     @property
     def vars(self):
         return self.torque.vars
@@ -992,6 +1022,9 @@ class JointPowerSquaredExpr:
 class StackExpr:
     name: str
     parts: Sequence[Expr]
+
+    def children(self):
+        return (*self.parts,)
 
     @property
     def vars(self):
@@ -1155,6 +1188,9 @@ class ComponentExpr:
     segment_dim: int
     index: int
 
+    def children(self):
+        return (self.base,)
+
     @property
     def vars(self):
         return self.base.vars
@@ -1254,6 +1290,9 @@ class ComponentExpr:
 class HingeExpr:
     name: str
     base: Expr
+
+    def children(self):
+        return (self.base,)
 
     def jvp(self, ctx: RuntimeContext, tangents):
         value = np.asarray(self.base.eval_value(ctx), dtype=float).reshape(-1)

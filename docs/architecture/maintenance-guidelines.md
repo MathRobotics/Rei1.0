@@ -15,6 +15,7 @@
 | 責務 | 配置 |
 |---|---|
 | 汎用capabilityへの変換 | `rei/problem/adapters.py`、`rei/flow/problem.py` |
+| 式木の子要素と走査 | 各Exprの `children()`、`rei/core/expr/traversal.py` |
 | 求解ループとその引数検証 | 各ソルバー。dispatchは数値を黙って丸めない |
 | 外部ソルバーの呼び出し・API差分の吸収 | `rei/optimize/solvers/scipy.py`、`cyipopt.py`、`liteopt.py` |
 | 外部ソルバー共通の目的関数評価・初期点設定 | `rei/optimize/solvers/_external_common.py` |
@@ -25,6 +26,11 @@
 IOCの診断文言は数値判定の根拠にしない。階数・残差・制約有無から判定し、
 説明メッセージの追加や翻訳で `unique_stationary_weights` が変わらないようにする。
 既存の辞書形式の戻り値は維持する。
+
+新しい合成Exprは `children()` で子要素を宣言する。レポート・描画・窓更新は
+`walk_expr()` を利用し、式の内部属性名を独自に列挙しない。
+走査はノードの同一性で重複・循環を除外する。既存のcustom Exprはdataclassまたは
+従来の属性名による走査にも対応する。
 
 外部ソルバーの依存ライブラリは各求解関数内で遅延importする。
 `dispatch.py` は設定解決・オプション検証・呼び出し先の選択を担当する。

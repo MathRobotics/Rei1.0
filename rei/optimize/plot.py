@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from ..core.expr.traversal import walk_expr as _walk_expr
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import canonical_dtype_name, canonical_field_name
 from .runtime import NLSRuntime
@@ -50,28 +51,6 @@ class TermAttrPlotSeries:
             if label != "":
                 return label
         return f"{self.name}[{i}]"
-
-
-def _iter_expr_children(expr: Any) -> Iterable[Any]:
-    for attr in ("a", "b", "base", "inner"):
-        child = getattr(expr, attr, None)
-        if child is not None and hasattr(child, "eval"):
-            yield child
-
-    parts = getattr(expr, "parts", None)
-    if isinstance(parts, (list, tuple)):
-        for child in parts:
-            if child is not None and hasattr(child, "eval"):
-                yield child
-
-
-def _walk_expr(expr: Any) -> Iterable[Any]:
-    stack = [expr]
-    while stack:
-        cur = stack.pop()
-        yield cur
-        children = list(_iter_expr_children(cur))
-        stack.extend(reversed(children))
 
 
 def _first_state_key_in_expr(expr: Any) -> StateKey | None:

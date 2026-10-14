@@ -15,6 +15,7 @@ from .nodes import (
     TrajectoryVarExpr,
 )
 from .registry import ExprRegister
+from .traversal import iter_expr_children, walk_expr
 from .types import (
     Array,
     DirectVectorExpr,
@@ -36,6 +37,8 @@ def register_stdlib(expr_register: ExprRegister) -> None:
 __all__ = [
     "Array",
     "ExprRegister",
+    "iter_expr_children",
+    "walk_expr",
     "register_stdlib",
     "Variable",
     "pack",

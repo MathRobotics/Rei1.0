@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
+from ..core.expr.traversal import walk_expr as _walk_expr
 from ..core.outcome import SolveOutcome
 from ..core.state_cache import StateKey
 from ..core.timing import TimingReport
@@ -50,35 +51,6 @@ def _format_vector(x: Array, *, max_elems: int, precision: int) -> str:
     else:
         s = s + " ..."
     return f"{s} (len={x.size})"
-
-
-def _iter_expr_children(expr: Any) -> Iterator[Any]:
-    a = getattr(expr, "a", None)
-    if a is not None and hasattr(a, "eval"):
-        yield a
-
-    b = getattr(expr, "b", None)
-    if b is not None and hasattr(b, "eval"):
-        yield b
-
-    base = getattr(expr, "base", None)
-    if base is not None and hasattr(base, "eval"):
-        yield base
-
-    parts = getattr(expr, "parts", None)
-    if isinstance(parts, (list, tuple)):
-        for p in parts:
-            if p is not None and hasattr(p, "eval"):
-                yield p
-
-
-def _walk_expr(expr: Any) -> Iterator[Any]:
-    stack = [expr]
-    while stack:
-        cur = stack.pop()
-        yield cur
-        children = list(_iter_expr_children(cur))
-        stack.extend(reversed(children))
 
 
 def collect_named_expr_values(

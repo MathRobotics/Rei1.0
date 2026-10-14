@@ -112,6 +112,9 @@ class DirectVectorExpr:
     fn_value: Callable[[RuntimeContext], Array]
     fn_blocks: Callable[[RuntimeContext], Sequence[Array]]
 
+    def children(self) -> tuple[Expr, ...]:
+        return ()
+
     def eval_value(self, ctx: RuntimeContext) -> Array:
         return np.asarray(self.fn_value(ctx), dtype=float).reshape(-1)
 

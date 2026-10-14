@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..backends.state.robotics.kots import KotsTrajectoryStateBuilder
+from ..core.expr.traversal import walk_expr
 from ..core.expr.nodes import ConstantExpr, RepeatConstantExpr, TrajectoryVarDerivativesExpr, TrajectoryVarExpr
 from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
@@ -158,39 +159,21 @@ class KotsTrajectoryProblemTemplate:
                     return order
             return None
 
-        def visit(value: Any) -> None:
-            value_id = id(value)
-            if value_id in seen:
-                return
-            seen.add(value_id)
-            if isinstance(value, TrajectoryVarExpr):
-                order = order_for(value.trajectory)
-                if order is not None:
-                    updates.append((value, "trajectory", new_maps[order]))
-                return
-            if isinstance(value, TrajectoryVarDerivativesExpr):
-                replaced = []
-                for traj in value.trajectories:
-                    order = order_for(traj)
-                    replaced.append(traj if order is None else new_maps[order])
-                updates.append((value, "trajectories", tuple(replaced)))
-                return
-            if isinstance(value, Mapping):
-                for item in value.values():
-                    visit(item)
-                return
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    visit(item)
-                return
-            fields = getattr(value, "__dataclass_fields__", None)
-            if fields is not None:
-                for name in fields:
-                    if name != "vars":
-                        visit(getattr(value, name))
-
         for expr, _cost in self.runtime.problem.terms:
-            visit(expr)
+            for value in walk_expr(expr):
+                if id(value) in seen:
+                    continue
+                seen.add(id(value))
+                if isinstance(value, TrajectoryVarExpr):
+                    order = order_for(value.trajectory)
+                    if order is not None:
+                        updates.append((value, "trajectory", new_maps[order]))
+                elif isinstance(value, TrajectoryVarDerivativesExpr):
+                    replaced = []
+                    for traj in value.trajectories:
+                        order = order_for(traj)
+                        replaced.append(traj if order is None else new_maps[order])
+                    updates.append((value, "trajectories", tuple(replaced)))
         return updates
 
     @property
@@ -216,30 +199,13 @@ class KotsTrajectoryProblemTemplate:
         found: dict[str, list[ConstantExpr | RepeatConstantExpr]] = {}
         seen: set[int] = set()
 
-        def visit(value: Any) -> None:
-            value_id = id(value)
-            if value_id in seen:
-                return
-            seen.add(value_id)
-            if isinstance(value, (ConstantExpr, RepeatConstantExpr)):
-                found.setdefault(str(value.name), []).append(value)
-                return
-            if isinstance(value, Mapping):
-                for item in value.values():
-                    visit(item)
-                return
-            if isinstance(value, (list, tuple)):
-                for item in value:
-                    visit(item)
-                return
-            fields = getattr(value, "__dataclass_fields__", None)
-            if fields is not None:
-                for name in fields:
-                    if name not in {"vars", "value"}:
-                        visit(getattr(value, name))
-
         for expr, _cost in self.runtime.problem.terms:
-            visit(expr)
+            for value in walk_expr(expr):
+                if id(value) in seen:
+                    continue
+                seen.add(id(value))
+                if isinstance(value, (ConstantExpr, RepeatConstantExpr)):
+                    found.setdefault(str(value.name), []).append(value)
         return found
 
     def update_window(
