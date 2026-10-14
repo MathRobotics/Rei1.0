@@ -132,15 +132,16 @@ class KotsTrajectoryProblemTemplate:
                 )
         return {order: self._immutable_map(traj) for order, traj in requested.items()}
 
-    def _rebind_expression_trajectory_maps(
+    def _prepare_expression_trajectory_map_updates(
         self,
         *,
         old_maps: Mapping[int, TrajectoryMap],
         new_maps: Mapping[int, TrajectoryMap],
-    ) -> None:
-        """Replace compiled trajectory-expression map references after validation."""
+    ) -> list[tuple[Any, str, Any]]:
+        """Prepare replacements without changing compiled expressions."""
         old_by_id = {id(traj): order for order, traj in old_maps.items()}
         seen: set[int] = set()
+        updates: list[tuple[Any, str, Any]] = []
 
         def order_for(traj: TrajectoryMap) -> int | None:
             direct = old_by_id.get(id(traj))
@@ -165,14 +166,14 @@ class KotsTrajectoryProblemTemplate:
             if isinstance(value, TrajectoryVarExpr):
                 order = order_for(value.trajectory)
                 if order is not None:
-                    value.trajectory = new_maps[order]
+                    updates.append((value, "trajectory", new_maps[order]))
                 return
             if isinstance(value, TrajectoryVarDerivativesExpr):
                 replaced = []
                 for traj in value.trajectories:
                     order = order_for(traj)
                     replaced.append(traj if order is None else new_maps[order])
-                value.trajectories = tuple(replaced)
+                updates.append((value, "trajectories", tuple(replaced)))
                 return
             if isinstance(value, Mapping):
                 for item in value.values():
@@ -190,6 +191,7 @@ class KotsTrajectoryProblemTemplate:
 
         for expr, _cost in self.runtime.problem.terms:
             visit(expr)
+        return updates
 
     @property
     def backend(self) -> str:
@@ -271,16 +273,14 @@ class KotsTrajectoryProblemTemplate:
             )
         if dt is not None and float(dt) != float(self.compiled.dt):
             raise ValueError("KotsTrajectoryProblemTemplate: dt differs; create a new template.")
+        new_maps = None
+        map_updates: list[tuple[Any, str, Any]] = []
         if trajectory_map is not None:
             new_maps = self._validate_trajectory_maps(trajectory_map, trajectory_derivative_maps)
             old_maps = dict(builder.trajectory_derivative_maps)
-            # All checks are complete before replacing any shared reference.
-            builder.trajectory_map = new_maps[0]
-            builder.trajectory_derivative_maps = dict(new_maps)
-            self.compiled.trajectory_map = new_maps[0]
-            self.compiled.trajectory_derivative_maps = dict(new_maps)
-            self._rebind_expression_trajectory_maps(old_maps=old_maps, new_maps=new_maps)
+            map_updates = self._prepare_expression_trajectory_map_updates(old_maps=old_maps, new_maps=new_maps)
 
+        point = None
         if p is not None:
             p_vec = np.asarray(p, dtype=float).reshape(-1)
             if p_vec.size != self.compiled.trajectory_map.p_dim:
@@ -289,12 +289,10 @@ class KotsTrajectoryProblemTemplate:
                     f"Expected {self.compiled.trajectory_map.p_dim}, got {p_vec.size}."
                 )
             start, stop = self.runtime.pack.slices[self.compiled.p_var]
-            current = self.runtime.pack.get()
-            if not np.array_equal(current[start:stop], p_vec):
-                dx = np.zeros_like(current)
-                dx[start:stop] = p_vec - current[start:stop]
-                self.runtime.pack.apply_dx(dx)
+            point = self.runtime.pack.get().copy()
+            point[start:stop] = p_vec
 
+        constant_updates: list[tuple[Any, np.ndarray]] = []
         if constants is not None:
             available = self._constant_exprs_by_name()
             for name_raw, value_raw in constants.items():
@@ -313,8 +311,20 @@ class KotsTrajectoryProblemTemplate:
                             f"KotsTrajectoryProblemTemplate: constant {name!r} shape mismatch. "
                             f"Expected {np.asarray(target.value).shape}, got {value.shape}."
                         )
-                    target.value = value.copy()
+                    constant_updates.append((target, value.copy()))
 
+        # Commit only after every map, parameter and constant has been checked.
+        if new_maps is not None:
+            builder.trajectory_map = new_maps[0]
+            builder.trajectory_derivative_maps = dict(new_maps)
+            self.compiled.trajectory_map = new_maps[0]
+            self.compiled.trajectory_derivative_maps = dict(new_maps)
+            for expr, attribute, value in map_updates:
+                setattr(expr, attribute, value)
+        if point is not None:
+            self.runtime.pack.set(point)
+        for target, value in constant_updates:
+            target.value = value
         if data is not None:
             builder.data = data
 

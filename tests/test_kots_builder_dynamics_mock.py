@@ -827,6 +827,69 @@ class TestKotsTrajectoryDynamicsMock:
         assert np.allclose(r, np.array([0.4, -0.45]))
         assert np.allclose(J, np.eye(2))
 
+    @pytest.mark.parametrize("failure", ["point", "missing_constant", "constant_shape"])
+    def test_window_validation_preserves_all_inputs_and_cached_linearization(self, failure):
+        dsl = {
+            "time": {"N": 1, "dt": .2},
+            "trajectory": {"type": "linear", "var": "p", "steps": 2, "q_dim": 2,
+                           "A": np.tile(np.eye(2), (2, 1)).tolist()},
+            "variables": [{"name": "p", "dim": 2, "init": [.25, -.5]}],
+            "terms": [{"expr": {"type": "sub",
+                "a": {"type": "get_traj_var", "var": "p", "k": 0},
+                "b": {"type": "const", "name": name, "var": "p", "value": [1., 2.]}},
+                "cost": {"type": "l2"}} for name in ("first", "second")],
+        }
+        template = compile_kots_trajectory_problem_template(dsl, model=_FakeKotsModel(), data={"window": 0})
+        runtime = template.runtime
+        residual, jacobian = (value.copy() for value in runtime.linearize())
+        point = runtime.pack.get().copy()
+        revisions = (runtime.pack.revision, runtime.state.revision)
+        old_map = template.compiled.trajectory_map
+        old_derivatives = dict(template.compiled.trajectory_derivative_maps)
+        builder = template.compiled.state_builder
+        old_data = builder.data
+        constants = {"first": [3., 4.]}
+        if failure == "missing_constant":
+            constants["missing"] = [0., 0.]
+        elif failure == "constant_shape":
+            constants["second"] = [0.]
+        replacement = copy.deepcopy(old_map)
+        replacement.A = 2 * np.asarray(replacement.A)
+        with pytest.raises((ValueError, KeyError)):
+            template.update_window(
+                p=[1.] if failure == "point" else [1., 2.],
+                trajectory_map=replacement,
+                trajectory_derivative_maps={order: value for order, value in old_derivatives.items() if order},
+                constants=constants, data={"window": 1},
+            )
+        assert template.compiled.trajectory_map is builder.trajectory_map is old_map
+        assert all(template.compiled.trajectory_derivative_maps[order] is value
+                   and builder.trajectory_derivative_maps[order] is value
+                   for order, value in old_derivatives.items())
+        assert builder.data is old_data
+        assert (runtime.pack.revision, runtime.state.revision) == revisions
+        np.testing.assert_array_equal(runtime.pack.get(), point)
+        actual_r, actual_j = runtime.linearize()
+        np.testing.assert_array_equal(actual_r, residual)
+        np.testing.assert_array_equal(actual_j, jacobian)
+        for expr, _ in runtime.problem.terms:
+            assert expr.a.trajectory is old_map
+            np.testing.assert_array_equal(expr.b.value, [1., 2.])
+        np.testing.assert_array_equal(runtime.eval_stacked_terms(weighted=True), residual)
+
+    def test_window_assigns_absolute_parameters_without_cancellation(self):
+        dsl = {
+            "time": {"N": 1, "dt": .2},
+            "trajectory": {"type": "linear", "var": "p", "steps": 2, "q_dim": 2,
+                           "A": np.tile(np.eye(2), (2, 1)).tolist()},
+            "variables": [{"name": "p", "dim": 2, "init": [1e16, -1e16]},
+                          {"name": "other", "dim": 1, "init": [7.]}],
+            "terms": [{"expr": {"type": "get_var", "var": "p"}, "cost": {"type": "l2"}}],
+        }
+        template = compile_kots_trajectory_problem_template(dsl, model=_FakeKotsModel())
+        template.update_window(p=[1., -1.])
+        np.testing.assert_array_equal(template.runtime.pack.get(), [1., -1., 7.])
+
     def test_kots_trajectory_template_replaces_sliding_window_maps_like_fresh_compile(self) -> None:
         def make_dsl(A) -> dict:
             return {
