@@ -6,7 +6,12 @@ from typing import Any
 
 import numpy as np
 
-from ..equations import RuntimeStationaritySource, estimate_stationarity_weights
+from ..equations import (
+    KktConstraintData,
+    RuntimeStationaritySource,
+    estimate_kkt_weights,
+    estimate_stationarity_weights,
+)
 from .trajectory_diagnostics import TrajectoryProblemDiagnostics
 
 Array = np.ndarray
@@ -96,24 +101,50 @@ def estimate_ioc_weights(
     simplex_method: str = "qr_nullspace",
     simplex_max_iters: int = 2000,
     simplex_tol: float = 1e-10,
+    constraint_mode: str = "objective_stationarity",
+    kkt_active_tol: float = 1e-8,
+    kkt_feasibility_tol: float = 1e-8,
 ) -> dict[str, Any]:
     """Adapt a compiled trajectory to the backend-independent IOC fitter.
 
     See :func:`rei.equations.estimate_stationarity_weights` for coefficient
-    normalization and the limitations of objective-only stationarity.
+    normalization and the limitations of objective-only stationarity. Select
+    ``constraint_mode="kkt"`` to fit constraint multipliers. KKT mode uses all
+    objective terms and the active signed inequalities, independently of
+    ``active_mode``; ``include_constraints=True`` is rejected because constraints
+    have multipliers rather than objective weights. ``simplex_max_iters`` and
+    ``simplex_tol`` also control the KKT active-set least-squares solver.
     """
     backend, compiled_obj, diagnostics = _as_compiled_ioc(compiled)
-    result = estimate_stationarity_weights(
-        RuntimeStationaritySource(compiled_obj.runtime),
-        p=p,
-        include_constraints=include_constraints,
-        active_mode=active_mode,
-        stationarity_scaling=stationarity_scaling,
-        stationarity_scale_eps=stationarity_scale_eps,
-        simplex_method=simplex_method,
-        simplex_max_iters=simplex_max_iters,
-        simplex_tol=simplex_tol,
-    )
+    runtime = compiled_obj.runtime
+    source = RuntimeStationaritySource(runtime)
+    if constraint_mode == "kkt":
+        if include_constraints:
+            raise ValueError("include_constraints=True is incompatible with constraint_mode='kkt'.")
+        eq_indices = runtime.find_constraint_term_indices(kind="eq")
+        ineq_indices = runtime.find_constraint_term_indices(kind="ineq")
+        if set(runtime.find_constraint_term_indices()) != set(eq_indices + ineq_indices):
+            raise ValueError("KKT IOC requires an explicit eq/ineq kind on every constraint.")
+        if p is not None:
+            source.set_point(np.asarray(p, dtype=float).reshape(-1))
+        h, Jh = runtime.linearize_stacked_terms(weighted=False, term_indices=eq_indices)
+        g, Jg = runtime.linearize_inequality_constraints(term_indices=ineq_indices)
+        result = estimate_kkt_weights(
+            source, KktConstraintData(h, Jh, g, Jg),
+            stationarity_scaling=stationarity_scaling,
+            stationarity_scale_eps=stationarity_scale_eps,
+            active_tol=kkt_active_tol, feasibility_tol=kkt_feasibility_tol,
+            max_iters=simplex_max_iters, tol=simplex_tol,
+        )
+    elif constraint_mode == "objective_stationarity":
+        result = estimate_stationarity_weights(
+            source, p=p, include_constraints=include_constraints,
+            active_mode=active_mode, stationarity_scaling=stationarity_scaling,
+            stationarity_scale_eps=stationarity_scale_eps, simplex_method=simplex_method,
+            simplex_max_iters=simplex_max_iters, simplex_tol=simplex_tol,
+        )
+    else:
+        raise ValueError("constraint_mode must be 'objective_stationarity' or 'kkt'.")
     return {
         "backend": str(backend),
         "requested_terms": [] if diagnostics is None else [dict(t) for t in diagnostics.requested_terms],

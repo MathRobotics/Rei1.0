@@ -10,6 +10,7 @@ import pytest
     ("core", {"backends", "optimize", "optimize_backends", "problem", "equations", "flow"}),
     ("backends", {"optimize", "optimize_backends", "problem", "equations", "flow"}),
     ("optimize", {"backends", "optimize_backends"}),
+    ("equations", {"backends", "optimize_backends"}),
 ])
 def test_layer_import_direction(layer, forbidden):
     root = Path(__file__).resolve().parents[1]

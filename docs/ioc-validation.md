@@ -6,7 +6,7 @@
 ## 結論
 
 1. 既定の列正規化を使うと、内部係数をそのまま元の目的関数の重みとして返していた。修正済み。
-2. 制約のある観測では、目的項の停留条件だけから生成時の重みを推定できるとは限らない。現APIはKKT乗数を推定しない。この制限を診断に明示したが、制約付き推定そのものは未実装。
+2. 制約のある観測では、目的項の停留条件だけから生成時の重みを推定できるとは限らない。既定モードはKKT乗数を推定しない。この制限を診断に明示し、2026-10-14に明示選択のKKT推定を追加した（下記）。
 3. 重複項やゼロ勾配項では、重みを一意に復元できない。階数・除外項・停留残差の診断を追加した。
 4. 識別可能な無制約問題では、既知重みの復元と再最適化を確認した。
 
@@ -41,7 +41,7 @@
 真の重みでの勾配は `-1.3`。制約ヤコビアンが1なので、乗数1.3でKKT停留条件を満たす。
 不等式の場合も乗数は非負で、実行可能性と相補性を満たす。
 
-現IOCはこの観測から `[0.75, 0.25]` を推定する。目的項の残差がゼロになっても、
+既定の目的項停留条件によるIOCはこの観測から `[0.75, 0.25]` を推定する。目的項の残差がゼロになっても、
 生成時の重みを復元した証拠にならない。`include_constraints=True` にしても、
 制約項の `J.T @ residual` は境界でゼロになり、KKTの `J.T @ multiplier` の代わりにはならない。
 
@@ -51,7 +51,7 @@
 - `validation.constraint_kkt_checked=False` と診断メッセージを返す。
 - 制約項がある場合、`identifiability.unique_stationary_weights` を真にしない。
 
-次の実装では、等式制約の許容方向への射影または自由な乗数、不等式制約の非負乗数と活動集合を扱う必要がある。
+追加したKKTモードでは等式制約の自由な乗数、不等式制約の非負乗数と活動集合を扱う。
 ただし実装しても、一つの制約境界の観測だけでは重みは一意に決まらないことがある。
 現在の診断は保守的で、非活動制約や事前に削減済みの制約を自動的に対応済みとは判定しない。
 
@@ -92,3 +92,61 @@ Rust側の再最適化は既定の勾配閾値1e-10で `stalled` となったた
 PYTHONPATH=. python -m pytest tests/test_ioc_validation.py -q
 PYTHONPATH=. MPLBACKEND=Agg python -m pytest -q
 ```
+
+## 制約付きKKT推定（2026-10-14）
+
+`rei.equations.estimate_stationarity_weights(source)` が汎用の目的項停留条件による推定、
+`estimate_kkt_weights(source, KktConstraintData(...))` が制約付き推定を担う。
+いずれも `StationaritySource` を受け取り、ロボットのコンパイル処理に依存しない。
+既存の `estimate_ioc_weights(compiled)` は接続とバックエンド診断を担当する。
+
+```python
+result = estimate_ioc_weights(compiled, p=demonstration, constraint_mode="kkt")
+print(result["weights"])
+print(result["kkt"]["equality_multipliers"])
+print(result["kkt"]["inequality_multipliers"])
+print(result["kkt"]["ok"], result["identifiability"]["unique_stationary_weights"])
+```
+
+KKTモードは以下を同時に満たす最小残差解を求める。
+
+- `A @ w + Jh.T @ lambda + Jg.T @ mu = 0`
+- `w >= 0`, `sum(w) = 1`、等式乗数 `lambda` は自由、`mu >= 0`
+- `h = 0`, `g <= 0`、非活動行の `mu = 0`、`mu * g = 0`
+
+等式法線をSVDで除き、非負係数と重みの合計条件を持つ最小二乗を活動集合法で解く。
+各活動面は零空間の最小二乗で解き、NumPyだけで動作する。
+不等式は `linearize_inequality_constraints()` の符号付き余裕とヤコビアンを使う。
+境界で勾配がゼロになるHingeペナルティを使用しない。
+
+`kkt_active_tol` は活動集合の判定、`kkt_feasibility_tol` は実行可能性・相補性の判定に使用する。
+`simplex_max_iters` と `simplex_tol` はこのモードでも反復上限・停留判定を制御する。
+`include_constraints=True` は拒否する。制約は重み付き目的項ではなく乗数として扱う。
+`active_mode` にかかわらずゼロ勾配を含む全目的項を保持する。
+`simplex_method` はKKTモードには使用しない（専用の活動集合法を使用）。
+
+`stationarity.ikkt_residual` はKKTモードでは**乗数を含む**停留残差になる。
+目的項だけの勾配は `stationarity.objective_gradient` で確認できる。
+乗数の単位は重みを合計1にした元の目的項の `J.T @ r` に対応する。
+内部係数 `scaled_weights` と元の係数 `weights` の変換は既定モードと同じ。
+KKT求解結果は `kkt`、既定モードの単体求解結果は `simplex` に置く。
+
+KKT適合と識別性は別の判定であり、制約が重みの違いを吸収する例では成功したKKT解でも
+`unique_stationary_weights=False` を返す。等式・活動不等式の法線と重み合計条件を含む行列から、
+乗数だけの零空間を差し引いた重みの自由度を `weight_affine_nullity` として返す。
+非負境界を使う厳密な一意性判定ではなく、保守的な線形階数判定である。
+KKT適合だけで非凸問題の最小性や生成時の行動原理を保証しない。
+
+`tests/test_ioc_kkt.py` は等式の許容方向で既知重み `[.75, .25]` を復元し、
+活動不等式の正の乗数、非活動乗数ゼロ、逆向き法線、実行不可能性、相補性違反、
+従属法線、ゼロ・重複目的項、反復上限を検証する。
+凸二次問題の閉形式による再最適化も一致する。
+100個のランダムな非負制約付き小問題は、SciPy SLSQPとの独立比較で目的値差 `4.44e-16` 以下だった。
+
+実行例（追加依存不要）:
+
+```sh
+uv run --locked python examples/constrained_stationarity_ioc.py
+```
+
+動力学主体の軌道や実測データでの制約付き重み復元は、今後の検証対象とする。

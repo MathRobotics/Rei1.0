@@ -22,12 +22,18 @@
 | 外部ソルバーの呼び出し・API差分の吸収 | `rei/optimize/solvers/scipy.py`、`cyipopt.py`、`liteopt.py` |
 | 外部ソルバー共通の目的関数評価・初期点設定 | `rei/optimize/solvers/_external_common.py` |
 | バックエンド状態・ヤコビアンの取得 | 各バックエンドのadapter/API層 |
-| IOCのコンパイル・推定の組み立て | `rei/optimize_backends/trajectory_ioc.py` |
-| IOCの識別性・適用範囲の診断 | `rei/optimize_backends/_ioc_diagnostics.py` |
+| IOCのコンパイル・ランタイム接続 | `rei/optimize_backends/trajectory_ioc.py` |
+| capabilityからのIOC推定・識別性の診断 | `rei/equations/ioc.py`、`_ioc_diagnostics.py` |
+| 等式・活動不等式のKKT重み・乗数推定 | `rei/equations/ioc_kkt.py` |
 
 IOCの診断文言は数値判定の根拠にしない。階数・残差・制約有無から判定し、
 説明メッセージの追加や翻訳で `unique_stationary_weights` が変わらないようにする。
 既存の辞書形式の戻り値は維持する。
+
+汎用IOC推定は `StationaritySource` と符号付き制約データを受け取り、
+コンパイル済みロボットを必要としない。既定の目的項停留条件による推定を維持し、
+`constraint_mode="kkt"` で制約乗数を推定する。制約のペナルティ勾配を
+乗数の代用にしない。KKT適合と重みの識別性は別々に判定する。
 
 新しい合成Exprは `children()` で子要素を宣言する。レポート・描画・窓更新は
 `walk_expr()` を利用し、式の内部属性名を独自に列挙しない。
