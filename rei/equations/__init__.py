@@ -1,5 +1,6 @@
 """Equation-oriented problem definitions (root, operator, dynamics, etc.)."""
 
+from .ioc import estimate_stationarity_weights
 from .problem import (
     EquationPoint,
     EvaluateEquation,
@@ -29,6 +30,7 @@ from .stationarity import (
 )
 
 __all__ = [
+    "estimate_stationarity_weights",
     "EquationPoint",
     "EvaluateEquation",
     "LinearizedEquation",

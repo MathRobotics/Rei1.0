@@ -5,7 +5,7 @@ from typing import Any
 
 import numpy as np
 
-from ..equations.stationarity import StationarityTermContribution, term_constraint_kind
+from .stationarity import StationarityTermContribution, term_constraint_kind
 
 
 def diagnose_ioc_fit(

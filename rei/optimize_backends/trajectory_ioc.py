@@ -6,16 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from ._ioc_diagnostics import diagnose_ioc_fit
-
-from ..equations import (
-    RuntimeStationaritySource,
-    build_reference_simplex_init,
-    build_stationarity_gradient_matrix,
-    filter_stationarity_contributions,
-    select_active_stationarity_indices,
-    solve_simplex_min_norm,
-)
+from ..equations import RuntimeStationaritySource, estimate_stationarity_weights
 from .trajectory_diagnostics import TrajectoryProblemDiagnostics
 
 Array = np.ndarray
@@ -94,64 +85,6 @@ def _as_compiled_ioc(compiled: Any) -> tuple[str, Any, TrajectoryProblemDiagnost
     return backend, compiled, getattr(compiled, "diagnostics", None)
 
 
-def _scale_columns(
-    A: Array,
-    contributions: list[Any],
-    *,
-    mode: str,
-    eps: float,
-) -> tuple[Array, Array]:
-    if not np.isfinite(eps) or eps <= 0:
-        raise ValueError("stationarity_scale_eps must be finite and positive.")
-    mode_name = str(mode).strip().lower()
-    if mode_name == "none":
-        scales = np.ones((A.shape[1],), dtype=float)
-    elif mode_name == "gradient_norm":
-        norms = np.linalg.norm(A, axis=0)
-        scales = 1.0 / np.maximum(norms, float(eps))
-    elif mode_name == "residual_norm":
-        norms = np.asarray(
-            [
-                0.0 if c.residual_norm is None else float(c.residual_norm)
-                for c in contributions
-            ],
-            dtype=float,
-        )
-        scales = 1.0 / np.maximum(norms, float(eps))
-    elif mode_name == "weighted_residual_norm":
-        norms = np.asarray(
-            [
-                0.0 if c.weighted_residual_norm is None else float(c.weighted_residual_norm)
-                for c in contributions
-            ],
-            dtype=float,
-        )
-        scales = 1.0 / np.maximum(norms, float(eps))
-    else:
-        raise ValueError(
-            "stationarity_scaling must be one of 'none', 'gradient_norm', "
-            "'residual_norm', or 'weighted_residual_norm'."
-        )
-    return A * scales.reshape(1, -1), scales
-
-
-def _contribution_json(term: Any, *, weight: float | None = None) -> dict[str, Any]:
-    out = {
-        "term_index": int(term.term_index),
-        "name": str(term.name),
-        "attrs": dict(term.attrs),
-        "residual_size": None if term.residual_size is None else int(term.residual_size),
-        "residual_norm": None if term.residual_norm is None else float(term.residual_norm),
-        "weighted_residual_norm": None
-        if term.weighted_residual_norm is None
-        else float(term.weighted_residual_norm),
-        "gradient_norm": float(np.linalg.norm(np.asarray(term.gradient, dtype=float).reshape(-1))),
-    }
-    if weight is not None:
-        out["weight"] = float(weight)
-    return out
-
-
 def estimate_ioc_weights(
     compiled: Any,
     *,
@@ -164,129 +97,29 @@ def estimate_ioc_weights(
     simplex_max_iters: int = 2000,
     simplex_tol: float = 1e-10,
 ) -> dict[str, Any]:
-    """Estimate normalized coefficients of the original, unweighted objectives.
+    """Adapt a compiled trajectory to the backend-independent IOC fitter.
 
-    ``scaled_weights`` contains the simplex coefficients used internally after
-    column scaling. ``weights`` converts those coefficients back to the original
-    objective scale. For noisy data, the selected scaling still determines the
-    fitting objective. Constraint terms are not KKT multipliers; see the returned
-    ``validation`` diagnostics before interpreting a constrained demonstration.
+    See :func:`rei.equations.estimate_stationarity_weights` for coefficient
+    normalization and the limitations of objective-only stationarity.
     """
     backend, compiled_obj, diagnostics = _as_compiled_ioc(compiled)
-    runtime = compiled_obj.runtime
-    source = RuntimeStationaritySource(runtime)
-    if p is not None:
-        source.set_point(np.asarray(p, dtype=float).reshape(-1))
-
-    required = source.required_list(None)
-    contributions_all = source.term_contributions(required=required)
-    contributions = filter_stationarity_contributions(
-        contributions_all,
+    result = estimate_stationarity_weights(
+        RuntimeStationaritySource(compiled_obj.runtime),
+        p=p,
         include_constraints=include_constraints,
-    )
-    A, term_indices = build_stationarity_gradient_matrix(
-        contributions,
-        n_total=int(source.n_total),
-    )
-    A_scaled, scales = _scale_columns(
-        A,
-        contributions,
-        mode=stationarity_scaling,
-        eps=float(stationarity_scale_eps),
-    )
-    active_idx, active_grad_idx, active_res_idx = select_active_stationarity_indices(
-        contributions,
-        mode=active_mode,
-    )
-
-    weights = np.zeros((len(contributions),), dtype=float)
-    scaled_weights = np.zeros_like(weights)
-    simplex_out = None
-    ikkt_residual = np.zeros((A.shape[0],), dtype=float)
-    ikkt_residual_scaled = np.zeros((A.shape[0],), dtype=float)
-    if len(active_idx) > 0:
-        active = np.asarray(active_idx, dtype=int)
-        x0 = build_reference_simplex_init(contributions, active_idx)
-        if x0 is not None:
-            x0 = x0 / scales[active]
-            x0 = x0 / x0.sum()
-        simplex_out = solve_simplex_min_norm(
-            A_scaled[:, active],
-            x0=x0,
-            method=simplex_method,
-            max_iters=int(simplex_max_iters),
-            tol=float(simplex_tol),
-        )
-        scaled_weights[active] = np.asarray(simplex_out.solution, dtype=float).reshape(-1)
-        # A_scaled @ z = A @ (scales * z). Report coefficients of A,
-        # normalized to unit sum, rather than the coefficients of A_scaled.
-        active_scales = scales[active]
-        original = scaled_weights[active] * (active_scales / active_scales.max())
-        weights[active] = original / original.sum()
-        ikkt_residual = A @ weights
-        ikkt_residual_scaled = A_scaled @ scaled_weights
-
-    fit_diagnostics = diagnose_ioc_fit(
-        contributions_all=contributions_all,
-        contributions=contributions,
-        active_idx=active_idx,
-        A_scaled=A_scaled,
-        ikkt_residual_scaled=ikkt_residual_scaled,
+        active_mode=active_mode,
+        stationarity_scaling=stationarity_scaling,
+        stationarity_scale_eps=stationarity_scale_eps,
+        simplex_method=simplex_method,
+        simplex_max_iters=simplex_max_iters,
         simplex_tol=simplex_tol,
     )
-
     return {
         "backend": str(backend),
-        "requested_terms": []
-        if diagnostics is None
-        else [dict(t) for t in diagnostics.requested_terms],
-        "active_terms": [
-            _contribution_json(contributions[i], weight=float(weights[i]))
-            for i in active_idx
-        ],
-        "terms": [
-            _contribution_json(term, weight=float(weights[i]))
-            for i, term in enumerate(contributions)
-        ],
-        "skipped_terms": []
-        if diagnostics is None
-        else [d.to_json_dict() for d in diagnostics.unsupported_terms],
-        "warnings": []
-        if diagnostics is None
-        else [d.to_json_dict() for d in diagnostics.warnings],
-        "stationarity_scaling": {
-            "mode": str(stationarity_scaling),
-            "eps": float(stationarity_scale_eps),
-            "column_scale": [float(x) for x in scales],
-            "active_column_scale": [float(scales[i]) for i in active_idx],
-        },
-        "stationarity": {
-            "term_indices": [int(i) for i in term_indices],
-            "active_indices": [int(i) for i in active_idx],
-            "active_gradient_indices": [int(i) for i in active_grad_idx],
-            "active_residual_indices": [int(i) for i in active_res_idx],
-            "ikkt_residual": ikkt_residual.tolist(),
-            "ikkt_residual_scaled": ikkt_residual_scaled.tolist(),
-            "ikkt_residual_norm": float(np.linalg.norm(ikkt_residual)),
-            "ikkt_residual_scaled_norm": float(np.linalg.norm(ikkt_residual_scaled)),
-        },
-        "simplex": None
-        if simplex_out is None
-        else {
-            "method": str(simplex_out.meta.get("method", simplex_method)),
-            "status": str(simplex_out.stats.status),
-            "iterations": int(simplex_out.stats.iterations),
-            "objective": None
-            if simplex_out.stats.objective is None
-            else float(simplex_out.stats.objective),
-            "residual_norm": None
-            if simplex_out.stats.residual_norm is None
-            else float(simplex_out.stats.residual_norm),
-            "meta": dict(simplex_out.meta),
-        },
-        "weights": [float(w) for w in weights],
-        "scaled_weights": [float(w) for w in scaled_weights],
-        **fit_diagnostics,
+        "requested_terms": [] if diagnostics is None else [dict(t) for t in diagnostics.requested_terms],
+        "skipped_terms": [] if diagnostics is None else [d.to_json_dict() for d in diagnostics.unsupported_terms],
+        "warnings": [] if diagnostics is None else [d.to_json_dict() for d in diagnostics.warnings],
+        **result,
     }
 
 
