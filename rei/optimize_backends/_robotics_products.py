@@ -9,7 +9,7 @@ import numpy as np
 from ..core.expr.nodes import GetStateExpr, JointPowerSquaredExpr, StackExpr, TrajectoryVarExpr
 from ..core.state_cache import StateKey
 from ..core.state_schema import canonical_field_name
-from ..optimize.runtime import _dedupe_required
+from ..optimize.term_products import StateTermProducts
 
 Array = np.ndarray
 
@@ -40,44 +40,11 @@ def _same_trajectory_map(left: Any, right: Any) -> bool:
 
 
 
-class RoboticsTermProducts:
+class RoboticsTermProducts(StateTermProducts):
     def __init__(self, builder: Any):
         self.builder = builder
 
 
-    def shared_jvp(self, runtime, indices, direction):
-        """Send compatible dynamics stacks together so backends can share tangents."""
-        batch = getattr(runtime.state, 'jacobian_mul_many', None)
-        if not callable(batch):
-            return {}
-        requests, selections = [], []
-        for idx in indices:
-            expr, _ = runtime.problem.terms[idx]
-            if not isinstance(expr, StackExpr) or not expr.parts:
-                continue
-            if not all(isinstance(p, GetStateExpr) and p.key_value.dtype == 'dynamics'
-                       and len(p.vars) == len(p.key_jacs) == 1 for p in expr.parts):
-                continue
-            start = len(requests)
-            for part in expr.parts:
-                lo, hi = runtime.pack.slices[part.vars[0].name]
-                if hi-lo != part.vars[0].dim():
-                    raise ValueError('Shared JVP: variable size mismatch.')
-                requests.append((part.key_value, part.key_jacs[0], direction[lo:hi]))
-            selections.append((idx, start, len(requests)))
-        if len(selections) < 2:
-            return {}
-        try:
-            values = batch(requests)
-        except (AttributeError, NotImplementedError):
-            return {}
-        if len(values) != len(requests):
-            raise ValueError('Shared JVP: wrong number of products.')
-        values = [np.asarray(v, dtype=float) for v in values]
-        if any(v.ndim != 1 for v in values):
-            raise ValueError('Shared JVP: expected vector products.')
-        return {idx: np.concatenate(values[start:stop])
-                for idx, start, stop in selections}
 
 
     def residual_vjp(
@@ -270,144 +237,3 @@ class RoboticsTermProducts:
             # Preserve the established per-expression VJP implementation for
             # unsupported state families and older backend contracts.
             return {}, zero, set()
-
-
-    def gradient_contributions(
-        self, runtime,
-        *,
-        term_indices: Iterable[int],
-    ) -> dict[int, tuple[Array, Array, Array]]:
-        """Evaluate compatible dynamics stacks across IOC terms in one VJP batch.
-
-        RoboKots sums its heterogeneous VJP requests.  Matrix RHS columns
-        preserve the individual term gradients while still using one reverse
-        pass; the legacy per-request API remains the fallback.
-        """
-        batch_vjp = getattr(runtime.state, "jacobian_transpose_mul_many", None) if runtime.state is not None else None
-        fused_column_vjp = (
-            getattr(runtime.state, "jacobian_transpose_mul_many_fused_columns", None)
-            if runtime.state is not None else None
-        )
-        if not callable(batch_vjp) and not callable(fused_column_vjp):
-            return {}
-
-        candidates: list[dict[str, Any]] = []
-        value_required: list[StateKey] = []
-        reference_vars: list[Any] | None = None
-        for idx in term_indices:
-            expr, cost = runtime.problem.terms[idx]
-            if not isinstance(expr, StackExpr) or len(expr.parts) < 2:
-                continue
-            if not all(isinstance(part, GetStateExpr) for part in expr.parts):
-                continue
-            parts = list(expr.parts)
-            if not all(getattr(part.key_value, "dtype", None) == "dynamics" for part in parts):
-                continue
-            vars_list = list(expr.vars)
-            if len(vars_list) == 0 or any(
-                len(part.vars) != len(vars_list)
-                or len(part.key_jacs) != len(vars_list)
-                or any(var is not ref for var, ref in zip(part.vars, vars_list, strict=True))
-                for part in parts
-            ):
-                continue
-            if reference_vars is None:
-                reference_vars = vars_list
-            elif len(reference_vars) != len(vars_list) or any(
-                var is not ref for var, ref in zip(vars_list, reference_vars, strict=True)
-            ):
-                continue
-            value_required.extend(part.key_value for part in parts)
-            candidates.append({"idx": idx, "expr": expr, "cost": cost, "parts": parts, "vars": vars_list})
-
-        if len(candidates) < 2 or reference_vars is None:
-            return {}
-
-        try:
-            runtime.update_state_if_needed(required=_dedupe_required(value_required))
-            requests_by_var: list[list[tuple[StateKey, StateKey, Array]]] = [[] for _ in reference_vars]
-            objective_requests_by_var: list[list[list[tuple[StateKey, StateKey, Array]]]] = [
-                [] for _ in reference_vars
-            ]
-            request_owners: list[list[tuple[dict[str, Any], int]]] = [[] for _ in reference_vars]
-            for candidate in candidates:
-                rhs_parts: list[Array] = []
-                values = [np.asarray(part.eval_value(runtime.ctx), dtype=float).reshape(-1) for part in candidate["parts"]]
-                raw = np.concatenate(values, axis=0)
-                candidate["raw"] = raw
-                offset = 0
-                for value in values:
-                    stop = offset + int(value.size)
-                    rhs_parts.append(raw[offset:stop])
-                    offset = stop
-                candidate["grads"] = [np.zeros((var.dim(),), dtype=float) for var in reference_vars]
-                for var_index, _var in enumerate(reference_vars):
-                    objective_requests: list[tuple[StateKey, StateKey, Array]] = []
-                    for part, rhs_part in zip(candidate["parts"], rhs_parts, strict=True):
-                        request = (part.key_value, part.key_jacs[var_index], rhs_part)
-                        requests_by_var[var_index].append(request)
-                        objective_requests.append(request)
-                        request_owners[var_index].append((candidate, var_index))
-                    objective_requests_by_var[var_index].append(objective_requests)
-
-            if callable(fused_column_vjp):
-                for var_index, request_groups in enumerate(objective_requests_by_var):
-                    columns = np.asarray(fused_column_vjp(request_groups), dtype=float)
-                    expected = (reference_vars[var_index].dim(), len(candidates))
-                    if columns.shape != expected:
-                        raise ValueError(
-                            "fused-column residual VJP shape mismatch. "
-                            f"Expected {expected}, got {columns.shape}."
-                        )
-                    for column, candidate in enumerate(candidates):
-                        candidate["grads"][var_index] += columns[:, column]
-                out: dict[int, tuple[Array, Array, Array]] = {}
-                for candidate in candidates:
-                    raw = np.asarray(candidate["raw"], dtype=float).reshape(-1)
-                    zeros = [np.zeros((raw.size, var.dim()), dtype=float) for var in candidate["vars"]]
-                    apply_cost = getattr(candidate["cost"], "apply", None)
-                    weighted = (np.asarray(apply_cost(raw, zeros)[0], dtype=float).reshape(-1)
-                                if callable(apply_cost) else raw.copy())
-                    out[int(candidate["idx"])] = (
-                        raw, weighted,
-                        runtime._assemble_global_gradient(
-                            term_name=runtime._term_display_name(int(candidate["idx"])),
-                            expr_vars=candidate["vars"], gradients=candidate["grads"],
-                        ),
-                    )
-                return out
-
-            for var_index, requests in enumerate(requests_by_var):
-                contributions = [np.asarray(value, dtype=float) for value in batch_vjp(requests)]
-                if len(contributions) != len(requests):
-                    raise ValueError("batched IOC VJP returned an unexpected number of contributions")
-                for contribution, (candidate, owner_var_index) in zip(
-                    contributions,
-                    request_owners[var_index],
-                    strict=True,
-                ):
-                    candidate["grads"][owner_var_index] += np.asarray(contribution, dtype=float).reshape(-1)
-
-            out: dict[int, tuple[Array, Array, Array]] = {}
-            for candidate in candidates:
-                raw = np.asarray(candidate["raw"], dtype=float).reshape(-1)
-                zeros = [np.zeros((raw.size, var.dim()), dtype=float) for var in candidate["vars"]]
-                apply_cost = getattr(candidate["cost"], "apply", None)
-                if callable(apply_cost):
-                    weighted, _blocks = apply_cost(raw, zeros)
-                    weighted = np.asarray(weighted, dtype=float).reshape(-1)
-                else:
-                    weighted = raw.copy()
-                out[int(candidate["idx"])] = (
-                    raw,
-                    weighted,
-                    runtime._assemble_global_gradient(
-                        term_name=runtime._term_display_name(int(candidate["idx"])),
-                        expr_vars=candidate["vars"],
-                        gradients=candidate["grads"],
-                    ),
-                )
-            return out
-        except (AttributeError, KeyError, ValueError, TypeError, RuntimeError):
-            return {}
-

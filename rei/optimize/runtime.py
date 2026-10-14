@@ -11,7 +11,7 @@ from ..core.expr.nodes import HingeExpr, StackExpr
 from ..core.state_cache import OwnerKey, StateKey
 from ..core.state_schema import canonical_dtype_name, canonical_field_name
 from ..problem import NLSProblem
-from .term_products import TermProductPlan
+from .term_products import StateTermProducts, TermProductPlan
 
 Array = np.ndarray
 
@@ -111,7 +111,7 @@ class NLSRuntime:
     ctx: RuntimeContext
     required: list[StateKey] = field(default_factory=list)
     solver_config: dict[str, Any] = field(default_factory=dict)
-    term_products: TermProductPlan | None = None
+    term_products: TermProductPlan | None = field(default_factory=StateTermProducts)
 
     def __post_init__(self) -> None:
         self.required = _dedupe_required(self.required)
