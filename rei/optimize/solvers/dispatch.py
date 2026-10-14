@@ -1,27 +1,28 @@
+"""Resolve solver options and dispatch to the selected implementation."""
+
 from __future__ import annotations
 
-import inspect
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
+from operator import index
 from typing import Any
 
 import numpy as np
 
-from ...core.outcome import SolveOutcome, SolveStats
 from ...core.state_cache import StateKey
-from ...core.timing import Profiler, ensure_profiler
-from ...problem import LinearizedProblem, as_linearized_problem
-from ...xops import as_vec
-from ..history import BackendProgress
+from ...core.timing import Profiler
+from ._external_common import IterCallback, SolveResult, _format_option_names
+from .cyipopt import solve_cyipopt_minimize
 from .gauss_newton import solve_gauss_newton
 from .gauss_newton_operator import solve_gauss_newton_operator
 from .gauss_newton_krylov import solve_gauss_newton_krylov
 from .levenberg_marquardt import solve_levenberg_marquardt
+from .liteopt import solve_liteopt_gd
 from .lm_ls import solve_lm_ls
 from .nls import nls
+from .scipy import solve_scipy_minimize
 
 Array = np.ndarray
-SolveResult = SolveOutcome
-IterCallback = Callable[[int, float, float], None]
 
 _COMMON_SOLVE_OPTION_KEYS = frozenset(
     {
@@ -131,6 +132,44 @@ _BUILTIN_NLS_SOLVERS = frozenset({
 
 _ALL_REI_SOLVER_OPTION_KEYS = frozenset().union(*_SOLVER_REI_OPTION_KEYS.values())
 
+# Only defaults that differ from the direct solver APIs belong here.
+_DISPATCH_DEFAULTS = {
+    "gauss_newton": {"max_iters": 200},
+    "gauss_newton_operator": {"max_iters": 200},
+}
+_LITEOPT_GD_ONLY_OPTIONS = frozenset({
+    "step_size", "tol_grad", "nonfinite_retries", "nonfinite_step_shrink", "min_step_size",
+})
+_LITEOPT_GN_ONLY_OPTIONS = _SOLVER_REI_OPTION_KEYS["liteopt"] - (
+    _LITEOPT_GD_ONLY_OPTIONS | {"method", "verbose", "max_iters", "line_search"}
+)
+_LITEOPT_GN_DEFAULTS = {
+    "tol_r": 1e-10,
+    "tol_dx": 1e-12,
+    "lambda_": 1e-8,
+    "damping_update": "fixed",
+    "linear_system": "normal_jtj",
+    "line_search_method": "strict_decrease",
+    "line_search": True,
+    "ls_beta": 0.5,
+    "ls_min_step": 1e-8,
+    "ls_max_steps": 12,
+}
+_INTEGER_OPTION_MINIMUMS = {
+    "max_iters": 0,
+    "ls_max_iters": 1,
+    "ls_max_steps": 1,
+    "ls_max_retries": 0,
+    "inner_max_iters": 1,
+    "nonfinite_retries": 0,
+}
+
+
+@dataclass(frozen=True)
+class _SolveRequest:
+    solver: str
+    arguments: dict[str, Any]
+
 
 def _allowed_solve_option_keys(solver_key: str) -> frozenset[str]:
     allowed = set(_COMMON_SOLVE_OPTION_KEYS)
@@ -138,10 +177,6 @@ def _allowed_solve_option_keys(solver_key: str) -> frozenset[str]:
     if solver_key not in _BUILTIN_NLS_SOLVERS:
         allowed.add("backend_options")
     return frozenset(allowed)
-
-
-def _format_option_names(keys: Iterable[str]) -> str:
-    return ", ".join(sorted(str(k) for k in keys))
 
 
 def _normalize_backend_options_for_solver(
@@ -191,63 +226,15 @@ def _normalize_backend_options_for_solver(
     return backend_local
 
 
-class _LinearizedObjective:
-    def __init__(
-        self,
-        problem: LinearizedProblem,
-        *,
-        required: Iterable[StateKey] | None = None,
-    ) -> None:
-        self.problem = problem
-        self.required = None if required is None else list(required)
-        self._last_x: Array | None = None
-        self._last_cost: float = float("nan")
-        self._last_grad: Array | None = None
-        self._last_rnorm: float = float("inf")
-
-    def eval(self, x: Array) -> tuple[float, Array, float]:
-        x_vec = as_vec(x, expected_size=int(self.problem.n_total), name="x")
-        if self._last_x is not None and np.array_equal(self._last_x, x_vec):
-            if self._last_grad is None:
-                raise RuntimeError("internal error: gradient cache is missing.")
-            return self._last_cost, self._last_grad, self._last_rnorm
-
-        self.problem.set_point(x_vec)
-        r_all, J_all = self.problem.linearize(required=self.required)
-        r = np.asarray(r_all, dtype=float).reshape(-1)
-        J = np.asarray(J_all, dtype=float)
-
-        cost = float(r @ r)
-        grad = np.asarray(2.0 * (J.T @ r), dtype=float).reshape(-1)
-        rnorm = float(np.linalg.norm(r))
-
-        self._last_x = x_vec.copy()
-        self._last_cost = cost
-        self._last_grad = grad
-        self._last_rnorm = rnorm
-        return cost, grad, rnorm
-
-
-def _extract_x_from_callback_arg(xk: Any, *, size: int) -> Array | None:
-    try:
-        return as_vec(xk, expected_size=size, name="callback.x")
-    except Exception:
-        pass
-
-    x_attr = getattr(xk, "x", None)
-    if x_attr is None:
-        return None
-    try:
-        return as_vec(x_attr, expected_size=size, name="callback.x")
-    except Exception:
-        return None
-
-
 def _merge_options(*sources: Mapping[str, Any] | None) -> dict[str, Any]:
     merged: dict[str, Any] = {}
     for src in sources:
         if src is None:
             continue
+        if not isinstance(src, Mapping):
+            raise TypeError("solve: options must be a mapping or None.")
+        if any(not isinstance(key, str) for key in src):
+            raise TypeError("solve: option names must be strings.")
         merged.update(dict(src))
     return merged
 
@@ -259,807 +246,133 @@ def _as_options_mapping(value: Any, *, where: str) -> Mapping[str, Any] | None:
         raise TypeError(f"{where}: options['backend_options'] must be a mapping or None.")
     return dict(value)
 
+
 def _normalize_term_indices_option(raw: Any) -> tuple[int, ...] | None:
     if raw is None:
         return None
     if isinstance(raw, (str, bytes)):
         raise TypeError("term_indices must be an iterable of integers, not a string.")
     try:
-        vals = tuple(int(v) for v in raw)
-    except Exception as e:  # pragma: no cover
+        vals = []
+        for value in raw:
+            if isinstance(value, (bool, np.bool_)):
+                raise TypeError("boolean term index")
+            vals.append(index(value))
+    except TypeError as e:
         raise TypeError("term_indices must be an iterable of integers or None.") from e
-    return vals
+    return tuple(vals)
 
 
-def _initialize_linear_problem_point(
-    linear_problem: LinearizedProblem,
-    *,
-    x0: Array | Any = None,
-) -> Array:
-    n_total = int(linear_problem.n_total)
-    if x0 is not None:
-        linear_problem.set_point(as_vec(x0, expected_size=n_total, name="x0"))
-    return np.asarray(linear_problem.get_point(), dtype=float).reshape(-1).copy()
-
-
-def solve_scipy_minimize(
-    problem: Any,
-    *,
-    x0: Array | Any = None,
-    required: Iterable[StateKey] | None = None,
-    weighted: bool | None = None,
-    term_indices: Iterable[int] | None = None,
-    method: str = "L-BFGS-B",
-    max_iters: int | None = 200,
-    tol: float | None = None,
-    bounds: Any = None,
-    verbose: bool = True,
-    options: Mapping[str, Any] | None = None,
-    on_iter: IterCallback | None = None,
-    profiler: Profiler | None = None,
-) -> SolveResult:
-    """Solve `||r(x)||^2` via scipy.optimize.minimize and return SolveOutcome."""
-
-    prof = ensure_profiler(profiler)
-    try:
-        from scipy.optimize import minimize
-    except ImportError as e:  # pragma: no cover
-        raise ImportError(
-            "solve_scipy_minimize requires scipy. Install scipy and re-run."
-        ) from e
-
-    with prof.span("solve.setup"):
-        linear_problem = as_linearized_problem(
-            problem,
-            weighted=weighted,
-            term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
-        )
-        x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
-        req = linear_problem.required_list(required)
-        objective = _LinearizedObjective(linear_problem, required=req)
-        n_total = int(x0_init.size)
-        initial_cost, grad0, _rnorm0 = objective.eval(x0_init)
-    progress = BackendProgress("scipy_minimize", verbose=verbose)
-    progress.initial(initial_cost, grad0 / 2)
-
-    options_local: dict[str, Any] = {} if options is None else dict(options)
-    if max_iters is not None and "maxiter" not in options_local:
-        options_local["maxiter"] = int(max_iters)
-
-    iter_count = 0
-    last_dxnorm = 0.0
-    prev_x = x0_init.copy()
-
-    def fun(x: Array) -> float:
-        fx, _gx, _rnorm = objective.eval(x)
-        return float(fx)
-
-    def jac(x: Array) -> Array:
-        _fx, gx, _rnorm = objective.eval(x)
-        return gx
-
-    def callback(xk: Any) -> None:
-        nonlocal iter_count, last_dxnorm, prev_x
-        x_vec = _extract_x_from_callback_arg(xk, size=n_total)
-        if x_vec is None:
-            return
-        fx, gx, rnorm = objective.eval(x_vec)
-        last_dxnorm = float(np.linalg.norm(x_vec - prev_x))
-        prev_x = x_vec.copy()
-        progress.iterate(fx, last_dxnorm, gx / 2)
-        if on_iter is not None:
-            on_iter(iter_count, rnorm, last_dxnorm)
-        iter_count += 1
-
-    with prof.span("solve.backend"):
-        result = minimize(
-            fun=fun,
-            x0=x0_init,
-            jac=jac,
-            method=str(method),
-            tol=tol,
-            bounds=bounds,
-            callback=callback,
-            options=options_local,
-        )
-
-    with prof.span("solve.finalize"):
-        x_star = as_vec(getattr(result, "x", x0_init), expected_size=n_total, name="result.x")
-        cost, final_grad, rnorm = objective.eval(x_star)
-    iters = int(getattr(result, "nit", iter_count))
-    if iters <= 0:
-        iters = int(iter_count)
-    if iter_count <= 0:
-        last_dxnorm = float(np.linalg.norm(x_star - x0_init))
-    converged = bool(getattr(result, "success", False))
-    status = "converged" if converged else "failed"
-    message = str(getattr(result, "message", "") or "")
-
-    outcome = SolveOutcome(
-        solution=x_star.copy(),
-        stats=SolveStats(
-            status=status,
-            iterations=iters,
-            initial_objective=float(initial_cost),
-            objective=float(cost),
-            residual_norm=float(rnorm),
-            step_norm=float(last_dxnorm),
-            message=message,
-        ),
-        timing=prof.snapshot(),
-        meta={
-            "solver": "scipy_minimize",
-            "method": str(method),
-            "x0": x0_init.copy(),
-        },
-    )
-    progress.final(outcome, final_grad / 2)
-    return outcome
-
-
-def solve_cyipopt_minimize(
-    problem: Any,
-    *,
-    x0: Array | Any = None,
-    required: Iterable[StateKey] | None = None,
-    weighted: bool | None = None,
-    term_indices: Iterable[int] | None = None,
-    max_iters: int | None = 200,
-    tol: float | None = None,
-    bounds: Any = None,
-    verbose: bool = True,
-    options: Mapping[str, Any] | None = None,
-    on_iter: IterCallback | None = None,
-    profiler: Profiler | None = None,
-) -> SolveResult:
-    """Solve `||r(x)||^2` via cyipopt.minimize_ipopt and return SolveOutcome."""
-
-    prof = ensure_profiler(profiler)
-    try:
-        from cyipopt import minimize_ipopt
-    except ImportError as e:  # pragma: no cover
-        raise ImportError(
-            "solve_cyipopt_minimize requires cyipopt. Install cyipopt and re-run."
-        ) from e
-
-    with prof.span("solve.setup"):
-        linear_problem = as_linearized_problem(
-            problem,
-            weighted=weighted,
-            term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
-        )
-        x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
-        req = linear_problem.required_list(required)
-        objective = _LinearizedObjective(linear_problem, required=req)
-        n_total = int(x0_init.size)
-        initial_cost, grad0, _rnorm0 = objective.eval(x0_init)
-    progress = BackendProgress("cyipopt_minimize", verbose=verbose)
-    progress.initial(initial_cost, grad0 / 2)
-
-    options_local: dict[str, Any] = {} if options is None else dict(options)
-    if max_iters is not None and "max_iter" not in options_local:
-        options_local["max_iter"] = int(max_iters)
-    options_local.setdefault("print_level", 0)
-
-    iter_count = 0
-    last_dxnorm = 0.0
-    prev_x = x0_init.copy()
-
-    def fun(x: Array) -> float:
-        fx, _gx, _rnorm = objective.eval(x)
-        return float(fx)
-
-    def jac(x: Array) -> Array:
-        _fx, gx, _rnorm = objective.eval(x)
-        return gx
-
-    def callback(xk: Any) -> None:
-        nonlocal iter_count, last_dxnorm, prev_x
-        x_vec = _extract_x_from_callback_arg(xk, size=n_total)
-        if x_vec is None:
-            return
-        fx, gx, rnorm = objective.eval(x_vec)
-        last_dxnorm = float(np.linalg.norm(x_vec - prev_x))
-        prev_x = x_vec.copy()
-        progress.iterate(fx, last_dxnorm, gx / 2)
-        if on_iter is not None:
-            on_iter(iter_count, rnorm, last_dxnorm)
-        iter_count += 1
-
-    kwargs: dict[str, Any] = {
-        "fun": fun,
-        "x0": x0_init,
-        "jac": jac,
-        "bounds": bounds,
-        "options": options_local,
-    }
-    if tol is not None:
-        kwargs["tol"] = float(tol)
-    if verbose or on_iter is not None:
-        kwargs["callback"] = callback
-
-    with prof.span("solve.backend"):
+def _validate_integer_options(solver: str, options: Mapping[str, Any]) -> None:
+    """Reject fractional counts before a backend can truncate them or set x0."""
+    for name, minimum in _INTEGER_OPTION_MINIMUMS.items():
+        if name not in options:
+            continue
+        value = options[name]
+        if value is None and (
+            name == "inner_max_iters"
+            or (name == "max_iters" and solver not in _BUILTIN_NLS_SOLVERS)
+        ):
+            continue
+        message = f"solve({solver}): {name} must be a finite integer >= {minimum}."
         try:
-            result = minimize_ipopt(**kwargs)
-        except TypeError as e:
-            if "callback" not in str(e):
-                raise
-            kwargs.pop("callback", None)
-            result = minimize_ipopt(**kwargs)
-
-    with prof.span("solve.finalize"):
-        x_star = as_vec(getattr(result, "x", x0_init), expected_size=n_total, name="result.x")
-        cost, final_grad, rnorm = objective.eval(x_star)
-    iters = int(getattr(result, "nit", iter_count))
-    if iters <= 0:
-        iters = int(iter_count)
-    if iter_count <= 0:
-        last_dxnorm = float(np.linalg.norm(x_star - x0_init))
-    converged = bool(getattr(result, "success", False))
-    status = "converged" if converged else "failed"
-    message = str(getattr(result, "message", "") or "")
-
-    outcome = SolveOutcome(
-        solution=x_star.copy(),
-        stats=SolveStats(
-            status=status,
-            iterations=iters,
-            initial_objective=float(initial_cost),
-            objective=float(cost),
-            residual_norm=float(rnorm),
-            step_norm=float(last_dxnorm),
-            message=message,
-        ),
-        timing=prof.snapshot(),
-        meta={
-            "solver": "cyipopt_minimize",
-            "x0": x0_init.copy(),
-        },
-    )
-    progress.final(outcome, final_grad / 2)
-    return outcome
+            valid = (
+                not isinstance(value, (bool, np.bool_, str, bytes))
+                and np.isscalar(value)
+                and np.isfinite(value)
+                and int(value) == value
+                and value >= minimum
+            )
+        except (TypeError, ValueError, OverflowError):
+            valid = False
+        if not valid:
+            raise ValueError(message)
 
 
-def _parse_liteopt_gd_result(
-    result: Any,
-    *,
-    n_total: int,
-) -> tuple[Array, bool, int | None]:
-    if isinstance(result, Mapping):
-        x_raw = result.get("x_star", result.get("x", None))
-        if x_raw is None:
-            raise ValueError("solve_liteopt_gd: liteopt.gd result must provide x_star (or x).")
-        converged = bool(result.get("converged", result.get("success", False)))
-        iters_raw = result.get("iters", result.get("n_iters", result.get("nit", None)))
-        iters = None if iters_raw is None else int(iters_raw)
-        x_star = as_vec(x_raw, expected_size=n_total, name="result.x")
-        return x_star, converged, iters
-
-    if isinstance(result, (tuple, list)):
-        if len(result) < 3:
+def _prepare_solver_arguments(
+    solver: str, options: Mapping[str, Any], backend_options: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Apply dispatch defaults and translate only the selected solver's options."""
+    arguments = dict(_DISPATCH_DEFAULTS.get(solver, {}))
+    arguments.update({
+        key: value for key, value in options.items() if key in _SOLVER_REI_OPTION_KEYS[solver]
+    })
+    if solver == "liteopt":
+        method = str(arguments.get("method", "gd")).strip().lower()
+        if method not in {"gd", "gn"}:
             raise ValueError(
-                "solve_liteopt_gd: liteopt.gd result must be "
-                "(x_star, f_star, converged) or Mapping."
+                "solve_liteopt_gd: liteopt method must be 'gd' or 'gn'. "
+                f"Got method={options.get('method')!r}."
             )
-        x_star = as_vec(result[0], expected_size=n_total, name="result.x")
-        converged = bool(result[2])
-        iters = None
-        if len(result) >= 4:
-            iters = int(result[3])
-        return x_star, converged, iters
-
-    x_star = as_vec(result, expected_size=n_total, name="result.x")
-    return x_star, False, None
-
-
-def _parse_liteopt_gn_result(
-    result: Any,
-    *,
-    n_total: int,
-) -> tuple[Array, float, int | None, float, float, bool]:
-    if isinstance(result, Mapping):
-        x_raw = result.get("x_star", result.get("x", None))
-        if x_raw is None:
-            raise ValueError("solve_liteopt_gd: liteopt.gn result must provide x_star (or x).")
-        cost_raw = result.get("cost", result.get("f_star", float("nan")))
-        iters_raw = result.get("iters", result.get("n_iters", result.get("nit", None)))
-        rnorm_raw = result.get("r_norm", result.get("residual_norm", float("nan")))
-        dxnorm_raw = result.get("dx_norm", result.get("step_norm", float("nan")))
-        ok_raw = result.get("ok", result.get("converged", result.get("success", False)))
-        x_star = as_vec(x_raw, expected_size=n_total, name="result.x")
-        iters = None if iters_raw is None else int(iters_raw)
-        return (
-            x_star,
-            float(cost_raw),
-            iters,
-            float(rnorm_raw),
-            float(dxnorm_raw),
-            bool(ok_raw),
-        )
-
-    if isinstance(result, (tuple, list)):
-        if len(result) < 6:
+        incompatible = _LITEOPT_GN_ONLY_OPTIONS if method == "gd" else _LITEOPT_GD_ONLY_OPTIONS
+        invalid = incompatible.intersection(arguments)
+        if invalid:
             raise ValueError(
-                "solve_liteopt_gd: liteopt.gn result must be "
-                "(x_star, cost, iters, r_norm, dx_norm, ok) or Mapping."
+                f"solve(liteopt): unsupported option(s) for method={method!r}: "
+                f"{_format_option_names(invalid)}."
             )
-        x_star = as_vec(result[0], expected_size=n_total, name="result.x")
-        return (
-            x_star,
-            float(result[1]),
-            int(result[2]),
-            float(result[3]),
-            float(result[4]),
-            bool(result[5]),
-        )
+        arguments["method"] = method
+        if method == "gn":
+            # Keep ls_max_steps precedence over the compatibility spelling.
+            if "ls_max_iters" in arguments:
+                arguments.setdefault("ls_max_steps", arguments.pop("ls_max_iters"))
+            arguments = {**_LITEOPT_GN_DEFAULTS, **arguments}
+            if arguments["line_search"] is None:
+                arguments["line_search"] = True
+    _validate_integer_options(solver, arguments)
+    if solver not in _BUILTIN_NLS_SOLVERS:
+        arguments["options"] = backend_options
+    return arguments
 
-    raise ValueError(
-        "solve_liteopt_gd: unsupported liteopt.gn result type. "
-        "Expected Mapping, tuple, or list."
+
+def _resolve_solve_request(
+    problem: Any, *, solver: str | None, x0: Any, options: Mapping[str, Any] | None,
+) -> _SolveRequest:
+    """Resolve configuration and validate arguments without evaluating the problem."""
+    from ..solver_config import normalize_solver_config
+
+    raw_config = getattr(problem, "solver_config", None)
+    config = normalize_solver_config(raw_config) if raw_config else {}
+    selected = solver if solver is not None else config.get("name", "levenberg_marquardt")
+    key = str(selected).strip().lower()
+    if key not in _SOLVER_REI_OPTION_KEYS:
+        raise ValueError(
+            "Unknown solver. Use one of: "
+            f"{', '.join(repr(name) for name in _SOLVER_REI_OPTION_KEYS)}. "
+            "Solver aliases are not supported. "
+            f"Got solver={selected!r}."
+        )
+    # A different explicit solver starts with its own defaults.
+    configured_options = config.get("options") if key == config.get("name") else None
+    opts = _merge_options(configured_options, options)
+    if x0 is not None and "x0" in opts:
+        raise ValueError("solve: pass x0 either as keyword argument or options['x0'], not both.")
+    weighted = opts.get("weighted")
+    if weighted is not None and not isinstance(weighted, (bool, np.bool_)):
+        raise TypeError("solve: weighted must be a boolean or None.")
+    term_indices = _normalize_term_indices_option(opts.get("term_indices"))
+    backend_options = _normalize_backend_options_for_solver(opts, solver_key=key)
+    arguments = _prepare_solver_arguments(key, opts, backend_options)
+    arguments.update(
+        x0=opts.get("x0", x0),
+        weighted=None if weighted is None else bool(weighted),
+        term_indices=term_indices,
     )
+    return _SolveRequest(solver=key, arguments=arguments)
 
 
-def _liteopt_uses_options_api(fn: Callable[..., Any]) -> bool:
-    try:
-        signature = inspect.signature(fn)
-    except (TypeError, ValueError):
-        return True
-    return "options" in signature.parameters
-
-
-def _silence_liteopt_output(fn: Callable[..., Any], options: dict[str, Any]) -> None:
-    """Reserve top-level verbose for Rei while honoring explicit backend options."""
-    if "verbose" in options:
-        return
-    try:
-        parameters = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return
-    if "verbose" in parameters or "options" in parameters:
-        options["verbose"] = False
-
-
-def _call_liteopt_gd(
-    liteopt: Any,
-    fun: Callable[[Array], float],
-    grad: Callable[[Array], Array],
-    x0: Array,
-    options: Mapping[str, Any],
-) -> Any:
-    gd = liteopt.gd
-    if _liteopt_uses_options_api(gd):
-        return gd(fun, grad, x0, options=dict(options))
-    return gd(fun, grad, x0, **dict(options))
-
-
-def _call_liteopt_gn(
-    liteopt: Any,
-    residual: Callable[[Array], Array],
-    jacobian: Callable[[Array], Array],
-    x0: Array,
-    options: Mapping[str, Any],
-) -> Any:
-    gn = liteopt.gn
-    if _liteopt_uses_options_api(gn):
-        return gn(residual, x0, jacobian=jacobian, options=dict(options))
-    return gn(residual, jacobian, x0, **dict(options))
-
-
-def solve_liteopt_gd(
-    problem: Any,
-    *,
-    x0: Array | Any = None,
-    required: Iterable[StateKey] | None = None,
-    weighted: bool | None = None,
-    term_indices: Iterable[int] | None = None,
-    method: str = "gd",
-    verbose: bool | None = True,
-    max_iters: int | None = 200,
-    step_size: float = 1e-3,
-    tol_grad: float = 1e-4,
-    tol_r: float | None = None,
-    tol_dx: float | None = None,
-    lambda_: float | None = None,
-    step_scale: float | None = None,
-    damping_update: str | None = None,
-    linear_system: str | None = None,
-    line_search_method: str | None = None,
-    line_search: bool | None = None,
-    ls_beta: float | None = None,
-    ls_min_step: float | None = None,
-    ls_max_steps: int | None = None,
-    ls_max_iters: int | None = None,
-    c_armijo: float | None = None,
-    nonfinite_retries: int = 8,
-    nonfinite_step_shrink: float = 0.2,
-    min_step_size: float = 1e-12,
-    options: Mapping[str, Any] | None = None,
-    on_iter: IterCallback | None = None,
-    profiler: Profiler | None = None,
-) -> SolveResult:
-    """Solve `||r(x)||^2` via liteopt (`gd` or `gn`) and return SolveOutcome."""
-
-    prof = ensure_profiler(profiler)
-    try:
-        import liteopt
-    except ImportError as e:  # pragma: no cover
-        raise ImportError(
-            "solve_liteopt_gd requires liteopt. Install liteopt and re-run."
-        ) from e
-
-    with prof.span("solve.setup"):
-        linear_problem = as_linearized_problem(
-            problem,
-            weighted=weighted,
-            term_indices=None if term_indices is None else tuple(int(i) for i in term_indices),
-        )
-        x0_init = _initialize_linear_problem_point(linear_problem, x0=x0)
-        req = linear_problem.required_list(required)
-        objective = _LinearizedObjective(linear_problem, required=req)
-        n_total = int(x0_init.size)
-        initial_cost, grad0, _rnorm0 = objective.eval(x0_init)
-    method_key = str(method).strip().lower()
-    if method_key not in {"gd", "gn"}:
-        raise ValueError(
-            "solve_liteopt_gd: liteopt method must be 'gd' or 'gn'. "
-            f"Got method={method!r}."
-        )
-    progress = BackendProgress(f"liteopt_{method_key}", verbose=bool(verbose))
-    progress.initial(initial_cost, grad0 / 2)
-
-    iter_count = 0
-    last_dxnorm = 0.0
-    prev_x = x0_init.copy()
-
-    def _is_nonfinite_error(exc: BaseException) -> bool:
-        if isinstance(exc, FloatingPointError):
-            return True
-        msg = str(exc).lower()
-        return (
-            "non-finite" in msg
-            or "must return finite" in msg
-            or "nan" in msg
-            or "inf" in msg
-            or "overflow" in msg
-        )
-
-    if method_key == "gn":
-        options_local: dict[str, Any] = {} if options is None else dict(options)
-        _silence_liteopt_output(liteopt.gn, options_local)
-        if max_iters is not None and "max_iters" not in options_local:
-            options_local["max_iters"] = int(max_iters)
-        if tol_r is not None and "tol_r" not in options_local:
-            options_local["tol_r"] = float(tol_r)
-        if tol_dx is not None and "tol_dx" not in options_local:
-            options_local["tol_dx"] = float(tol_dx)
-        if lambda_ is not None and "lambda_" not in options_local:
-            options_local["lambda_"] = float(lambda_)
-        if step_scale is not None and "step_scale" not in options_local:
-            options_local["step_scale"] = float(step_scale)
-        if damping_update is not None and "damping_update" not in options_local:
-            options_local["damping_update"] = str(damping_update)
-        if linear_system is not None and "linear_system" not in options_local:
-            options_local["linear_system"] = str(linear_system)
-        if line_search_method is not None and "line_search_method" not in options_local:
-            options_local["line_search_method"] = str(line_search_method)
-        if line_search is not None and "line_search" not in options_local:
-            options_local["line_search"] = bool(line_search)
-        if ls_beta is not None and "ls_beta" not in options_local:
-            options_local["ls_beta"] = float(ls_beta)
-        if ls_min_step is not None and "ls_min_step" not in options_local:
-            options_local["ls_min_step"] = float(ls_min_step)
-        if "ls_max_steps" not in options_local:
-            if ls_max_steps is not None:
-                options_local["ls_max_steps"] = int(ls_max_steps)
-            elif ls_max_iters is not None:
-                options_local["ls_max_steps"] = int(ls_max_iters)
-        if c_armijo is not None and "c_armijo" not in options_local:
-            options_local["c_armijo"] = float(c_armijo)
-
-        gn_iter_count = 0
-        gn_prev_x: Array | None = None
-
-        def _emit_gn_iter(x_vec: Array, r_vec: Array) -> None:
-            nonlocal gn_iter_count, gn_prev_x, last_dxnorm
-            if on_iter is None:
-                return
-            if gn_prev_x is not None and np.array_equal(gn_prev_x, x_vec):
-                return
-            if gn_prev_x is None:
-                dxnorm_local = 0.0
-            else:
-                dxnorm_local = float(np.linalg.norm(x_vec - gn_prev_x))
-            last_dxnorm = dxnorm_local
-            on_iter(gn_iter_count, float(np.linalg.norm(r_vec)), dxnorm_local)
-            gn_iter_count += 1
-            gn_prev_x = x_vec.copy()
-
-        def residual(x: Array) -> Array:
-            x_vec = as_vec(x, expected_size=n_total, name="x")
-            if not bool(np.all(np.isfinite(x_vec))):
-                raise ValueError("solve_liteopt_gd: non-finite iterate encountered.")
-            linear_problem.set_point(x_vec)
-            r_all, _J_all = linear_problem.linearize(required=req)
-            r = np.asarray(r_all, dtype=float).reshape(-1)
-            if not bool(np.all(np.isfinite(r))):
-                raise ValueError("solve_liteopt_gd: residual became non-finite.")
-            _emit_gn_iter(x_vec, r)
-            return r
-
-        def jacobian(x: Array) -> Array:
-            x_vec = as_vec(x, expected_size=n_total, name="x")
-            if not bool(np.all(np.isfinite(x_vec))):
-                raise ValueError("solve_liteopt_gd: non-finite iterate encountered.")
-            linear_problem.set_point(x_vec)
-            _r_all, J_all = linear_problem.linearize(required=req)
-            J = np.asarray(J_all, dtype=float)
-            if not bool(np.all(np.isfinite(J))):
-                raise ValueError("solve_liteopt_gd: jacobian became non-finite.")
-            return J
-
-        result: Any | None = None
-        failure_message = ""
-        with prof.span("solve.backend"):
-            try:
-                result = _call_liteopt_gn(
-                    liteopt,
-                    residual,
-                    jacobian,
-                    x0_init.copy(),
-                    options_local,
-                )
-            except Exception as e:
-                if not _is_nonfinite_error(e):
-                    raise
-                failure_message = str(e)
-                result = None
-
-        converged = False
-        x_star = x0_init.copy()
-        iters = int(max_iters) if max_iters is not None else 0
-        cost = float("nan")
-        rnorm = float("nan")
-        if result is not None:
-            (
-                x_star,
-                cost,
-                iters_raw,
-                rnorm,
-                last_dxnorm,
-                converged,
-            ) = _parse_liteopt_gn_result(result, n_total=n_total)
-            if iters_raw is not None:
-                iters = int(iters_raw)
-        with prof.span("solve.finalize"):
-            final_gradient = None
-            if bool(np.all(np.isfinite(x_star))):
-                cost_eval, final_gradient, rnorm_eval = objective.eval(x_star)
-                if bool(np.isfinite(cost_eval)):
-                    cost = float(cost_eval)
-                if bool(np.isfinite(rnorm_eval)):
-                    rnorm = float(rnorm_eval)
-            else:
-                failure_message = "solve_liteopt_gd: backend returned a non-finite solution vector."
-
-        finite_objective = bool(np.isfinite(cost)) and bool(np.isfinite(rnorm))
-        status = "converged" if bool(converged and finite_objective) else "failed"
-        message = ""
-        if result is None:
-            message = "liteopt.gn aborted due to non-finite objective/residual."
-            if str(failure_message).strip():
-                message += f" last_error={failure_message}"
-        elif not finite_objective:
-            message = (
-                "liteopt.gn returned a non-finite final objective/residual; "
-                "marking solve as failed."
-            )
-        outcome = SolveOutcome(
-            solution=x_star.copy(),
-            stats=SolveStats(
-                status=status,
-                iterations=int(iters),
-                initial_objective=float(initial_cost),
-                objective=float(cost),
-                residual_norm=float(rnorm),
-                step_norm=float(last_dxnorm),
-                message=message,
-            ),
-            timing=prof.snapshot(),
-            meta={
-                "solver": "liteopt_gn",
-                "method": "gn",
-                "x0": x0_init.copy(),
-            },
-        )
-        progress.final(outcome, None if final_gradient is None else final_gradient / 2)
-        return outcome
-
-    options_local = {} if options is None else dict(options)
-    _silence_liteopt_output(liteopt.gd, options_local)
-    nonfinite_retries = int(options_local.pop("nonfinite_retries", nonfinite_retries))
-    nonfinite_step_shrink = float(
-        options_local.pop("nonfinite_step_shrink", nonfinite_step_shrink)
-    )
-    min_step_size = float(options_local.pop("min_step_size", min_step_size))
-
-    if nonfinite_retries < 0:
-        raise ValueError(
-            "solve_liteopt_gd: nonfinite_retries must be >= 0, "
-            f"got {nonfinite_retries}."
-        )
-    if not (0.0 < nonfinite_step_shrink < 1.0):
-        raise ValueError(
-            "solve_liteopt_gd: nonfinite_step_shrink must be in (0, 1), "
-            f"got {nonfinite_step_shrink}."
-        )
-    if min_step_size <= 0.0:
-        raise ValueError(
-            "solve_liteopt_gd: min_step_size must be > 0, "
-            f"got {min_step_size}."
-        )
-
-    gn_only_keys = {
-        "tol_r",
-        "tol_dx",
-        "lambda_",
-        "step_scale",
-        "damping_update",
-        "linear_system",
-        "line_search_method",
-        "ls_beta",
-        "ls_min_step",
-        "ls_max_steps",
-        "ls_max_iters",
-        "c_armijo",
-    }
-    bad_for_gd = tuple(sorted(k for k in options_local if str(k) in gn_only_keys))
-    if bad_for_gd:
-        raise ValueError(
-            "solve_liteopt_gd(method='gd'): unsupported option(s) for gd: "
-            f"{_format_option_names(bad_for_gd)}. "
-            "Use method='gn' to enable these options."
-        )
-
-    if "step_size" not in options_local:
-        options_local["step_size"] = float(step_size)
-    if max_iters is not None and "max_iters" not in options_local:
-        options_local["max_iters"] = int(max_iters)
-    if "tol_grad" not in options_local:
-        options_local["tol_grad"] = float(tol_grad)
-    if line_search is not None and "line_search" not in options_local:
-        options_local["line_search"] = bool(line_search)
-    base_step_size = float(options_local.get("step_size", step_size))
-    if base_step_size <= 0.0:
-        raise ValueError(
-            "solve_liteopt_gd: step_size must be > 0, "
-            f"got {base_step_size}."
-        )
-
-    def fun(x: Array) -> float:
-        x_vec = as_vec(x, expected_size=n_total, name="x")
-        if not bool(np.all(np.isfinite(x_vec))):
-            raise ValueError("solve_liteopt_gd: non-finite iterate encountered.")
-        fx, _gx, _rnorm = objective.eval(x_vec)
-        if not bool(np.isfinite(fx)):
-            raise ValueError("solve_liteopt_gd: objective became non-finite.")
-        return float(fx)
-
-    def grad(x: Array) -> Array:
-        nonlocal iter_count, last_dxnorm, prev_x
-        x_vec = as_vec(x, expected_size=n_total, name="x")
-        if not bool(np.all(np.isfinite(x_vec))):
-            raise ValueError("solve_liteopt_gd: non-finite iterate encountered.")
-        fx, gx, rnorm = objective.eval(x_vec)
-        if not bool(np.isfinite(rnorm)):
-            raise ValueError("solve_liteopt_gd: residual norm became non-finite.")
-        if not bool(np.all(np.isfinite(gx))):
-            raise ValueError("solve_liteopt_gd: gradient became non-finite.")
-        last_dxnorm = float(np.linalg.norm(x_vec - prev_x))
-        if last_dxnorm > 0:
-            progress.iterate(fx, last_dxnorm, gx / 2)
-        prev_x = x_vec.copy()
-        if on_iter is not None:
-            on_iter(iter_count, rnorm, last_dxnorm)
-        iter_count += 1
-        return gx
-
-    result: Any | None = None
-    step_size_used = base_step_size
-    retry_count = 0
-    failure_message = ""
-
-    with prof.span("solve.backend"):
-        for attempt in range(nonfinite_retries + 1):
-            options_attempt = dict(options_local)
-            options_attempt["step_size"] = float(step_size_used)
-            prev_x = x0_init.copy()
-            try:
-                result = _call_liteopt_gd(
-                    liteopt,
-                    fun,
-                    grad,
-                    x0_init.copy(),
-                    options_attempt,
-                )
-                break
-            except Exception as e:
-                if not _is_nonfinite_error(e):
-                    raise
-                failure_message = str(e)
-                retry_count = int(attempt + 1)
-                step_next = float(step_size_used * nonfinite_step_shrink)
-                if attempt >= nonfinite_retries or step_next < min_step_size:
-                    result = None
-                    break
-                step_size_used = step_next
-
-    converged = False
-    iters_from_result: int | None = None
-    x_star = x0_init.copy()
-    if result is not None:
-        x_star, converged, iters_from_result = _parse_liteopt_gd_result(
-            result,
-            n_total=n_total,
-        )
-
-    cost = float("nan")
-    rnorm = float("nan")
-    final_gradient = None
-    with prof.span("solve.finalize"):
-        if bool(np.all(np.isfinite(x_star))):
-            cost, final_gradient, rnorm = objective.eval(x_star)
-        else:
-            failure_message = (
-                "solve_liteopt_gd: backend returned a non-finite solution vector."
-            )
-
-    iters = int(iter_count)
-    if iters_from_result is not None and retry_count <= 0:
-        iters = int(iters_from_result)
-    elif iters <= 0:
-        iters = int(max_iters) if max_iters is not None else 0
-
-    if iter_count <= 0:
-        last_dxnorm = float(np.linalg.norm(x_star - x0_init))
-
-    finite_objective = bool(np.isfinite(cost)) and bool(np.isfinite(rnorm))
-    status = "converged" if bool(converged and finite_objective) else "failed"
-    message = ""
-    if result is None:
-        message = (
-            "liteopt.gd aborted due to non-finite objective/gradient. "
-            f"retries={retry_count}, final_step_size={step_size_used:.3e}."
-        )
-        if str(failure_message).strip():
-            message += f" last_error={failure_message}"
-    elif not finite_objective:
-        message = (
-            "liteopt.gd returned a non-finite final objective/residual; "
-            "marking solve as failed."
-        )
-
-    outcome = SolveOutcome(
-        solution=x_star.copy(),
-        stats=SolveStats(
-            status=status,
-            iterations=iters,
-            initial_objective=float(initial_cost),
-            objective=float(cost),
-            residual_norm=float(rnorm),
-            step_norm=float(last_dxnorm),
-            message=message,
-        ),
-        timing=prof.snapshot(),
-        meta={
-            "solver": "liteopt_gd",
-            "method": "gd",
-            "retry_count": int(retry_count),
-            "step_size_used": float(step_size_used),
-            "x0": x0_init.copy(),
-        },
-    )
-    progress.final(outcome, None if final_gradient is None else final_gradient / 2)
-    return outcome
+def _select_solver(solver: str) -> Callable[..., SolveResult]:
+    """Select the implementation independently of option resolution."""
+    return {
+        "levenberg_marquardt": solve_levenberg_marquardt,
+        "lm-ls": solve_lm_ls,
+        "gauss_newton": solve_gauss_newton,
+        "gauss_newton_operator": solve_gauss_newton_operator,
+        "gauss_newton_krylov": solve_gauss_newton_krylov,
+        "scipy_minimize": solve_scipy_minimize,
+        "cyipopt": solve_cyipopt_minimize,
+        "liteopt": solve_liteopt_gd,
+    }[solver]
 
 
 def solve(
@@ -1082,6 +395,9 @@ def solve(
     solver discards configured options. With no configuration, the default is LM.
     Solver parameters are provided via `options`.
     `x0` may be passed directly or as `options["x0"]` (but not both).
+    Common arguments and integer counts are checked before invoking a solver.
+    `weighted` must be bool or None, and term indices must be integers.
+    Liteopt GD/GN reject options that apply only to the other method.
 
     levenberg_marquardt (default):
       max_iters=200, tol_grad=1e-8, tol_dx=1e-12, tau=1e-3, damping=None
@@ -1131,189 +447,14 @@ def solve(
       (unknown top-level keys are forwarded to the selected liteopt backend API)
     """
 
-    from ..solver_config import normalize_solver_config
+    if on_iter is not None and not callable(on_iter):
+        raise TypeError("solve: on_iter must be callable or None.")
+    request = _resolve_solve_request(problem, solver=solver, x0=x0, options=options)
+    implementation = _select_solver(request.solver)
+    return implementation(
+        problem, required=required, on_iter=on_iter, profiler=profiler, **request.arguments,
+    )
 
-    raw_config = getattr(problem, "solver_config", None)
-    config = normalize_solver_config(raw_config) if raw_config else {}
-    selected = solver if solver is not None else config.get("name", "levenberg_marquardt")
-    key = str(selected).strip().lower()
-    if key not in _SOLVER_REI_OPTION_KEYS:
-        raise ValueError(
-            "Unknown solver. Use one of: "
-            "'levenberg_marquardt', 'lm-ls', 'gauss_newton', 'gauss_newton_operator', 'gauss_newton_krylov', 'scipy_minimize', 'cyipopt', 'liteopt'. "
-            "Solver aliases are not supported. "
-            f"Got solver={selected!r}."
-        )
-
-    # A different explicit solver starts with its own defaults; do not leak
-    # incompatible TOML options such as Krylov preconditioning into LM.
-    configured_options = config.get("options") if key == config.get("name") else None
-    opts = _merge_options(configured_options, options)
-    if x0 is not None and "x0" in opts:
-        raise ValueError("solve: pass x0 either as keyword argument or options['x0'], not both.")
-    x0_override = opts.get("x0", x0)
-    weighted = None if opts.get("weighted") is None else bool(opts["weighted"])
-    term_indices = _normalize_term_indices_option(opts.get("term_indices", None))
-    backend_options = _normalize_backend_options_for_solver(opts, solver_key=key)
-
-    if key in {"levenberg_marquardt", "lm-ls"}:
-        lm_options = {k: v for k, v in opts.items() if k in _SOLVER_REI_OPTION_KEYS[key]}
-        lm_solver = solve_lm_ls if key == "lm-ls" else solve_levenberg_marquardt
-        return lm_solver(
-            problem, x0=x0_override, required=required, weighted=weighted,
-            term_indices=term_indices, on_iter=on_iter, profiler=profiler, **lm_options,
-        )
-
-    if key == "gauss_newton_krylov":
-        krylov_options = {k: v for k, v in opts.items() if k in _SOLVER_REI_OPTION_KEYS[key]}
-        return solve_gauss_newton_krylov(
-            problem, x0=x0_override, required=required, weighted=weighted,
-            term_indices=term_indices, on_iter=on_iter, profiler=profiler, **krylov_options,
-        )
-
-    if key == "gauss_newton_operator":
-        gn_options = {k: v for k, v in opts.items() if k in _SOLVER_REI_OPTION_KEYS[key]}
-        gn_options.setdefault("max_iters", 200)
-        return solve_gauss_newton_operator(
-            problem, x0=x0_override, required=required, weighted=weighted,
-            term_indices=term_indices, on_iter=on_iter, profiler=profiler, **gn_options,
-        )
-
-    if key == "gauss_newton":
-        return solve_gauss_newton(
-            problem,
-            x0=x0_override,
-            required=required,
-            weighted=weighted,
-            term_indices=term_indices,
-            max_iters=opts.get("max_iters", 200),
-            tol_r=float(opts.get("tol_r", 1e-10)),
-            tol_dx=float(opts.get("tol_dx", 1e-12)),
-            tol_grad=float(opts.get("tol_grad", 1e-10)),
-            damping=float(opts.get("damping", 1e-8)),
-            line_search=bool(opts.get("line_search", True)),
-            ls_beta=float(opts.get("ls_beta", 0.5)),
-            ls_min_step=float(opts.get("ls_min_step", 1e-8)),
-            ls_max_iters=opts.get("ls_max_iters", 12),
-            ls_max_retries=opts.get("ls_max_retries", 3),
-            damping_increase=float(opts.get("damping_increase", 10.0)),
-            damping_max=float(opts.get("damping_max", 1e12)),
-            damping_decrease=float(opts.get("damping_decrease", 0.1)),
-            damping_min_factor=float(opts.get("damping_min_factor", 100.0)),
-            c_armijo=float(opts.get("c_armijo", 1e-4)),
-            history=bool(opts.get("history", True)),
-            history_vectors=bool(opts.get("history_vectors", False)),
-            history_path=opts.get("history_path"),
-            line_search_history_path=opts.get("line_search_history_path"),
-            verbose=bool(opts.get("verbose", True)),
-            on_iter=on_iter,
-            profiler=profiler,
-        )
-
-    if key == "scipy_minimize":
-        tol = opts.get("tol", None)
-        return solve_scipy_minimize(
-            problem,
-            x0=x0_override,
-            required=required,
-            weighted=weighted,
-            term_indices=term_indices,
-            method=str(opts.get("method", "L-BFGS-B")),
-            max_iters=int(opts.get("max_iters", 200)),
-            tol=(None if tol is None else float(tol)),
-            bounds=opts.get("bounds", None),
-            verbose=bool(opts.get("verbose", True)),
-            options=backend_options,
-            on_iter=on_iter,
-            profiler=profiler,
-        )
-
-    if key == "cyipopt":
-        tol = opts.get("tol", None)
-        return solve_cyipopt_minimize(
-            problem,
-            x0=x0_override,
-            required=required,
-            weighted=weighted,
-            term_indices=term_indices,
-            max_iters=int(opts.get("max_iters", 200)),
-            tol=(None if tol is None else float(tol)),
-            bounds=opts.get("bounds", None),
-            verbose=bool(opts.get("verbose", True)),
-            options=backend_options,
-            on_iter=on_iter,
-            profiler=profiler,
-        )
-
-    if key == "liteopt":
-        method_liteopt = str(opts.get("method", "gd")).strip().lower()
-        verbose_opt = opts.get("verbose", True)
-        line_search_opt = opts.get("line_search", None)
-        ls_max_steps_raw = opts.get("ls_max_steps", opts.get("ls_max_iters", 12))
-
-        if method_liteopt == "gn":
-            return solve_liteopt_gd(
-                problem,
-                x0=x0_override,
-                required=required,
-                weighted=weighted,
-                term_indices=term_indices,
-                method="gn",
-                verbose=(
-                    None if verbose_opt is None else bool(verbose_opt)
-                ),
-                max_iters=int(opts.get("max_iters", 200)),
-                tol_r=float(opts.get("tol_r", 1e-10)),
-                tol_dx=float(opts.get("tol_dx", 1e-12)),
-                lambda_=float(opts.get("lambda_", 1e-8)),
-                step_scale=(
-                    None
-                    if opts.get("step_scale", None) is None
-                    else float(opts.get("step_scale"))
-                ),
-                damping_update=str(opts.get("damping_update", "fixed")),
-                linear_system=str(opts.get("linear_system", "normal_jtj")),
-                line_search_method=str(opts.get("line_search_method", "strict_decrease")),
-                line_search=(
-                    True if line_search_opt is None else bool(line_search_opt)
-                ),
-                ls_beta=float(opts.get("ls_beta", 0.5)),
-                ls_min_step=float(opts.get("ls_min_step", 1e-8)),
-                ls_max_steps=int(ls_max_steps_raw),
-                c_armijo=(
-                    None
-                    if opts.get("c_armijo", None) is None
-                    else float(opts.get("c_armijo"))
-                ),
-                options=backend_options,
-                on_iter=on_iter,
-                profiler=profiler,
-            )
-
-        return solve_liteopt_gd(
-            problem,
-            x0=x0_override,
-            required=required,
-            weighted=weighted,
-            term_indices=term_indices,
-            method=method_liteopt,
-            verbose=(
-                None if verbose_opt is None else bool(verbose_opt)
-            ),
-            max_iters=int(opts.get("max_iters", 200)),
-            step_size=float(opts.get("step_size", 1e-3)),
-            tol_grad=float(opts.get("tol_grad", 1e-4)),
-            line_search=(
-                None if line_search_opt is None else bool(line_search_opt)
-            ),
-            nonfinite_retries=int(opts.get("nonfinite_retries", 8)),
-            nonfinite_step_shrink=float(opts.get("nonfinite_step_shrink", 0.2)),
-            min_step_size=float(opts.get("min_step_size", 1e-12)),
-            options=backend_options,
-            on_iter=on_iter,
-            profiler=profiler,
-        )
-    raise RuntimeError(f"internal error: unsupported solver dispatch key {key!r}.")
 
 __all__ = [
     "nls",

@@ -16,6 +16,8 @@
 |---|---|
 | 汎用capabilityへの変換 | `rei/problem/adapters.py`、`rei/flow/problem.py` |
 | 求解ループとその引数検証 | 各ソルバー。dispatchは数値を黙って丸めない |
+| 外部ソルバーの呼び出し・API差分の吸収 | `rei/optimize/solvers/scipy.py`、`cyipopt.py`、`liteopt.py` |
+| 外部ソルバー共通の目的関数評価・初期点設定 | `rei/optimize/solvers/_external_common.py` |
 | バックエンド状態・ヤコビアンの取得 | 各バックエンドのadapter/API層 |
 | IOCのコンパイル・推定の組み立て | `rei/optimize_backends/trajectory_ioc.py` |
 | IOCの識別性・適用範囲の診断 | `rei/optimize_backends/_ioc_diagnostics.py` |
@@ -24,6 +26,17 @@ IOCの診断文言は数値判定の根拠にしない。階数・残差・制�
 説明メッセージの追加や翻訳で `unique_stationary_weights` が変わらないようにする。
 既存の辞書形式の戻り値は維持する。
 
+外部ソルバーの依存ライブラリは各求解関数内で遅延importする。
+`dispatch.py` は設定解決・オプション検証・呼び出し先の選択を担当する。
+`solve()` は設定を解決した要求を作り、選択した実装を1回呼び出す。
+設定の継承・共通引数の検証・dispatch固有の既定値の補完は求解前に完了する。
+数値反復や外部ライブラリのAPI差分は各ソルバーが担当する。
+整数指定の回数・項番号を丸めない。liteoptのGD/GNで適用できないRei設定は
+黙って無視せず、呼び出し前にエラーにする。ライブラリ固有の指定は
+`backend_options` として各ソルバーへ渡す。
+従来の `rei`、`rei.optimize`、`rei.optimize.solvers` および
+`rei.optimize.solvers.dispatch` からのソルバー関数のimport経路を維持する。
+
 ## 回帰確認
 
 今回追加した `tests/test_api_maintainability.py` は、設定継承・非破壊の上書き、
@@ -31,9 +44,17 @@ IOCの診断文言は数値判定の根拠にしない。階数・残差・制�
 IOCの計算結果は既知解を使った既存の `test_ioc_validation.py` で確認する。
 
 ```sh
-PYTHONPATH=. python -m pytest tests/test_api_maintainability.py tests/test_ioc_validation.py -q
-PYTHONPATH=. MPLBACKEND=Agg python -m pytest -q
+uv run --group dev python -m pytest tests/test_api_maintainability.py tests/test_ioc_validation.py -q -rs
+MPLBACKEND=Agg uv run --group dev python -m pytest -q -rs
 ```
+
+既定の収集対象は `pyproject.toml` の `testpaths = ["tests"]` で指定する。
+`examples/model` などのリンク先にある外部リポジトリのテストを収集しない。
+任意バックエンドのモックはテストごとに導入・復元し、`sys.modules` や
+親パッケージの属性に残さない。テストの収集時に代替モジュールを登録しない。
+
+実RoboKots・Pinocchioも含めて検証する場合は、上記コマンドに
+`--group kots --group pinocchio` を `uv run` のオプションとして追加する。
 
 対応するPython環境ごとに実行する。実ロボットライブラリを使うテストのスキップを
 成功と取り違えない。実行時間の改善はテスト成功だけでは主張せず、必要時に別途測定する。

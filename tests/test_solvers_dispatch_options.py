@@ -33,6 +33,67 @@ def _build_scalar_runtime(target: float = 0.0):
 
 
 class TestSolverDispatchOptions:
+    @pytest.mark.parametrize("options", [[], [("max_iters", 0)], "verbose", {1: False}])
+    def test_invalid_option_containers_fail_before_changing_point(self, options):
+        runtime = _build_scalar_runtime()
+        with pytest.raises(TypeError, match="option"):
+            solve(runtime, x0=[5.0], options=options)
+        np.testing.assert_array_equal(runtime.pack.get(), [0.0])
+
+    @pytest.mark.parametrize("options,name", [
+        ({"weighted": "false"}, "weighted"),
+        ({"term_indices": [0.5]}, "term_indices"),
+        ({"term_indices": ["0"]}, "term_indices"),
+        ({"term_indices": [True]}, "term_indices"),
+    ])
+    def test_invalid_common_arguments_fail_before_changing_point(self, options, name):
+        runtime = _build_scalar_runtime()
+        with pytest.raises(TypeError, match=name):
+            solve(runtime, x0=[5.0], options=options)
+        np.testing.assert_array_equal(runtime.pack.get(), [0.0])
+
+    @pytest.mark.parametrize("solver", [
+        "levenberg_marquardt", "lm-ls", "gauss_newton", "gauss_newton_operator",
+        "gauss_newton_krylov", "scipy_minimize", "cyipopt", "liteopt",
+    ])
+    @pytest.mark.parametrize("value", [1.5, np.inf, True])
+    def test_iteration_counts_are_checked_before_backend_loading_or_point_changes(
+        self, monkeypatch, solver, value,
+    ):
+        for module in ("scipy", "cyipopt", "liteopt"):
+            monkeypatch.setitem(sys.modules, module, None)
+        runtime = _build_scalar_runtime()
+        with pytest.raises(ValueError, match="max_iters"):
+            solve(runtime, solver=solver, x0=[5.0], options={"max_iters": value})
+        np.testing.assert_array_equal(runtime.pack.get(), [0.0])
+
+    @pytest.mark.parametrize("method,option", [
+        ("gd", "tol_r"), ("gd", "ls_max_iters"), ("gd", "lambda_"),
+        ("gn", "step_size"), ("gn", "tol_grad"), ("gn", "nonfinite_retries"),
+    ])
+    def test_liteopt_rejects_inapplicable_settings_before_loading_backend(
+        self, monkeypatch, method, option,
+    ):
+        monkeypatch.setitem(sys.modules, "liteopt", None)
+        runtime = _build_scalar_runtime()
+        with pytest.raises(ValueError, match=option):
+            solve(runtime, solver="liteopt", x0=[5.0], options={"method": method, option: 1})
+        np.testing.assert_array_equal(runtime.pack.get(), [0.0])
+
+    def test_invalid_callback_fails_before_changing_point(self):
+        runtime = _build_scalar_runtime()
+        with pytest.raises(TypeError, match="on_iter"):
+            solve(runtime, x0=[5.0], on_iter=42)
+        np.testing.assert_array_equal(runtime.pack.get(), [0.0])
+
+    def test_term_index_iterator_and_numpy_boolean_are_supported(self):
+        runtime = _build_scalar_runtime(target=2.0)
+        out = solve(runtime, options={
+            "term_indices": iter([np.int64(0)]), "weighted": np.bool_(False), "verbose": False,
+        })
+        assert out.converged
+        np.testing.assert_allclose(out.solution, [2.0], atol=1e-7)
+
     @pytest.mark.parametrize("solver,module_name,function_name", [
         ("scipy_minimize", "scipy.optimize", "minimize"),
         ("cyipopt", "cyipopt", "minimize_ipopt"),
