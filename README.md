@@ -777,7 +777,8 @@ See `examples/README.md` for the full sample list and spec/DSL/model file guide.
 Run the test suite:
 
 ```bash
-MPLBACKEND=Agg uv run --group dev python -m pytest -q -rs
+uv sync --locked --group dev
+MPLBACKEND=Agg uv run --locked --group dev python -m pytest -q -rs
 ```
 
 Pytest collects `tests/` by default. Model repositories linked under `examples/`
@@ -789,11 +790,16 @@ optional library are skipped; `-rs` shows why. To include the real robotics
 backends, run:
 
 ```bash
-MPLBACKEND=Agg uv run --group dev --group kots --group pinocchio python -m pytest -q -rs
+MPLBACKEND=Agg uv run --locked --group dev --group kots --group pinocchio python -m pytest -q -rs --fail-on-skip
 ```
 
 Check the skip reasons when validating a backend. Passing mock tests or skipping
 integration tests does not verify the real library.
+
+The committed `uv.lock` and pinned RoboKots revision reproduce the development
+dependencies. CI tests Python 3.11/3.13 with the core dependencies and runs a
+separate native robotics job that rejects skips. See [testing and dependency
+updates](docs/testing.md) for exact commands and verification scope.
 
 Compile-check the package:
 

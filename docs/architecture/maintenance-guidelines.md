@@ -67,8 +67,8 @@ LM・LM-LSのアルゴリズムは各専用実装に置く。
 IOCの計算結果は既知解を使った既存の `test_ioc_validation.py` で確認する。
 
 ```sh
-uv run --group dev python -m pytest tests/test_api_maintainability.py tests/test_ioc_validation.py -q -rs
-MPLBACKEND=Agg uv run --group dev python -m pytest -q -rs
+uv run --locked --group dev python -m pytest tests/test_api_maintainability.py tests/test_ioc_validation.py -q -rs
+MPLBACKEND=Agg uv run --locked --group dev python -m pytest -q -rs
 ```
 
 既定の収集対象は `pyproject.toml` の `testpaths = ["tests"]` で指定する。
@@ -83,4 +83,4 @@ MPLBACKEND=Agg uv run --group dev python -m pytest -q -rs
 成功と取り違えない。実行時間の改善はテスト成功だけでは主張せず、必要時に別途測定する。
 
 今回の変更は主要API周辺の改善であり、リポジトリ全体の設計問題を網羅したものではない。
-依存固定・CI・制約付きIOCなどの未完了項目は `docs/improvement-plan.md` で追跡する。
+動的IOC・性能測定・配布環境の網羅などの残る課題は `docs/improvement-plan.md` で追跡する。

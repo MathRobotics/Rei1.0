@@ -4,7 +4,6 @@
 /rei.egg-info/
 *.pyc
 *.png
-uv.lock
 .python-version
 */logs
 /records

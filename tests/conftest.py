@@ -8,6 +8,39 @@ import types
 import pytest
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--fail-on-skip", action="store_true", default=False,
+        help="Fail if any selected test or test module is skipped (native integration CI).",
+    )
+
+
+class _FailOnSkip:
+    def __init__(self):
+        self.skipped = []
+
+    def pytest_collectreport(self, report):
+        if report.skipped:
+            self.skipped.append(report.nodeid)
+
+    def pytest_runtest_logreport(self, report):
+        if report.skipped:
+            self.skipped.append(report.nodeid)
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        if self.skipped and exitstatus == pytest.ExitCode.OK:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+    def pytest_terminal_summary(self, terminalreporter):
+        if self.skipped:
+            terminalreporter.write_sep("=", f"--fail-on-skip: {len(self.skipped)} unexpected skip(s)", red=True)
+
+
+def pytest_configure(config):
+    if config.getoption("--fail-on-skip"):
+        config.pluginmanager.register(_FailOnSkip(), "rei-fail-on-skip")
+
+
 @pytest.fixture
 def isolated_backend_imports():
     """Import backend modules against temporary dependencies, then restore caches."""
