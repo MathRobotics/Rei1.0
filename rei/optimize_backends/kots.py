@@ -13,6 +13,7 @@ from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl
 from ..optimize.runtime import NLSRuntime
+from ._robotics_products import RoboticsTermProducts
 from ._state_field_utils import (
     base_field_name,
     canonicalize_unique_fields,
@@ -506,6 +507,7 @@ class _KotsTrajectoryCompileAdapter:
         prepared: PreparedTrajectoryProblemDsl,
     ) -> None:
         del prepared
+        runtime.term_products = RoboticsTermProducts(state_builder)
         _validate_kots_runtime_dynamics_coverage(
             runtime=runtime,
             builder=state_builder,

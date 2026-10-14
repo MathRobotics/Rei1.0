@@ -16,6 +16,7 @@
 |---|---|
 | 汎用capabilityへの変換 | `rei/problem/adapters.py`、`rei/flow/problem.py` |
 | 式木の子要素と走査 | 各Exprの `children()`、`rei/core/expr/traversal.py` |
+| バックエンド固有の式・微分積の一括評価 | `rei/optimize_backends/_robotics_products.py` |
 | 求解ループとその引数検証 | 各ソルバー。dispatchは数値を黙って丸めない |
 | 外部ソルバーの呼び出し・API差分の吸収 | `rei/optimize/solvers/scipy.py`、`cyipopt.py`、`liteopt.py` |
 | 外部ソルバー共通の目的関数評価・初期点設定 | `rei/optimize/solvers/_external_common.py` |
@@ -31,6 +32,11 @@ IOCの診断文言は数値判定の根拠にしない。階数・残差・制�
 `walk_expr()` を利用し、式の内部属性名を独自に列挙しない。
 走査はノードの同一性で重複・循環を除外する。既存のcustom Exprはdataclassまたは
 従来の属性名による走査にも対応する。
+
+汎用ランタイムは任意の `TermProductPlan` にまとめて評価できる項を委譲する。
+ロボット状態名やバックエンド内部をランタイムから調べない。RoboKotsのコンパイル層が
+builderを明示的に渡して実行計画を設定し、未設定・非対応の項は通常のExpr評価へ戻る。
+層のimport方向は `tests/test_namespace_dependency_rules.py` で確認する。
 
 外部ソルバーの依存ライブラリは各求解関数内で遅延importする。
 `dispatch.py` は設定解決・オプション検証・呼び出し先の選択を担当する。
