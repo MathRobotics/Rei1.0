@@ -244,14 +244,50 @@ Each helper returns a compile result whose main entry point is
 `compiled.runtime`. Some helpers also return backend-specific metadata such as
 trajectory maps or prepared DSL data.
 
+The problem TOML may also select the robot file:
+
+```toml
+[model]
+file = "../models/planar2.urdf"
+
+# Optional: fixed joint positions (rad or metres), URDF only.
+[model.locked_joints]
+joint2 = 0.2
+```
+
+```python
+from rei import load_problem_spec_toml
+from rei.optimize_backends.kots import compile_kots_trajectory_problem
+
+problem = load_problem_spec_toml("examples/spec/robokots_traj_dynamics_d12.toml")
+compiled = compile_kots_trajectory_problem(problem, kots_backend="rust")
+```
+
+Relative `model.file` paths are resolved against the TOML's directory, not the
+process working directory. Reading TOML only validates and preserves metadata;
+the compile helper creates the model. RoboKots accepts `.urdf` and `.json`;
+Pinocchio accepts `.urdf` and creates its associated data automatically. Both
+apply `model.locked_joints` when loading URDFs. JSON with nonempty joint locks,
+unsupported formats and missing files raise explicit errors at model loading.
+RoboKots motion order is still inferred from the compiled problem.
+
+Passing `model=` explicitly takes precedence over the entire model-loading
+configuration, including joint locks. Existing calls without `[model]` remain
+valid when they supply a model. The same optional loading works for Kots
+templates and `compile_trajectory_ioc_problem(..., backend="kots")` or
+`backend="pinocchio"`. Direct dictionary specs have no source directory;
+use absolute model paths there, or resolve relative paths before changing CWD.
+
 ### IOC weight interpretation
 
 `estimate_ioc_weights()` returns `weights` in the original, unweighted
 objective scale, normalized to sum to one when active terms exist.
 `scaled_weights` contains the internal coefficients after column scaling.
-Check `validation` and `identifiability`: fitting objective stationarity does
-not account for constraint KKT multipliers, and inactive or dependent terms
-can prevent weight identification. See the [IOC validation report](docs/ioc-validation.md)
+Check `validation` and `identifiability`: the default mode fits objective
+stationarity without constraint multipliers, and inactive or dependent terms
+can prevent weight identification. Set `constraint_mode="kkt"` to estimate
+equality and active inequality multipliers alongside the weights. KKT fit and
+weight identification are reported separately. See the [IOC validation report](docs/ioc-validation.md)
 for known-answer tests, migration details, and remaining limitations.
 
 ### RoboKots Jacobians
@@ -265,20 +301,53 @@ compiled = compile_kots_trajectory_problem(
 ```
 
 `jacobian_method` accepts `"analytic"` (default), `"numerical"` (RoboKots finite
-differences), or `"autodiff"` (RoboKots JAX forward-mode AD). The same option is
+differences), or `"autodiff"` (RoboKots JAX AD). The same option is
 available on both Kots state builders and `compile_trajectory_ioc_problem`
 with `backend="kots"`; it applies to DOC Jacobians and IOC gradient products.
 The trajectory example also accepts `--jacobian-method`.
+
+Pass public RoboKots settings through `jacobian_options`: `{"eps": 1e-5}` for
+numerical differences, or `{"mode": "reverse", "jit": True}` for AD. Defaults
+are `eps=1e-8`, `mode="forward"`, and `jit=True`; invalid or method-inapplicable
+options raise errors. `compiled.derivative_settings` records method, options,
+batch selection, requested strategy, effective state-Jacobian construction,
+backend selection and float64 precision. IOC reports include these settings.
 
 AD requires JAX and supports rigid-body momentum, force, torque, and their time
 derivatives for fixed/revolute/prismatic models; it does not support kinematic
 outputs or kinetic energy. Numerical kinetic-energy derivatives are also
 unsupported by RoboKots. Unsupported requests raise errors, without switching
-to analytic derivatives. AD runs without JIT, in a local float64 context, and
-forms a dense Jacobian before multiplying. Numerical/AD methods currently use
-per-time-step evaluation even when `batch_trajectory=True`; analytic mode keeps
-the batched fast paths. These alternatives are primarily useful for validation
-and can be much slower than the default.
+to analytic derivatives. AD calls `jacobian_autodiff(...)` in a local float64
+context; numerical differentiation calls `jacobian(..., numerical=True, eps=...)`.
+With `batch_trajectory=True`, supported dynamics outputs use
+time batches and output lists (including all joint torques). The returned
+state Jacobians are chained with each time's trajectory derivatives, including
+when an output uses fewer motion orders than the model. DOC, IOC/KKT and
+JVP/VJP products preserve the selected differentiation method. Numerical/AD
+construct one dense state Jacobian for all RHS columns in a product call;
+the difference scheme and JIT compilation remain inside RoboKots. `dense` and
+`mul` strategies share this construction for numerical/AD. Analytic `dense`
+requests state Jacobians; analytic `mul` retains native product optimizations.
+
+RoboKots owns the JIT function cache. Rei does not reuse numerical/AD batch states or
+evaluated numerical/AD Jacobians across calls; gravity, physical-model edits, motion
+order and output selection are evaluated afresh. As with other runtime state
+changes, invalidate `compiled.runtime.state` after external model/gravity edits.
+Changing robot topology requires a new builder. `batch_trajectory=False` keeps
+the single-time path for each method. Non-finite derivatives raise
+`FloatingPointError`; numerical/AD compilation refuses unsupported terms even
+with `unsupported="warn_skip"`, so a comparison cannot silently lose terms.
+
+The tested dynamics scope includes total-joint torque, `torque_d1` through
+`torque_d3`, force and momentum. Torque time derivative N needs model order
+N + 3 and the corresponding spline derivatives. Kinetic energy is unsupported
+by numerical/AD. Kinematic AD outputs remain unsupported; kinematic batching
+is not enabled by this change.
+
+Initial JIT compilation can dominate the first evaluation. The two-stage
+[comparison benchmark](developer/benchmarks/kots_derivative_comparison.md)
+measures fixed-trajectory Jacobians first, then DOC→IOC under identical TOML,
+initial values and solver settings, recording evaluation counts and KKT results.
 
 The Kots trajectory backend uses RoboKots multiply APIs by default for
 trajectory-parameter dynamics Jacobians:
@@ -289,6 +358,15 @@ trajectory-parameter dynamics Jacobians:
 RoboKots owns its state internally. `KotsStateBuilder`,
 `KotsTrajectoryStateBuilder`, and `compile_kots_trajectory_problem` accept
 `data=None` (the default); do not access the removed `kots.state_dict_` attribute.
+
+Trajectory compilation automatically calls `model.set_order(...)` before
+building derivative maps, using the highest motion order required by the
+problem, `dynamics_fields`, and `max_derivative_order`. Position requires order
+1, velocity 2, torque 3, and `torque_dN` requires N + 3. Existing gravity is
+preserved, and an unchanged order does not reset the model. This can raise or
+lower the supplied model's order: use separate models for simultaneously live
+compiled problems with different orders. Custom providers without `set_order`
+keep their configured order.
 
 Dense Jacobian assembly is still available by passing
 `jacobian_strategy="dense"` to `compile_kots_trajectory_problem`; otherwise the

@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..backends.state.robotics.pinocchio import PinocchioTrajectoryStateBuilder
+from ..backends.state.robotics.model_loading import load_pinocchio_model
 from ..backends.state.robotics.spatial import Jacobian6Order
 from ..core.state_schema import DTYPE_DYNAMICS
 from ..core.trajectory import TrajectoryMap
@@ -193,8 +194,8 @@ class _PinocchioTrajectoryCompileAdapter:
 def compile_pinocchio_trajectory_problem(
     dsl: Mapping[str, Any],
     *,
-    model: Any,
-    data: Any,
+    model: Any = None,
+    data: Any = None,
     p_var: str | None = None,
     max_derivative_order: int | None = None,
     derivative_wrt: str = "time",
@@ -211,6 +212,16 @@ def compile_pinocchio_trajectory_problem(
     torque_jacobian: str = "auto",
     trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
 ) -> PinocchioTrajectoryCompiledProblem:
+    """Compile with an explicit model/data or a URDF specified by model.file.
+
+    File-loaded models apply model.locked_joints and create their own data.
+    An explicit model bypasses all model-loading metadata.
+    """
+    if model is None:
+        if data is not None:
+            raise ValueError("data= requires an explicit model=; file-loaded models create their own data.")
+        model = load_pinocchio_model(dsl)
+        data = model.createData()
     model_order = _infer_model_order(model)
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
     unsupported_policy = normalize_unsupported_policy(unsupported)

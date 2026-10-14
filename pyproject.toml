@@ -39,8 +39,8 @@ include = ["rei*"]
 testpaths = ["tests"]
 
 [tool.uv.sources]
-# Includes reproducible model perturbations and TOML configuration support.
-robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "3703e91697c737d4ce1e91ef025c9f580ef45e9b" }
+# Includes Rust numerical Jacobians and cached JIT autodiff output lists.
+robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "acb2a041453d7c4d3170050e98a1ead81c1897ba" }
 
 [dependency-groups]
 dev = [

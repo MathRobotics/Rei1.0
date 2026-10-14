@@ -1,0 +1,3197 @@
+{
+  "environment": {
+    "python": "3.13.1",
+    "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
+    "numpy": "2.5.3",
+    "jax": "0.11.2",
+    "robokots": "{\"url\":\"https://github.com/MathRobotics/RoboKots.git\",\"vcs_info\":{\"vcs\":\"git\",\"commit_id\":\"acb2a041453d7c4d3170050e98a1ead81c1897ba\",\"requested_revision\":\"acb2a041453d7c4d3170050e98a1ead81c1897ba\"}}"
+  },
+  "spec_path": "/home/ishigaki/src/Rei/examples/spec/robokots_traj_dynamics_d12.toml",
+  "spec_sha256": "67f39b5462c982d66122f7b1029424fd60a5226c65adc2d971352feec2ea9093",
+  "model_sha256": "fad19bd0e3536096f078335fc4efcd687d7c3d0126d56a69b1ed4847ed11e0cf",
+  "effective_dsl": {
+    "time": {
+      "N": 20,
+      "dt": 0.1
+    },
+    "trajectory": {
+      "type": "bspline",
+      "degree": 5,
+      "num_ctrl_points": 8
+    },
+    "variables": [
+      {
+        "init": {
+          "fill": 0.0
+        },
+        "name": "p"
+      }
+    ],
+    "terms": [
+      {
+        "expr": {
+          "type": "vstack",
+          "name": "q_boundary",
+          "parts": [
+            {
+              "type": "sub",
+              "name": "q_boundary_at_0",
+              "a": {
+                "type": "get_traj_var",
+                "name": "q_boundary_at_0_value",
+                "var": "p",
+                "k": "first",
+                "derivative_order": 0
+              },
+              "b": {
+                "type": "const",
+                "name": "q_boundary_at_0_target",
+                "value": {
+                  "fill": 1.57
+                },
+                "var": "p"
+              }
+            },
+            {
+              "type": "sub",
+              "name": "q_boundary_at_1",
+              "a": {
+                "type": "get_traj_var",
+                "name": "q_boundary_at_1_value",
+                "var": "p",
+                "k": "last",
+                "derivative_order": 0
+              },
+              "b": {
+                "type": "const",
+                "name": "q_boundary_at_1_target",
+                "value": {
+                  "fill": -1.57
+                },
+                "var": "p"
+              }
+            }
+          ]
+        },
+        "cost": {
+          "type": "scalar_weight",
+          "w": 100.0
+        },
+        "constraint": {
+          "kind": "eq"
+        },
+        "attrs": {
+          "plot": {
+            "type": "traj_derivative",
+            "name": "joint_q",
+            "derivative_order": 0
+          },
+          "enforce": "nullspace"
+        }
+      },
+      {
+        "expr": {
+          "type": "vstack",
+          "name": "qdot_boundary",
+          "parts": [
+            {
+              "type": "sub",
+              "name": "qdot_boundary_at_0",
+              "a": {
+                "type": "get_traj_var",
+                "name": "qdot_boundary_at_0_value",
+                "var": "p",
+                "k": "first",
+                "derivative_order": 1,
+                "derivative_wrt": "time"
+              },
+              "b": {
+                "type": "const",
+                "name": "qdot_boundary_at_0_target",
+                "value": {
+                  "fill": 0.0
+                },
+                "var": "p"
+              }
+            },
+            {
+              "type": "sub",
+              "name": "qdot_boundary_at_1",
+              "a": {
+                "type": "get_traj_var",
+                "name": "qdot_boundary_at_1_value",
+                "var": "p",
+                "k": "last",
+                "derivative_order": 1,
+                "derivative_wrt": "time"
+              },
+              "b": {
+                "type": "const",
+                "name": "qdot_boundary_at_1_target",
+                "value": {
+                  "fill": 0.0
+                },
+                "var": "p"
+              }
+            }
+          ]
+        },
+        "cost": {
+          "type": "scalar_weight",
+          "w": 100.0
+        },
+        "constraint": {
+          "kind": "eq"
+        },
+        "attrs": {
+          "enforce": "nullspace"
+        }
+      },
+      {
+        "expr": {
+          "type": "vstack",
+          "name": "joint_q_bounds",
+          "parts": [
+            {
+              "type": "hinge",
+              "name": "joint_q_bounds_upper_violation",
+              "base": {
+                "type": "sub",
+                "name": "joint_q_bounds_upper_margin",
+                "a": {
+                  "type": "get_traj_var",
+                  "name": "joint_q_bounds_upper_value",
+                  "var": "p",
+                  "derivative_order": 0
+                },
+                "b": {
+                  "type": "const_repeat",
+                  "name": "joint_q_bounds_upper",
+                  "value": {
+                    "fill": 3.14159
+                  },
+                  "var": "p"
+                }
+              }
+            },
+            {
+              "type": "hinge",
+              "name": "joint_q_bounds_lower_violation",
+              "base": {
+                "type": "sub",
+                "name": "joint_q_bounds_lower_margin",
+                "a": {
+                  "type": "const_repeat",
+                  "name": "joint_q_bounds_lower",
+                  "value": {
+                    "fill": -3.14159
+                  },
+                  "var": "p"
+                },
+                "b": {
+                  "type": "get_traj_var",
+                  "name": "joint_q_bounds_lower_value",
+                  "var": "p",
+                  "derivative_order": 0
+                }
+              }
+            }
+          ]
+        },
+        "cost": {
+          "type": "scalar_weight",
+          "w": 100000.0
+        },
+        "constraint": {
+          "kind": "ineq"
+        }
+      },
+      {
+        "expr": {
+          "type": "get_traj_var",
+          "name": "qdot_traj_regularization",
+          "var": "p",
+          "derivative_order": 1,
+          "derivative_wrt": "time"
+        },
+        "cost": {
+          "type": "scalar_weight",
+          "w": 0.0001
+        }
+      },
+      {
+        "expr": {
+          "type": "get_traj_var",
+          "name": "qddot_traj_regularization",
+          "var": "p",
+          "derivative_order": 2,
+          "derivative_wrt": "time"
+        },
+        "cost": {
+          "type": "scalar_weight",
+          "w": 0.0001
+        }
+      },
+      {
+        "expr": {
+          "type": "stack",
+          "name": "torque_traj_regularization",
+          "range": {
+            "k0": 0,
+            "k1": "last"
+          },
+          "inner": {
+            "type": "get_state",
+            "name": "torque_traj_regularization_k",
+            "key": {
+              "owner_type": "total_joint",
+              "owner_name": "robot",
+              "dtype": "dynamics",
+              "field": "torque",
+              "k": 0
+            },
+            "jac": {
+              "var": "p"
+            }
+          }
+        },
+        "cost": {
+          "type": "scalar_weight",
+          "w": 1e-10
+        },
+        "attrs": {
+          "plot": "joint_torque"
+        }
+      }
+    ]
+  },
+  "seed": 18,
+  "gravity": [
+    0.0,
+    -9.81,
+    0.0
+  ],
+  "solver": "gauss_newton",
+  "solver_options": {
+    "max_iters": 100,
+    "tol_grad": 1e-08,
+    "tol_r": 1e-10,
+    "tol_dx": 1e-12,
+    "verbose": false
+  },
+  "warm_repeats": 5,
+  "timing_note": "first includes compile+execution; warm median uses the identical fixed point, with Rei state reuse disabled. DOC follows fixed-point warmup, after restoring the TOML initial point; any additional shape compilation is included in DOC.",
+  "results": [
+    {
+      "settings": {
+        "jacobian_method": "analytic",
+        "jacobian_options": {},
+        "batch_trajectory": false,
+        "jacobian_strategy": "dense",
+        "state_jacobian_construction": "dense",
+        "kots_backend": "rust",
+        "dtype": "float64"
+      },
+      "model_order": 5,
+      "fixed_jacobian": {
+        "shape": [
+          42,
+          16
+        ],
+        "first_seconds": 0.00996971782296896,
+        "warm_median_seconds": 0.004267965909093618,
+        "warm_seconds": [
+          0.00528605398721993,
+          0.004262374946847558,
+          0.004267965909093618,
+          0.004218223039060831,
+          0.004295588005334139
+        ],
+        "max_abs_error": 0.0,
+        "relative_frobenius_error": 0.0,
+        "counts": {
+          "dynamics": 126,
+          "jacobian": 126
+        }
+      },
+      "reduction_setup_seconds": 0.0011236649006605148,
+      "doc": {
+        "seconds": 0.020130974939092994,
+        "status": "converged",
+        "converged": true,
+        "iterations": 2,
+        "objective": 0.04406286448255577,
+        "counts": {
+          "eval_stacked_terms": 3,
+          "dynamics": 126,
+          "linearize_stacked_terms": 3,
+          "jacobian": 63
+        }
+      },
+      "kkt": {
+        "ok": true,
+        "message": "ok (stationarity=4.077e-13, eq=7.168e-15, ineq=0.000e+00, comp=0.000e+00, dual=0.000e+00)",
+        "stationarity_inf": 4.077004218117501e-13,
+        "eq_violation_inf": 7.167599846980005e-15,
+        "ineq_violation_inf": 0.0,
+        "complementarity_inf": 0.0,
+        "dual_violation_inf": 0.0,
+        "n_vars": 16,
+        "n_objective_rows": 126,
+        "n_eq_rows": 8,
+        "n_ineq_rows": 84,
+        "n_active_ineq_rows": 0,
+        "lambda_eq": [
+          -0.007016518787319555,
+          -0.007016263652604885,
+          0.007016182226068642,
+          0.007016332808780346,
+          -0.00544877060545884,
+          -0.005448689032756151,
+          -0.005448694874661184,
+          -0.00544871920778331
+        ],
+        "mu_ineq": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "kkt_seconds": 0.005714236060157418,
+      "kkt_counts": {
+        "linearize_stacked_terms": 2,
+        "dynamics": 21,
+        "jacobian": 21
+      },
+      "ioc": {
+        "backend": "KotsTrajectoryCompiledProblem",
+        "derivative_settings": {
+          "jacobian_method": "analytic",
+          "jacobian_options": {},
+          "batch_trajectory": false,
+          "jacobian_strategy": "dense",
+          "state_jacobian_construction": "dense",
+          "kots_backend": "rust",
+          "dtype": "float64"
+        },
+        "requested_terms": [
+          {
+            "term_index": 0,
+            "term_name": "q_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 1,
+            "term_name": "qdot_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 2,
+            "term_name": "joint_q_bounds",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 3,
+            "term_name": "qdot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 4,
+            "term_name": "qddot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qddot",
+                "required_derivative_order": 2
+              }
+            ]
+          },
+          {
+            "term_index": 5,
+            "term_name": "torque_traj_regularization",
+            "requests": [
+              {
+                "kind": "dynamics",
+                "dtype": "dynamics",
+                "owner_type": "total_joint",
+                "field": "torque",
+                "required_derivative_order": 2,
+                "required_model_order": null
+              }
+            ]
+          }
+        ],
+        "active_terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545546788
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.003139679321183638
+          }
+        ],
+        "terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545546788
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.003139679321183638
+          }
+        ],
+        "skipped_terms": [],
+        "warnings": [],
+        "stationarity_scaling": {
+          "mode": "gradient_norm",
+          "eps": 1e-12,
+          "column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.0001744825620220695
+          ],
+          "active_column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.0001744825620220695
+          ]
+        },
+        "stationarity": {
+          "term_indices": [
+            3,
+            4,
+            5
+          ],
+          "active_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_gradient_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_residual_indices": [
+            0,
+            1,
+            2
+          ],
+          "ikkt_residual": [
+            -9.196866407069445,
+            -3.928162887219355,
+            26.987225722347187,
+            17.136816369186445,
+            9.849661236944259,
+            6.577691442875696,
+            1.5258657958475192,
+            0.9786307171707307,
+            -3.6522236223951827,
+            -3.3020915961193014,
+            -5.947094654228722,
+            -7.474770022293162,
+            -11.587221837464805,
+            -12.72117386130845,
+            2.587631242391825,
+            0.5617797900555003
+          ],
+          "ikkt_residual_scaled": [
+            -0.16966217365275785,
+            -0.07246605793854241,
+            0.4978555927909836,
+            0.3161369738337637,
+            0.18170481784085962,
+            0.12134409465354419,
+            0.028148903786064373,
+            0.018053607319001016,
+            -0.06737557892166486,
+            -0.06091640489280784,
+            -0.1097109560251463,
+            -0.1378932424811458,
+            -0.21375903014420478,
+            -0.2346779776060676,
+            0.04773616596828188,
+            0.010363614744011186
+          ],
+          "ikkt_residual_norm": 41.03836683951935,
+          "ikkt_residual_scaled_norm": 0.7570685723780936
+        },
+        "simplex": {
+          "method": "qr_nullspace",
+          "status": "converged",
+          "iterations": 1,
+          "objective": 0.28657641164130226,
+          "residual_norm": 0.7570685723780934,
+          "meta": {
+            "solver": "simplex_min_norm",
+            "method": "qr_nullspace",
+            "grad_norm": 0.9927298104270171,
+            "step_size": 0.0,
+            "active_size": 3
+          }
+        },
+        "weights": [
+          0.9844552441332696,
+          0.012405076545546788,
+          0.003139679321183638
+        ],
+        "scaled_weights": [
+          0.42686347378736533,
+          0.24118213980533199,
+          0.3319543864073028
+        ],
+        "validation": {
+          "scope": "objective_stationarity",
+          "constraint_term_indices": [
+            0,
+            1,
+            2
+          ],
+          "constraint_kkt_checked": false,
+          "messages": [
+            "Constraint KKT multipliers are not fitted; objective stationarity alone is insufficient.",
+            "The fitted coefficients do not satisfy exact scaled stationarity."
+          ]
+        },
+        "identifiability": {
+          "active_augmented_rank": 3,
+          "active_affine_nullity": 0,
+          "active_augmented_singular_values": [
+            2.182412073841709,
+            0.9233751390325533,
+            0.6200450730120718
+          ],
+          "excluded_term_indices": [],
+          "unique_stationary_weights": false
+        }
+      },
+      "ioc_seconds": 0.0030381008982658386,
+      "ioc_counts": {
+        "dynamics": 21,
+        "jacobian_transpose_mul": 21
+      },
+      "solution": [
+        1.5700000000000007,
+        1.57,
+        1.5700000000000003,
+        1.5700000000000005,
+        1.4425028415986114,
+        1.4425042347502797,
+        0.45146791616666526,
+        0.4514707559874931,
+        -0.451460681348426,
+        -0.45146134948624084,
+        -1.442504032094777,
+        -1.4425031431736852,
+        -1.569999999999995,
+        -1.5700000000000003,
+        -1.569999999999994,
+        -1.57
+      ]
+    },
+    {
+      "settings": {
+        "jacobian_method": "analytic",
+        "jacobian_options": {},
+        "batch_trajectory": true,
+        "jacobian_strategy": "dense",
+        "state_jacobian_construction": "dense",
+        "kots_backend": "rust",
+        "dtype": "float64"
+      },
+      "model_order": 5,
+      "fixed_jacobian": {
+        "shape": [
+          42,
+          16
+        ],
+        "first_seconds": 0.00287449499592185,
+        "warm_median_seconds": 0.002517376095056534,
+        "warm_seconds": [
+          0.002573091071099043,
+          0.002542562782764435,
+          0.0025049629621207714,
+          0.002517376095056534,
+          0.0025117150507867336
+        ],
+        "max_abs_error": 0.0,
+        "relative_frobenius_error": 0.0,
+        "counts": {
+          "dynamics": 6,
+          "jacobian": 6
+        }
+      },
+      "reduction_setup_seconds": 0.0008575671818107367,
+      "doc": {
+        "seconds": 0.012156014097854495,
+        "status": "converged",
+        "converged": true,
+        "iterations": 2,
+        "objective": 0.04406286448255577,
+        "counts": {
+          "eval_stacked_terms": 3,
+          "dynamics": 3,
+          "linearize_stacked_terms": 3,
+          "jacobian": 3
+        }
+      },
+      "kkt": {
+        "ok": true,
+        "message": "ok (stationarity=4.077e-13, eq=7.168e-15, ineq=0.000e+00, comp=0.000e+00, dual=0.000e+00)",
+        "stationarity_inf": 4.077004218117501e-13,
+        "eq_violation_inf": 7.167599846980005e-15,
+        "ineq_violation_inf": 0.0,
+        "complementarity_inf": 0.0,
+        "dual_violation_inf": 0.0,
+        "n_vars": 16,
+        "n_objective_rows": 126,
+        "n_eq_rows": 8,
+        "n_ineq_rows": 84,
+        "n_active_ineq_rows": 0,
+        "lambda_eq": [
+          -0.007016518787319555,
+          -0.007016263652604885,
+          0.007016182226068642,
+          0.007016332808780346,
+          -0.00544877060545884,
+          -0.005448689032756151,
+          -0.005448694874661184,
+          -0.00544871920778331
+        ],
+        "mu_ineq": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "kkt_seconds": 0.003405921161174774,
+      "kkt_counts": {
+        "linearize_stacked_terms": 2,
+        "jacobian": 1
+      },
+      "ioc": {
+        "backend": "KotsTrajectoryCompiledProblem",
+        "derivative_settings": {
+          "jacobian_method": "analytic",
+          "jacobian_options": {},
+          "batch_trajectory": true,
+          "jacobian_strategy": "dense",
+          "state_jacobian_construction": "dense",
+          "kots_backend": "rust",
+          "dtype": "float64"
+        },
+        "requested_terms": [
+          {
+            "term_index": 0,
+            "term_name": "q_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 1,
+            "term_name": "qdot_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 2,
+            "term_name": "joint_q_bounds",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 3,
+            "term_name": "qdot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 4,
+            "term_name": "qddot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qddot",
+                "required_derivative_order": 2
+              }
+            ]
+          },
+          {
+            "term_index": 5,
+            "term_name": "torque_traj_regularization",
+            "requests": [
+              {
+                "kind": "dynamics",
+                "dtype": "dynamics",
+                "owner_type": "total_joint",
+                "field": "torque",
+                "required_derivative_order": 2,
+                "required_model_order": null
+              }
+            ]
+          }
+        ],
+        "active_terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545546791
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.003139679321183635
+          }
+        ],
+        "terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545546791
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.003139679321183635
+          }
+        ],
+        "skipped_terms": [],
+        "warnings": [],
+        "stationarity_scaling": {
+          "mode": "gradient_norm",
+          "eps": 1e-12,
+          "column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.00017448256202206954
+          ],
+          "active_column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.00017448256202206954
+          ]
+        },
+        "stationarity": {
+          "term_indices": [
+            3,
+            4,
+            5
+          ],
+          "active_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_gradient_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_residual_indices": [
+            0,
+            1,
+            2
+          ],
+          "ikkt_residual": [
+            -9.196866407069438,
+            -3.928162887219353,
+            26.987225722347173,
+            17.13681636918644,
+            9.849661236944257,
+            6.577691442875697,
+            1.5258657958475201,
+            0.9786307171707317,
+            -3.6522236223951805,
+            -3.3020915961193,
+            -5.947094654228722,
+            -7.4747700222931615,
+            -11.587221837464808,
+            -12.721173861308452,
+            2.587631242391824,
+            0.5617797900555009
+          ],
+          "ikkt_residual_scaled": [
+            -0.16966217365275776,
+            -0.0724660579385424,
+            0.4978555927909835,
+            0.31613697383376377,
+            0.18170481784085962,
+            0.12134409465354425,
+            0.028148903786064404,
+            0.01805360731900104,
+            -0.06737557892166485,
+            -0.06091640489280784,
+            -0.10971095602514636,
+            -0.13789324248114584,
+            -0.21375903014420491,
+            -0.2346779776060677,
+            0.047736165968281875,
+            0.010363614744011198
+          ],
+          "ikkt_residual_norm": 41.03836683951934,
+          "ikkt_residual_scaled_norm": 0.7570685723780936
+        },
+        "simplex": {
+          "method": "qr_nullspace",
+          "status": "converged",
+          "iterations": 1,
+          "objective": 0.2865764116413023,
+          "residual_norm": 0.7570685723780936,
+          "meta": {
+            "solver": "simplex_min_norm",
+            "method": "qr_nullspace",
+            "grad_norm": 0.9927298104270172,
+            "step_size": 0.0,
+            "active_size": 3
+          }
+        },
+        "weights": [
+          0.9844552441332696,
+          0.012405076545546791,
+          0.003139679321183635
+        ],
+        "scaled_weights": [
+          0.4268634737873655,
+          0.24118213980533212,
+          0.3319543864073025
+        ],
+        "validation": {
+          "scope": "objective_stationarity",
+          "constraint_term_indices": [
+            0,
+            1,
+            2
+          ],
+          "constraint_kkt_checked": false,
+          "messages": [
+            "Constraint KKT multipliers are not fitted; objective stationarity alone is insufficient.",
+            "The fitted coefficients do not satisfy exact scaled stationarity."
+          ]
+        },
+        "identifiability": {
+          "active_augmented_rank": 3,
+          "active_affine_nullity": 0,
+          "active_augmented_singular_values": [
+            2.182412073841709,
+            0.9233751390325533,
+            0.6200450730120718
+          ],
+          "excluded_term_indices": [],
+          "unique_stationary_weights": false
+        }
+      },
+      "ioc_seconds": 0.0012338110245764256,
+      "ioc_counts": {
+        "dynamics": 1,
+        "jacobian_transpose_mul": 1
+      },
+      "solution": [
+        1.5700000000000007,
+        1.57,
+        1.5700000000000003,
+        1.5700000000000005,
+        1.4425028415986114,
+        1.4425042347502797,
+        0.45146791616666526,
+        0.4514707559874931,
+        -0.451460681348426,
+        -0.45146134948624084,
+        -1.442504032094777,
+        -1.4425031431736852,
+        -1.569999999999995,
+        -1.5700000000000003,
+        -1.569999999999994,
+        -1.57
+      ]
+    },
+    {
+      "settings": {
+        "jacobian_method": "numerical",
+        "jacobian_options": {
+          "eps": 1e-05
+        },
+        "batch_trajectory": false,
+        "jacobian_strategy": "dense",
+        "state_jacobian_construction": "dense",
+        "kots_backend": "rust",
+        "dtype": "float64"
+      },
+      "model_order": 5,
+      "fixed_jacobian": {
+        "shape": [
+          42,
+          16
+        ],
+        "first_seconds": 0.007308583008125424,
+        "warm_median_seconds": 0.006922097876667976,
+        "warm_seconds": [
+          0.006922097876667976,
+          0.006820989074185491,
+          0.0068406660575419664,
+          0.008002992952242494,
+          0.006931806914508343
+        ],
+        "max_abs_error": 1.9034018805541564e-09,
+        "relative_frobenius_error": 1.2173440233180633e-11,
+        "counts": {
+          "dynamics": 126,
+          "jacobian": 126
+        }
+      },
+      "reduction_setup_seconds": 0.0008165100589394569,
+      "doc": {
+        "seconds": 0.027896633837372065,
+        "status": "converged",
+        "converged": true,
+        "iterations": 2,
+        "objective": 0.04406286448255578,
+        "counts": {
+          "eval_stacked_terms": 3,
+          "dynamics": 126,
+          "linearize_stacked_terms": 3,
+          "jacobian": 63
+        }
+      },
+      "kkt": {
+        "ok": true,
+        "message": "ok (stationarity=4.077e-13, eq=7.168e-15, ineq=0.000e+00, comp=0.000e+00, dual=0.000e+00)",
+        "stationarity_inf": 4.0770193452077683e-13,
+        "eq_violation_inf": 7.167599846980005e-15,
+        "ineq_violation_inf": 0.0,
+        "complementarity_inf": 0.0,
+        "dual_violation_inf": 0.0,
+        "n_vars": 16,
+        "n_objective_rows": 126,
+        "n_eq_rows": 8,
+        "n_ineq_rows": 84,
+        "n_active_ineq_rows": 0,
+        "lambda_eq": [
+          -0.007016518787319539,
+          -0.007016263652604891,
+          0.007016182226068656,
+          0.0070163328087803544,
+          -0.005448770605458838,
+          -0.005448689032756152,
+          -0.005448694874661186,
+          -0.005448719207783307
+        ],
+        "mu_ineq": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "kkt_seconds": 0.008218748029321432,
+      "kkt_counts": {
+        "linearize_stacked_terms": 2,
+        "dynamics": 21,
+        "jacobian": 21
+      },
+      "ioc": {
+        "backend": "KotsTrajectoryCompiledProblem",
+        "derivative_settings": {
+          "jacobian_method": "numerical",
+          "jacobian_options": {
+            "eps": 1e-05
+          },
+          "batch_trajectory": false,
+          "jacobian_strategy": "dense",
+          "state_jacobian_construction": "dense",
+          "kots_backend": "rust",
+          "dtype": "float64"
+        },
+        "requested_terms": [
+          {
+            "term_index": 0,
+            "term_name": "q_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 1,
+            "term_name": "qdot_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 2,
+            "term_name": "joint_q_bounds",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 3,
+            "term_name": "qdot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 4,
+            "term_name": "qddot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qddot",
+                "required_derivative_order": 2
+              }
+            ]
+          },
+          {
+            "term_index": 5,
+            "term_name": "torque_traj_regularization",
+            "requests": [
+              {
+                "kind": "dynamics",
+                "dtype": "dynamics",
+                "owner_type": "total_joint",
+                "field": "torque",
+                "required_derivative_order": 2,
+                "required_model_order": null
+              }
+            ]
+          }
+        ],
+        "active_terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.99800878396452,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332409
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.87923394705412,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.01240507654556987
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161836,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754095786,
+            "weight": 0.0031396793211891493
+          }
+        ],
+        "terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.99800878396452,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332409
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.87923394705412,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.01240507654556987
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161836,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754095786,
+            "weight": 0.0031396793211891493
+          }
+        ],
+        "skipped_terms": [],
+        "warnings": [],
+        "stationarity_scaling": {
+          "mode": "gradient_norm",
+          "eps": 1e-12,
+          "column_scale": [
+            0.042545352982947926,
+            0.0009488541320448826,
+            0.00017448256202261527
+          ],
+          "active_column_scale": [
+            0.042545352982947926,
+            0.0009488541320448826,
+            0.00017448256202261527
+          ]
+        },
+        "stationarity": {
+          "term_indices": [
+            3,
+            4,
+            5
+          ],
+          "active_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_gradient_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_residual_indices": [
+            0,
+            1,
+            2
+          ],
+          "ikkt_residual": [
+            -9.196866407138364,
+            -3.9281628871936416,
+            26.98722572230641,
+            17.136816369198556,
+            9.849661236905101,
+            6.577691442910492,
+            1.5258657958658457,
+            0.978630717154566,
+            -3.652223622431807,
+            -3.3020915961319237,
+            -5.947094654313405,
+            -7.474770022273816,
+            -11.587221837487252,
+            -12.721173861321406,
+            2.5876312423985124,
+            0.5617797900547359
+          ],
+          "ikkt_residual_scaled": [
+            -0.1696621736540325,
+            -0.07246605793806944,
+            0.4978555927902408,
+            0.3161369738339932,
+            0.1817048178401407,
+            0.12134409465418843,
+            0.028148903786402998,
+            0.018053607318703157,
+            -0.06737557892234179,
+            -0.06091640489304186,
+            -0.10971095602671062,
+            -0.13789324248079154,
+            -0.21375903014462294,
+            -0.2346779776063111,
+            0.04773616596840615,
+            0.010363614743997301
+          ],
+          "ikkt_residual_norm": 41.03836683953084,
+          "ikkt_residual_scaled_norm": 0.7570685723783199
+        },
+        "simplex": {
+          "method": "qr_nullspace",
+          "status": "converged",
+          "iterations": 1,
+          "objective": 0.2865764116414737,
+          "residual_norm": 0.7570685723783199,
+          "meta": {
+            "solver": "simplex_min_norm",
+            "method": "qr_nullspace",
+            "grad_norm": 0.9927298104276109,
+            "step_size": 0.0,
+            "active_size": 3
+          }
+        },
+        "weights": [
+          0.9844552441332409,
+          0.01240507654556987,
+          0.0031396793211891493
+        ],
+        "scaled_weights": [
+          0.4268634737873611,
+          0.24118213980578534,
+          0.3319543864068535
+        ],
+        "validation": {
+          "scope": "objective_stationarity",
+          "constraint_term_indices": [
+            0,
+            1,
+            2
+          ],
+          "constraint_kkt_checked": false,
+          "messages": [
+            "Constraint KKT multipliers are not fitted; objective stationarity alone is insufficient.",
+            "The fitted coefficients do not satisfy exact scaled stationarity."
+          ]
+        },
+        "identifiability": {
+          "active_augmented_rank": 3,
+          "active_affine_nullity": 0,
+          "active_augmented_singular_values": [
+            2.182412073841925,
+            0.9233751390322448,
+            0.6200450730117695
+          ],
+          "excluded_term_indices": [],
+          "unique_stationary_weights": false
+        }
+      },
+      "ioc_seconds": 0.005286765052005649,
+      "ioc_counts": {
+        "dynamics": 21,
+        "jacobian": 21
+      },
+      "solution": [
+        1.5700000000000007,
+        1.57,
+        1.5700000000000003,
+        1.5700000000000005,
+        1.4425028415986114,
+        1.4425042347502797,
+        0.451467916166665,
+        0.4514707559874927,
+        -0.45146068134842565,
+        -0.451461349486241,
+        -1.4425040320947775,
+        -1.4425031431736854,
+        -1.569999999999995,
+        -1.5700000000000003,
+        -1.569999999999994,
+        -1.57
+      ]
+    },
+    {
+      "settings": {
+        "jacobian_method": "numerical",
+        "jacobian_options": {
+          "eps": 1e-05
+        },
+        "batch_trajectory": true,
+        "jacobian_strategy": "dense",
+        "state_jacobian_construction": "dense",
+        "kots_backend": "rust",
+        "dtype": "float64"
+      },
+      "model_order": 5,
+      "fixed_jacobian": {
+        "shape": [
+          42,
+          16
+        ],
+        "first_seconds": 0.004108457127586007,
+        "warm_median_seconds": 0.003094257088378072,
+        "warm_seconds": [
+          0.0031045968644320965,
+          0.0030856311786919832,
+          0.003167223185300827,
+          0.003094257088378072,
+          0.0030896279495209455
+        ],
+        "max_abs_error": 1.9034018805541564e-09,
+        "relative_frobenius_error": 1.2173440233180633e-11,
+        "counts": {
+          "dynamics": 6,
+          "jacobian": 6
+        }
+      },
+      "reduction_setup_seconds": 0.0008945360314100981,
+      "doc": {
+        "seconds": 0.014098934829235077,
+        "status": "converged",
+        "converged": true,
+        "iterations": 2,
+        "objective": 0.04406286448255578,
+        "counts": {
+          "eval_stacked_terms": 3,
+          "dynamics": 6,
+          "linearize_stacked_terms": 3,
+          "jacobian": 3
+        }
+      },
+      "kkt": {
+        "ok": true,
+        "message": "ok (stationarity=4.077e-13, eq=7.168e-15, ineq=0.000e+00, comp=0.000e+00, dual=0.000e+00)",
+        "stationarity_inf": 4.0770193452077683e-13,
+        "eq_violation_inf": 7.167599846980005e-15,
+        "ineq_violation_inf": 0.0,
+        "complementarity_inf": 0.0,
+        "dual_violation_inf": 0.0,
+        "n_vars": 16,
+        "n_objective_rows": 126,
+        "n_eq_rows": 8,
+        "n_ineq_rows": 84,
+        "n_active_ineq_rows": 0,
+        "lambda_eq": [
+          -0.007016518787319539,
+          -0.007016263652604891,
+          0.007016182226068656,
+          0.0070163328087803544,
+          -0.005448770605458838,
+          -0.005448689032756152,
+          -0.005448694874661186,
+          -0.005448719207783307
+        ],
+        "mu_ineq": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "kkt_seconds": 0.004081727005541325,
+      "kkt_counts": {
+        "linearize_stacked_terms": 2,
+        "dynamics": 1,
+        "jacobian": 1
+      },
+      "ioc": {
+        "backend": "KotsTrajectoryCompiledProblem",
+        "derivative_settings": {
+          "jacobian_method": "numerical",
+          "jacobian_options": {
+            "eps": 1e-05
+          },
+          "batch_trajectory": true,
+          "jacobian_strategy": "dense",
+          "state_jacobian_construction": "dense",
+          "kots_backend": "rust",
+          "dtype": "float64"
+        },
+        "requested_terms": [
+          {
+            "term_index": 0,
+            "term_name": "q_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 1,
+            "term_name": "qdot_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 2,
+            "term_name": "joint_q_bounds",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 3,
+            "term_name": "qdot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 4,
+            "term_name": "qddot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qddot",
+                "required_derivative_order": 2
+              }
+            ]
+          },
+          {
+            "term_index": 5,
+            "term_name": "torque_traj_regularization",
+            "requests": [
+              {
+                "kind": "dynamics",
+                "dtype": "dynamics",
+                "owner_type": "total_joint",
+                "field": "torque",
+                "required_derivative_order": 2,
+                "required_model_order": null
+              }
+            ]
+          }
+        ],
+        "active_terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.99800878396452,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332393
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.87923394705412,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545562636
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161836,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.23175407688,
+            "weight": 0.00313967932119808
+          }
+        ],
+        "terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.99800878396452,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332393
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.87923394705412,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545562636
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161836,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.23175407688,
+            "weight": 0.00313967932119808
+          }
+        ],
+        "skipped_terms": [],
+        "warnings": [],
+        "stationarity_scaling": {
+          "mode": "gradient_norm",
+          "eps": 1e-12,
+          "column_scale": [
+            0.042545352982947926,
+            0.0009488541320448826,
+            0.00017448256202319085
+          ],
+          "active_column_scale": [
+            0.042545352982947926,
+            0.0009488541320448826,
+            0.00017448256202319085
+          ]
+        },
+        "stationarity": {
+          "term_indices": [
+            3,
+            4,
+            5
+          ],
+          "active_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_gradient_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_residual_indices": [
+            0,
+            1,
+            2
+          ],
+          "ikkt_residual": [
+            -9.19686640714372,
+            -3.9281628871615974,
+            26.987225722305453,
+            17.13681636915774,
+            9.849661236932862,
+            6.577691442901909,
+            1.5258657958595607,
+            0.9786307171695946,
+            -3.6522236224124085,
+            -3.302091596071038,
+            -5.947094654295204,
+            -7.474770022287409,
+            -11.587221837497854,
+            -12.721173861352385,
+            2.587631242417263,
+            0.5617797900575794
+          ],
+          "ikkt_residual_scaled": [
+            -0.16966217365418088,
+            -0.07246605793749948,
+            0.4978555927903687,
+            0.3161369738333326,
+            0.18170481784070594,
+            0.12134409465406557,
+            0.028148903786295282,
+            0.01805360731898567,
+            -0.06737557892200362,
+            -0.06091640489193646,
+            -0.10971095602640693,
+            -0.13789324248108262,
+            -0.21375903014488104,
+            -0.23467797760695117,
+            0.04773616596876602,
+            0.010363614744052776
+          ],
+          "ikkt_residual_norm": 41.03836683952374,
+          "ikkt_residual_scaled_norm": 0.7570685723784102
+        },
+        "simplex": {
+          "method": "qr_nullspace",
+          "status": "converged",
+          "iterations": 1,
+          "objective": 0.2865764116415421,
+          "residual_norm": 0.7570685723784102,
+          "meta": {
+            "solver": "simplex_min_norm",
+            "method": "qr_nullspace",
+            "grad_norm": 0.9927298104278478,
+            "step_size": 0.0,
+            "active_size": 3
+          }
+        },
+        "weights": [
+          0.9844552441332393,
+          0.012405076545562636,
+          0.00313967932119808
+        ],
+        "scaled_weights": [
+          0.4268634737874852,
+          0.2411821398057152,
+          0.3319543864067997
+        ],
+        "validation": {
+          "scope": "objective_stationarity",
+          "constraint_term_indices": [
+            0,
+            1,
+            2
+          ],
+          "constraint_kkt_checked": false,
+          "messages": [
+            "Constraint KKT multipliers are not fitted; objective stationarity alone is insufficient.",
+            "The fitted coefficients do not satisfy exact scaled stationarity."
+          ]
+        },
+        "identifiability": {
+          "active_augmented_rank": 3,
+          "active_affine_nullity": 0,
+          "active_augmented_singular_values": [
+            2.182412073842044,
+            0.9233751390322801,
+            0.6200450730112997
+          ],
+          "excluded_term_indices": [],
+          "unique_stationary_weights": false
+        }
+      },
+      "ioc_seconds": 0.0017372339498251677,
+      "ioc_counts": {
+        "dynamics": 1,
+        "jacobian": 1
+      },
+      "solution": [
+        1.5700000000000007,
+        1.57,
+        1.5700000000000003,
+        1.5700000000000005,
+        1.4425028415986114,
+        1.4425042347502797,
+        0.451467916166665,
+        0.4514707559874927,
+        -0.45146068134842565,
+        -0.451461349486241,
+        -1.4425040320947775,
+        -1.4425031431736854,
+        -1.569999999999995,
+        -1.5700000000000003,
+        -1.569999999999994,
+        -1.57
+      ]
+    },
+    {
+      "settings": {
+        "jacobian_method": "autodiff",
+        "jacobian_options": {
+          "mode": "forward",
+          "jit": true
+        },
+        "batch_trajectory": false,
+        "jacobian_strategy": "dense",
+        "state_jacobian_construction": "dense",
+        "kots_backend": "rust",
+        "dtype": "float64"
+      },
+      "model_order": 5,
+      "fixed_jacobian": {
+        "shape": [
+          42,
+          16
+        ],
+        "first_seconds": 0.40240168012678623,
+        "warm_median_seconds": 0.010179460979998112,
+        "warm_seconds": [
+          0.010179460979998112,
+          0.010279027977958322,
+          0.010471108136698604,
+          0.010107535868883133,
+          0.009986508870497346
+        ],
+        "max_abs_error": 4.263256414560601e-14,
+        "relative_frobenius_error": 1.7787879994666274e-16,
+        "counts": {
+          "dynamics": 126,
+          "jacobian_autodiff": 126
+        }
+      },
+      "reduction_setup_seconds": 0.0009657291229814291,
+      "doc": {
+        "seconds": 0.037612095940858126,
+        "status": "converged",
+        "converged": true,
+        "iterations": 2,
+        "objective": 0.04406286448255577,
+        "counts": {
+          "eval_stacked_terms": 3,
+          "dynamics": 126,
+          "linearize_stacked_terms": 3,
+          "jacobian_autodiff": 63
+        }
+      },
+      "kkt": {
+        "ok": true,
+        "message": "ok (stationarity=4.077e-13, eq=7.168e-15, ineq=0.000e+00, comp=0.000e+00, dual=0.000e+00)",
+        "stationarity_inf": 4.0770042180099673e-13,
+        "eq_violation_inf": 7.167599846980005e-15,
+        "ineq_violation_inf": 0.0,
+        "complementarity_inf": 0.0,
+        "dual_violation_inf": 0.0,
+        "n_vars": 16,
+        "n_objective_rows": 126,
+        "n_eq_rows": 8,
+        "n_ineq_rows": 84,
+        "n_active_ineq_rows": 0,
+        "lambda_eq": [
+          -0.007016518787319555,
+          -0.007016263652604885,
+          0.007016182226068642,
+          0.007016332808780346,
+          -0.00544877060545884,
+          -0.005448689032756151,
+          -0.005448694874661184,
+          -0.00544871920778331
+        ],
+        "mu_ineq": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "kkt_seconds": 0.011442326940596104,
+      "kkt_counts": {
+        "linearize_stacked_terms": 2,
+        "dynamics": 21,
+        "jacobian_autodiff": 21
+      },
+      "ioc": {
+        "backend": "KotsTrajectoryCompiledProblem",
+        "derivative_settings": {
+          "jacobian_method": "autodiff",
+          "jacobian_options": {
+            "mode": "forward",
+            "jit": true
+          },
+          "batch_trajectory": false,
+          "jacobian_strategy": "dense",
+          "state_jacobian_construction": "dense",
+          "kots_backend": "rust",
+          "dtype": "float64"
+        },
+        "requested_terms": [
+          {
+            "term_index": 0,
+            "term_name": "q_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 1,
+            "term_name": "qdot_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 2,
+            "term_name": "joint_q_bounds",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 3,
+            "term_name": "qdot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 4,
+            "term_name": "qddot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qddot",
+                "required_derivative_order": 2
+              }
+            ]
+          },
+          {
+            "term_index": 5,
+            "term_name": "torque_traj_regularization",
+            "requests": [
+              {
+                "kind": "dynamics",
+                "dtype": "dynamics",
+                "owner_type": "total_joint",
+                "field": "torque",
+                "required_derivative_order": 2,
+                "required_model_order": null
+              }
+            ]
+          }
+        ],
+        "active_terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.01240507654554679
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.003139679321183637
+          }
+        ],
+        "terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.01240507654554679
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.003139679321183637
+          }
+        ],
+        "skipped_terms": [],
+        "warnings": [],
+        "stationarity_scaling": {
+          "mode": "gradient_norm",
+          "eps": 1e-12,
+          "column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.00017448256202206954
+          ],
+          "active_column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.00017448256202206954
+          ]
+        },
+        "stationarity": {
+          "term_indices": [
+            3,
+            4,
+            5
+          ],
+          "active_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_gradient_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_residual_indices": [
+            0,
+            1,
+            2
+          ],
+          "ikkt_residual": [
+            -9.19686640706944,
+            -3.928162887219353,
+            26.98722572234718,
+            17.13681636918644,
+            9.849661236944257,
+            6.577691442875696,
+            1.525865795847519,
+            0.9786307171707312,
+            -3.652223622395182,
+            -3.3020915961193005,
+            -5.947094654228722,
+            -7.4747700222931615,
+            -11.587221837464806,
+            -12.72117386130845,
+            2.587631242391824,
+            0.561779790055501
+          ],
+          "ikkt_residual_scaled": [
+            -0.16966217365275776,
+            -0.07246605793854238,
+            0.49785559279098346,
+            0.31613697383376366,
+            0.18170481784085962,
+            0.12134409465354419,
+            0.028148903786064376,
+            0.01805360731900103,
+            -0.06737557892166485,
+            -0.06091640489280782,
+            -0.1097109560251463,
+            -0.1378932424811458,
+            -0.21375903014420478,
+            -0.2346779776060676,
+            0.04773616596828187,
+            0.0103636147440112
+          ],
+          "ikkt_residual_norm": 41.03836683951934,
+          "ikkt_residual_scaled_norm": 0.7570685723780933
+        },
+        "simplex": {
+          "method": "qr_nullspace",
+          "status": "converged",
+          "iterations": 1,
+          "objective": 0.28657641164130215,
+          "residual_norm": 0.7570685723780933,
+          "meta": {
+            "solver": "simplex_min_norm",
+            "method": "qr_nullspace",
+            "grad_norm": 0.992729810427017,
+            "step_size": 0.0,
+            "active_size": 3
+          }
+        },
+        "weights": [
+          0.9844552441332696,
+          0.01240507654554679,
+          0.003139679321183637
+        ],
+        "scaled_weights": [
+          0.42686347378736533,
+          0.241182139805332,
+          0.33195438640730257
+        ],
+        "validation": {
+          "scope": "objective_stationarity",
+          "constraint_term_indices": [
+            0,
+            1,
+            2
+          ],
+          "constraint_kkt_checked": false,
+          "messages": [
+            "Constraint KKT multipliers are not fitted; objective stationarity alone is insufficient.",
+            "The fitted coefficients do not satisfy exact scaled stationarity."
+          ]
+        },
+        "identifiability": {
+          "active_augmented_rank": 3,
+          "active_affine_nullity": 0,
+          "active_augmented_singular_values": [
+            2.182412073841709,
+            0.9233751390325533,
+            0.6200450730120718
+          ],
+          "excluded_term_indices": [],
+          "unique_stationary_weights": false
+        }
+      },
+      "ioc_seconds": 0.008861090987920761,
+      "ioc_counts": {
+        "dynamics": 21,
+        "jacobian_autodiff": 21
+      },
+      "solution": [
+        1.5700000000000007,
+        1.57,
+        1.5700000000000003,
+        1.5700000000000005,
+        1.4425028415986114,
+        1.4425042347502797,
+        0.45146791616666526,
+        0.4514707559874931,
+        -0.451460681348426,
+        -0.45146134948624084,
+        -1.442504032094777,
+        -1.4425031431736852,
+        -1.569999999999995,
+        -1.5700000000000003,
+        -1.569999999999994,
+        -1.57
+      ]
+    },
+    {
+      "settings": {
+        "jacobian_method": "autodiff",
+        "jacobian_options": {
+          "mode": "forward",
+          "jit": true
+        },
+        "batch_trajectory": true,
+        "jacobian_strategy": "dense",
+        "state_jacobian_construction": "dense",
+        "kots_backend": "rust",
+        "dtype": "float64"
+      },
+      "model_order": 5,
+      "fixed_jacobian": {
+        "shape": [
+          42,
+          16
+        ],
+        "first_seconds": 0.5418849599082023,
+        "warm_median_seconds": 0.003486621892079711,
+        "warm_seconds": [
+          0.004760008072480559,
+          0.004321365850046277,
+          0.003464139997959137,
+          0.003486621892079711,
+          0.0034734869841486216
+        ],
+        "max_abs_error": 4.263256414560601e-14,
+        "relative_frobenius_error": 1.7787879994666274e-16,
+        "counts": {
+          "dynamics": 6,
+          "jacobian_autodiff": 6
+        }
+      },
+      "reduction_setup_seconds": 0.0009672120213508606,
+      "doc": {
+        "seconds": 0.015217990847304463,
+        "status": "converged",
+        "converged": true,
+        "iterations": 2,
+        "objective": 0.04406286448255577,
+        "counts": {
+          "eval_stacked_terms": 3,
+          "dynamics": 6,
+          "linearize_stacked_terms": 3,
+          "jacobian_autodiff": 3
+        }
+      },
+      "kkt": {
+        "ok": true,
+        "message": "ok (stationarity=4.077e-13, eq=7.168e-15, ineq=0.000e+00, comp=0.000e+00, dual=0.000e+00)",
+        "stationarity_inf": 4.0770042180099673e-13,
+        "eq_violation_inf": 7.167599846980005e-15,
+        "ineq_violation_inf": 0.0,
+        "complementarity_inf": 0.0,
+        "dual_violation_inf": 0.0,
+        "n_vars": 16,
+        "n_objective_rows": 126,
+        "n_eq_rows": 8,
+        "n_ineq_rows": 84,
+        "n_active_ineq_rows": 0,
+        "lambda_eq": [
+          -0.007016518787319555,
+          -0.007016263652604885,
+          0.007016182226068642,
+          0.007016332808780346,
+          -0.00544877060545884,
+          -0.005448689032756151,
+          -0.005448694874661184,
+          -0.00544871920778331
+        ],
+        "mu_ineq": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "kkt_seconds": 0.004332897020503879,
+      "kkt_counts": {
+        "linearize_stacked_terms": 2,
+        "dynamics": 1,
+        "jacobian_autodiff": 1
+      },
+      "ioc": {
+        "backend": "KotsTrajectoryCompiledProblem",
+        "derivative_settings": {
+          "jacobian_method": "autodiff",
+          "jacobian_options": {
+            "mode": "forward",
+            "jit": true
+          },
+          "batch_trajectory": true,
+          "jacobian_strategy": "dense",
+          "state_jacobian_construction": "dense",
+          "kots_backend": "rust",
+          "dtype": "float64"
+        },
+        "requested_terms": [
+          {
+            "term_index": 0,
+            "term_name": "q_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 1,
+            "term_name": "qdot_boundary",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 2,
+            "term_name": "joint_q_bounds",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              },
+              {
+                "kind": "trajectory_derivative",
+                "field": "q",
+                "required_derivative_order": 0
+              }
+            ]
+          },
+          {
+            "term_index": 3,
+            "term_name": "qdot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qdot",
+                "required_derivative_order": 1
+              }
+            ]
+          },
+          {
+            "term_index": 4,
+            "term_name": "qddot_traj_regularization",
+            "requests": [
+              {
+                "kind": "trajectory_derivative",
+                "field": "qddot",
+                "required_derivative_order": 2
+              }
+            ]
+          },
+          {
+            "term_index": 5,
+            "term_name": "torque_traj_regularization",
+            "requests": [
+              {
+                "kind": "dynamics",
+                "dtype": "dynamics",
+                "owner_type": "total_joint",
+                "field": "torque",
+                "required_derivative_order": 2,
+                "required_model_order": null
+              }
+            ]
+          }
+        ],
+        "active_terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545546788
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.0031396793211836385
+          }
+        ],
+        "terms": [
+          {
+            "term_index": 3,
+            "name": "qdot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 10.998008783964519,
+            "weighted_residual_norm": 0.10998008783964519,
+            "gradient_norm": 23.504329612702886,
+            "weight": 0.9844552441332696
+          },
+          {
+            "term_index": 4,
+            "name": "qddot_traj_regularization",
+            "attrs": {},
+            "residual_size": 42,
+            "residual_norm": 17.879233947054118,
+            "weighted_residual_norm": 0.17879233947054118,
+            "gradient_norm": 1053.902772015012,
+            "weight": 0.012405076545546788
+          },
+          {
+            "term_index": 5,
+            "name": "torque_traj_regularization",
+            "attrs": {
+              "plot": "joint_torque"
+            },
+            "residual_size": 42,
+            "residual_norm": 73.76367605161835,
+            "weighted_residual_norm": 0.0007376367605161837,
+            "gradient_norm": 5731.231754113712,
+            "weight": 0.0031396793211836385
+          }
+        ],
+        "skipped_terms": [],
+        "warnings": [],
+        "stationarity_scaling": {
+          "mode": "gradient_norm",
+          "eps": 1e-12,
+          "column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.0001744825620220695
+          ],
+          "active_column_scale": [
+            0.04254535298294793,
+            0.0009488541320448826,
+            0.0001744825620220695
+          ]
+        },
+        "stationarity": {
+          "term_indices": [
+            3,
+            4,
+            5
+          ],
+          "active_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_gradient_indices": [
+            0,
+            1,
+            2
+          ],
+          "active_residual_indices": [
+            0,
+            1,
+            2
+          ],
+          "ikkt_residual": [
+            -9.196866407069445,
+            -3.9281628872193552,
+            26.987225722347187,
+            17.136816369186445,
+            9.84966123694426,
+            6.577691442875696,
+            1.5258657958475195,
+            0.9786307171707304,
+            -3.6522236223951836,
+            -3.3020915961193014,
+            -5.947094654228722,
+            -7.474770022293162,
+            -11.587221837464805,
+            -12.72117386130845,
+            2.5876312423918253,
+            0.5617797900555002
+          ],
+          "ikkt_residual_scaled": [
+            -0.16966217365275785,
+            -0.07246605793854241,
+            0.4978555927909836,
+            0.3161369738337637,
+            0.18170481784085965,
+            0.12134409465354419,
+            0.028148903786064373,
+            0.01805360731900101,
+            -0.06737557892166487,
+            -0.06091640489280784,
+            -0.10971095602514629,
+            -0.1378932424811458,
+            -0.21375903014420475,
+            -0.2346779776060676,
+            0.04773616596828187,
+            0.010363614744011186
+          ],
+          "ikkt_residual_norm": 41.03836683951935,
+          "ikkt_residual_scaled_norm": 0.7570685723780936
+        },
+        "simplex": {
+          "method": "qr_nullspace",
+          "status": "converged",
+          "iterations": 1,
+          "objective": 0.2865764116413023,
+          "residual_norm": 0.7570685723780936,
+          "meta": {
+            "solver": "simplex_min_norm",
+            "method": "qr_nullspace",
+            "grad_norm": 0.9927298104270171,
+            "step_size": 0.0,
+            "active_size": 3
+          }
+        },
+        "weights": [
+          0.9844552441332696,
+          0.012405076545546788,
+          0.0031396793211836385
+        ],
+        "scaled_weights": [
+          0.42686347378736533,
+          0.24118213980533196,
+          0.33195438640730285
+        ],
+        "validation": {
+          "scope": "objective_stationarity",
+          "constraint_term_indices": [
+            0,
+            1,
+            2
+          ],
+          "constraint_kkt_checked": false,
+          "messages": [
+            "Constraint KKT multipliers are not fitted; objective stationarity alone is insufficient.",
+            "The fitted coefficients do not satisfy exact scaled stationarity."
+          ]
+        },
+        "identifiability": {
+          "active_augmented_rank": 3,
+          "active_affine_nullity": 0,
+          "active_augmented_singular_values": [
+            2.1824120738417085,
+            0.9233751390325532,
+            0.6200450730120716
+          ],
+          "excluded_term_indices": [],
+          "unique_stationary_weights": false
+        }
+      },
+      "ioc_seconds": 0.002121805911883712,
+      "ioc_counts": {
+        "dynamics": 1,
+        "jacobian_autodiff": 1
+      },
+      "solution": [
+        1.5700000000000007,
+        1.57,
+        1.5700000000000003,
+        1.5700000000000005,
+        1.4425028415986114,
+        1.4425042347502797,
+        0.45146791616666526,
+        0.4514707559874931,
+        -0.451460681348426,
+        -0.45146134948624084,
+        -1.442504032094777,
+        -1.4425031431736852,
+        -1.569999999999995,
+        -1.5700000000000003,
+        -1.569999999999994,
+        -1.57
+      ]
+    }
+  ],
+  "initial_point": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "fixed_point": [
+    -0.043234000554110225,
+    -0.1130096771890423,
+    0.06738436579279798,
+    -0.11078145982748595,
+    0.20139155830911443,
+    0.09241120367011457,
+    -0.03592629380835823,
+    0.05705157312751827,
+    0.16115890898926155,
+    0.2833969406582865,
+    -0.09232646653032858,
+    0.10650737311362374,
+    0.051774062919817926,
+    -0.027955103506860146,
+    0.10921981830820932,
+    0.05067743001129121
+  ]
+}

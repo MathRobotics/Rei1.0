@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ...core.mapping import mapping_as_dict
+from ...core.model_config import normalize_model_config
 from ..solver_config import normalize_solver_config
 from .spec_reserved import resolve_opt_vals, resolve_quantity
 
@@ -22,13 +23,19 @@ class _SpecContext:
 
 
 def load_problem_spec_toml(path: str | Path) -> dict[str, Any]:
-    """Load a human-oriented problem spec TOML file and convert it to DSL."""
+    """Convert TOML to DSL, resolving model.file against its source directory.
+
+    Model metadata is retained, but no robotics backend/model is instantiated.
+    """
 
     p = Path(path)
     data = tomllib.loads(p.read_text(encoding="utf-8"))
     if not isinstance(data, Mapping):
         raise TypeError("Problem spec TOML must decode to an object.")
-    return problem_spec_to_dsl(data)
+    dsl = problem_spec_to_dsl(data)
+    if "model" in dsl:
+        dsl["model"] = normalize_model_config(dsl["model"], base_dir=p.resolve().parent)
+    return dsl
 
 
 def problem_spec_to_dsl(spec: Mapping[str, Any]) -> dict[str, Any]:
@@ -42,6 +49,8 @@ def problem_spec_to_dsl(spec: Mapping[str, Any]) -> dict[str, Any]:
 
     spec_dict = mapping_as_dict(spec, where="spec")
     dsl: dict[str, Any] = {}
+    if "model" in spec_dict:
+        dsl["model"] = normalize_model_config(spec_dict["model"])
     if "solver" in spec_dict:
         dsl["solver"] = normalize_solver_config(spec_dict["solver"])
 

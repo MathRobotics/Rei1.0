@@ -31,12 +31,12 @@ UV_PROJECT_ENVIRONMENT=/tmp/rei-py311/venv uv sync --locked --python 3.11 \
 PYTHONPATH=. MPLBACKEND=Agg /tmp/rei-py311/venv/bin/python -m pytest -q -ra
 ```
 
-As of 2026-10-14, `uv.lock` is committed and RoboKots is pinned to
-`3703e91697c737d4ce1e91ef025c9f580ef45e9b`. Use `--locked` to reject
+As of the remote integration on 2026-10-14, `uv.lock` is committed and RoboKots is pinned to
+`acb2a041453d7c4d3170050e98a1ead81c1897ba`. Use `--locked` to reject
 unintentional dependency resolution. The table above remains a historical record;
 it is not a test report for the new revision. See [testing instructions](../../docs/testing.md).
 
-## Verification on 2026-10-14
+## Verification on 2026-10-14 (before remote integration)
 
 Fresh environments were installed from the committed lock with uv 0.9.18 on
 macOS 15.7.4 ARM64. The existing project `.venv` was left unchanged.
@@ -84,3 +84,41 @@ dependency selections passed `uv sync --locked --python-platform
 x86_64-unknown-linux-gnu --dry-run`. This is **not** a Linux execution result:
 the remote workflow has not been run. Native cyipopt/liteopt execution and
 dynamic constrained IOC reconstruction remain outside this verification.
+
+## Verification on 2026-10-14 after remote integration
+
+Integrated local `e13e542` and remote `2265c27`, retaining the solver/runtime/IOC
+refactoring together with TOML model loading, motion-order inference and batched
+numerical/autodiff derivatives. Both branches' commit histories are preserved.
+
+The lock now selects RoboKots revision
+`acb2a041453d7c4d3170050e98a1ead81c1897ba`; other locked package versions did
+not change. The earlier tables remain records of their respective revisions.
+
+| Check on macOS ARM64 | Result |
+|---|---|
+| Python 3.11.14, core + dev | 899 passed, 73 optional-dependency skips |
+| Python 3.13.1, dev + real RoboKots Rust / Pinocchio | 1013 passed, no skips (`--fail-on-skip`) |
+| `uv pip check`, both environments | passed |
+| `uv lock --check --offline` | passed |
+| Workflow YAML and shell syntax | passed |
+
+The Python 3.13 environment was created for the actual merged workspace;
+`rei.__file__` and RoboKots' installed Git revision were checked explicitly.
+The existing Python 3.11 core environment was reused because its locked
+dependencies did not change. Commands:
+
+```sh
+UV_PROJECT_ENVIRONMENT=/tmp/rei-merge-verify313 uv sync --locked --python 3.13 \
+  --group dev --group kots --group pinocchio
+MPLBACKEND=Agg /tmp/rei-verify-py311/bin/python -m pytest -q -rs
+MPLBACKEND=Agg /tmp/rei-merge-verify313/bin/python -m pytest -q -rs --fail-on-skip
+uv pip check --python /tmp/rei-verify-py311/bin/python
+uv pip check --python /tmp/rei-merge-verify313/bin/python
+uv lock --check --offline
+```
+
+The new AD test module skips before importing the optional backend when RoboKots
+is absent, so core CI can collect successfully. The native CI selection now
+also includes AD batching, motion-order inference and TOML model loading tests.
+GitHub Actions / Linux execution has not been performed locally.

@@ -44,8 +44,8 @@ def compile_trajectory_ioc_problem(
     dsl: Mapping[str, Any],
     *,
     backend: str,
-    model: Any,
-    data: Any,
+    model: Any = None,
+    data: Any = None,
     unsupported: str = "warn_skip",
     **kwargs: Any,
 ) -> TrajectoryIocCompiledProblem:
@@ -147,6 +147,7 @@ def estimate_ioc_weights(
         raise ValueError("constraint_mode must be 'objective_stationarity' or 'kkt'.")
     return {
         "backend": str(backend),
+        "derivative_settings": getattr(compiled_obj, "derivative_settings", {}),
         "requested_terms": [] if diagnostics is None else [dict(t) for t in diagnostics.requested_terms],
         "skipped_terms": [] if diagnostics is None else [d.to_json_dict() for d in diagnostics.unsupported_terms],
         "warnings": [] if diagnostics is None else [d.to_json_dict() for d in diagnostics.warnings],

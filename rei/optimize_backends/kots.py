@@ -7,10 +7,12 @@ from typing import Any
 import numpy as np
 
 from ..backends.state.robotics.kots import KotsTrajectoryStateBuilder
+from ..backends.state.robotics.model_loading import load_kots_model
 from ..core.expr.traversal import walk_expr
 from ..core.expr.nodes import ConstantExpr, RepeatConstantExpr, TrajectoryVarDerivativesExpr, TrajectoryVarExpr
 from ..core.state_schema import DTYPE_DYNAMICS, torque_derivative_order
 from ..core.trajectory import TrajectoryMap
+from ..optimize.dsl.dsl_ops import iter_nodes
 from ..optimize.dsl.trajectory_compile import PreparedTrajectoryProblemDsl
 from ..optimize.runtime import NLSRuntime
 from ._robotics_products import RoboticsTermProducts
@@ -42,6 +44,10 @@ class KotsTrajectoryCompiledProblem:
     diagnostics: TrajectoryProblemDiagnostics | None = None
     state_builder: KotsTrajectoryStateBuilder | None = None
     perturbation_report: Any = None
+
+    @property
+    def derivative_settings(self) -> dict[str, Any]:
+        return {} if self.state_builder is None else self.state_builder.derivative_settings
 
 
 @dataclass
@@ -335,6 +341,63 @@ def _infer_model_order(model: Any) -> int:
         return 1
 
 
+def _required_model_order(
+    dsl: Mapping[str, Any],
+    *,
+    dynamics_fields: Sequence[str] | None,
+    max_derivative_order: int | None,
+) -> int:
+    """Count motion slots (q through the highest requested time derivative)."""
+    order = 1
+    if max_derivative_order is not None:
+        if int(max_derivative_order) < 0:
+            raise ValueError("max_derivative_order must be >= 0.")
+        order = max(order, int(max_derivative_order) + 1)
+
+    def field_order(field: str) -> int:
+        field = base_field_name(field)
+        derivative = torque_derivative_order(field)
+        if derivative is not None:
+            return derivative + 3
+        return {
+            "vel": 2,
+            "momentum": 2,
+            "kinetic_energy": 2,
+            "acc": 3,
+            "force": 3,
+        }.get(field, 1)
+
+    for field in dynamics_fields or ():
+        order = max(order, field_order(str(field)))
+    for node in iter_nodes(dict(dsl)):
+        if node.get("type") == "get_state":
+            key = node.get("key")
+            if isinstance(key, Mapping) and key.get("dtype") in ("kinematics", "dynamics"):
+                order = max(order, field_order(str(key.get("field", ""))))
+        elif node.get("type") == "get_traj_var":
+            derivative = node.get(
+                "max_derivative_order",
+                node.get("derivative_order_max", node.get("max_deriv_order")),
+            )
+            if derivative is None:
+                derivative = node.get("derivative_order", node.get("deriv_order", 0))
+            order = max(order, int(derivative) + 1)
+    return order
+
+
+def _set_model_order(model: Any, order: int) -> None:
+    # Older/custom providers without set_order retain their existing behavior.
+    setter = getattr(model, "set_order", None)
+    if not callable(setter) or _infer_model_order(model) == order:
+        return
+    gravity = getattr(model, "gravity_", None)
+    if gravity is not None:
+        gravity = np.array(gravity, copy=True)
+    setter(order)
+    if gravity is not None:
+        model.gravity_ = gravity
+
+
 def _canonicalize_dynamics_fields(
     dynamics_fields: Sequence[str] | None,
 ) -> tuple[str, ...] | None:
@@ -409,6 +472,7 @@ class _KotsTrajectoryCompileAdapter:
     prefer_matvec_jacobian: bool = False
     jacobian_strategy: str | None = None
     jacobian_method: str = "analytic"
+    jacobian_options: Mapping[str, Any] | None = None
     kots_backend: str | None = None
     gravity: Sequence[float] | None = None
     batch_trajectory: bool = True
@@ -491,6 +555,7 @@ class _KotsTrajectoryCompileAdapter:
             prefer_matvec_jacobian=self.prefer_matvec_jacobian,
             jacobian_strategy=self.jacobian_strategy,
             jacobian_method=self.jacobian_method,
+            jacobian_options=self.jacobian_options,
             kots_backend=self.kots_backend,
             gravity=self.gravity,
             batch_trajectory=self.batch_trajectory,
@@ -525,7 +590,7 @@ class _KotsTrajectoryCompileAdapter:
 def compile_kots_trajectory_problem(
     dsl: Mapping[str, Any],
     *,
-    model: Any,
+    model: Any = None,
     data: Any = None,
     p_var: str | None = None,
     max_derivative_order: int | None = None,
@@ -540,6 +605,7 @@ def compile_kots_trajectory_problem(
     prefer_matvec_jacobian: bool = False,
     jacobian_strategy: str | None = None,
     jacobian_method: str = "analytic",
+    jacobian_options: Mapping[str, Any] | None = None,
     trajectory_maps: Mapping[int, TrajectoryMap] | Sequence[TrajectoryMap] | None = None,
     kots_backend: str | None = None,
     gravity: Sequence[float] | None = None,
@@ -552,8 +618,29 @@ def compile_kots_trajectory_problem(
     or TOML file path. Sampling occurs once when the state builder is created;
     values and all derivatives use that same model, including template windows.
     The realized changes are available as ``perturbation_report``.
+
+    Model motion order is inferred from the problem and explicit derivative/
+    dynamics options, and set before preparing trajectory maps. This mutates
+    the supplied model (preserving gravity); use separate models for live
+    compiled problems requiring different orders. Providers without set_order
+    retain their configured order.
+
+    If model is omitted, load dsl['model']['file']; explicit model objects take
+    precedence over all file/locking metadata. TOML loaders resolve relative
+    paths against the TOML directory, without importing a robotics backend.
     """
+    if model is None:
+        model = load_kots_model(dsl, backend=kots_backend)
+    required_order = _required_model_order(
+        dsl,
+        dynamics_fields=dynamics_fields,
+        max_derivative_order=max_derivative_order,
+    )
+    # Diagnose against the planned order before mutating the model.
+    can_set_order = callable(getattr(model, "set_order", None))
     model_order = _infer_model_order(model)
+    if can_set_order:
+        model_order = required_order
     max_derivative_order_use = max(0, model_order - 1) if max_derivative_order is None else int(max_derivative_order)
     unsupported_policy = normalize_unsupported_policy(unsupported)
     diagnostics = inspect_trajectory_problem_backend(
@@ -565,10 +652,24 @@ def compile_kots_trajectory_problem(
         extra_supported_dynamics_owner_fields={"total_body": ("kinetic_energy",)},
         unsupported_action=("skipped" if unsupported_policy == "warn_skip" else "error"),
     )
+    if jacobian_method != "analytic" and diagnostics.unsupported_terms:
+        raise NotImplementedError(
+            f"{jacobian_method} comparison cannot skip unsupported terms: "
+            + "; ".join(item.reason for item in diagnostics.unsupported_terms)
+        )
     if unsupported_policy == "error":
         dsl_use: Mapping[str, Any] = dsl
     else:
         dsl_use = filter_unsupported_terms_from_dsl(dsl, diagnostics)
+
+    if can_set_order:
+        if unsupported_policy != "error":
+            required_order = _required_model_order(
+                dsl_use,
+                dynamics_fields=dynamics_fields,
+                max_derivative_order=max_derivative_order,
+            )
+        _set_model_order(model, required_order)
 
     adapter = _KotsTrajectoryCompileAdapter(
         fields=fields,
@@ -577,6 +678,7 @@ def compile_kots_trajectory_problem(
         prefer_matvec_jacobian=prefer_matvec_jacobian,
         jacobian_strategy=jacobian_strategy,
         jacobian_method=jacobian_method,
+        jacobian_options=jacobian_options,
         kots_backend=kots_backend,
         gravity=gravity,
         batch_trajectory=batch_trajectory,

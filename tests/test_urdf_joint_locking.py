@@ -116,7 +116,8 @@ def test_dynamics_match_original_with_zero_locked_velocity(robot_xml, positions)
 
 
 @pytest.mark.parametrize('backend', ['numpy', 'rust'])
-def test_reduced_model_trajectory_derivatives(robot_xml, backend):
+@pytest.mark.parametrize('method', ['analytic', 'numerical', 'autodiff'])
+def test_reduced_model_trajectory_derivatives(robot_xml, backend, method):
     Kots = pytest.importorskip('robokots.kots').Kots
     from robokots.urdf_io import urdf_xml_to_model_data
     from rei import load_problem_spec_toml
@@ -126,7 +127,11 @@ def test_reduced_model_trajectory_derivatives(robot_xml, backend):
     spec = load_problem_spec_toml(Path(__file__).resolve().parents[1] / 'examples/spec/robokots_traj_dynamics_d12.toml')
     spec['time'].update(N=2, dt=.1)
     spec['trajectory']['num_ctrl_points'] = 6
-    compiled = compile_kots_trajectory_problem(spec, model=model, kots_backend=backend)
+    compiled = compile_kots_trajectory_problem(
+        spec, model=model, kots_backend=backend, jacobian_method=method,
+        jacobian_options={"eps": 1e-5} if method == 'numerical' else None,
+        gravity=(0., -9.81, 0.),
+    )
     assert compiled.trajectory_map.q_dim == 2
     runtime = compiled.runtime
     rng = np.random.default_rng(42)

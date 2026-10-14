@@ -102,6 +102,19 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
     RoboKots owns its state; ``data`` is an optional legacy placeholder.
     """
 
+    @property
+    def derivative_settings(self) -> dict[str, Any]:
+        return {
+            "jacobian_method": self.jacobian_method,
+            "jacobian_options": dict(self._jacobian_ops.options),
+            "batch_trajectory": getattr(self, "batch_trajectory", False),
+            "jacobian_strategy": getattr(self, "jacobian_strategy", "dense"),
+            "state_jacobian_construction": ("dense" if self.jacobian_method != "analytic"
+                                             else getattr(self, "jacobian_strategy", "dense")),
+            "kots_backend": self.kots_backend,
+            "dtype": "float64",
+        }
+
     def __init__(
         self,
         model: Any,
@@ -113,6 +126,7 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
         dynamics_owner_type: str = "total_joint",
         prefer_matvec_jacobian: bool = False,
         jacobian_method: str = "analytic",
+        jacobian_options: Mapping[str, Any] | None = None,
         kots_backend: str | None = None,
         gravity: Sequence[float] | None = None,
         perturbation: Any = None,
@@ -128,7 +142,9 @@ class KotsStateBuilder(BackendDispatchStateBuilder):
             raise ValueError("KotsStateBuilder: dynamics_owner_type must be non-empty.")
         self._needs_dynamics_update = False
         self.prefer_matvec_jacobian = bool(prefer_matvec_jacobian)
-        self._jacobian_ops = kapi.RoboKotsJacobianOperator(self.model, jacobian_method=jacobian_method)
+        self._jacobian_ops = kapi.RoboKotsJacobianOperator(
+            self.model, jacobian_method=jacobian_method, jacobian_options=jacobian_options,
+        )
         self.jacobian_method = self._jacobian_ops.jacobian_method
         self.adapter = KotsAdapter(self, state_type=StateType)
 
@@ -315,6 +331,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         prefer_matvec_jacobian: bool = False,
         jacobian_strategy: str | None = None,
         jacobian_method: str = "analytic",
+        jacobian_options: Mapping[str, Any] | None = None,
         kots_backend: str | None = None,
         gravity: Sequence[float] | None = None,
         batch_trajectory: bool = True,
@@ -328,9 +345,8 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             jacobian_strategy,
             prefer_matvec_jacobian=prefer_matvec_jacobian,
         )
-        # Fused trajectory derivatives use analytic-only RoboKots APIs.
-        # Other methods use the single-time operator for both DOC and IOC.
-        self.batch_trajectory = bool(batch_trajectory) and jacobian_method == "analytic"
+        # Numerical/AD use dense state derivatives and shared trajectory chains.
+        self.batch_trajectory = bool(batch_trajectory)
         # The RoboKots model owns the materialized outward state.  Retain the
         # exact batch signature that was loaded so value/JVP/VJP phases of one
         # IOC evaluation can share it without another import+dynamics pass.
@@ -360,6 +376,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             dynamics_owner_type=dynamics_owner_type,
             prefer_matvec_jacobian=prefer_matvec_jacobian,
             jacobian_method=jacobian_method,
+            jacobian_options=jacobian_options,
             kots_backend=kots_backend,
             gravity=gravity,
             perturbation=perturbation,
@@ -455,7 +472,8 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             return False
         if not callable(getattr(self.model, "state_info_list", None)):
             return False
-        if not callable(getattr(self.model, "jacobian_mul", None)):
+        method = {"autodiff": "jacobian_autodiff", "numerical": "jacobian", "analytic": "jacobian_mul"}[self.jacobian_method]
+        if not callable(getattr(self.model, method, None)):
             return False
         for entries in grouped.values():
             for key, _entry in entries:
@@ -466,9 +484,18 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                     self.dynamics_owner_type,
                     _KINETIC_ENERGY_OWNER_TYPE,
                 ):
+                    if self.jacobian_method != "analytic" and not self._dense_derivative_supports_key(key):
+                        return False
                     continue
                 return False
         return True
+
+    @staticmethod
+    def _dense_derivative_supports_key(key: StateKey) -> bool:
+        field = str(key.field).split("_J_", 1)[0]
+        return key.dtype == DTYPE_DYNAMICS and (
+            field in ("momentum", "force") or torque_derivative_order(field) is not None
+        )
 
     def _batched_dynamics_key(self, *, p: Array, motions: Array, time: Any = None) -> tuple[Any, ...]:
         """Identity of the materialized RoboKots batch outward state.
@@ -495,7 +522,10 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
 
     def _update_batched_dynamics(self, motions: Array, *, p: Array, time: Any = None) -> None:
         key = self._batched_dynamics_key(p=p, motions=motions, time=time)
-        if key == self._batched_dynamics_cache_key:
+        # AD caches executable functions in RoboKots, never evaluated states in
+        # Rei. Reimport even at the same point: single-state calls or mutable
+        # model parameters/gravity may have changed the backend in between.
+        if self.jacobian_method == "analytic" and key == self._batched_dynamics_cache_key:
             self._batched_dynamics_cache_hits += 1
             return
 
@@ -518,9 +548,11 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         inner solves retain the native product path. The outward-state cache
         invalidates these exact derivatives whenever point/grid/gravity changes.
         """
+        if self.jacobian_method != "analytic":
+            return self._jacobian_ops.batched_jvp(refs, direction, dof=self._model_dof())
         if not all(key.owner.owner_type == 'total_joint'
                    and torque_derivative_order(key.field) is not None for key in keys):
-            return self.model.jacobian_mul(refs, direction)
+            return self._jacobian_ops.batched_jvp(refs, direction, dof=self._model_dof())
         width = direction.shape[1]
         signatures = [(self._motion_product_signature(key), width) for key in keys]
         cached = [self._motion_product_cache.get(sig) for sig in signatures]
@@ -529,7 +561,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         count_key = tuple(signatures)
         previous_calls = self._motion_product_calls.get(count_key, 0)
         if previous_calls is None:
-            return self.model.jacobian_mul(refs, direction)
+            return self._jacobian_ops.batched_jvp(refs, direction, dof=self._model_dof())
         calls = previous_calls + 1
         self._motion_product_calls[count_key] = calls
         dof = self._model_dof()
@@ -538,7 +570,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         if calls >= width and needed + stored <= 32 * 1024**2:
             basis = np.broadcast_to(np.eye(width), (len(direction), width, width))
             try:
-                matrix = np.asarray(self.model.jacobian_mul(refs, basis), dtype=float)
+                matrix = self._jacobian_ops.batched_jvp(refs, basis, dof=dof)
                 if matrix.shape != (len(direction), dof*len(keys), width):
                     raise ValueError('Unexpected local torque derivative shape.')
             except (AttributeError, NotImplementedError, TypeError, ValueError):
@@ -548,7 +580,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 for i, sig in enumerate(signatures):
                     self._motion_product_cache[sig] = matrix[:, i*dof:(i+1)*dof].copy()
                 return matrix @ direction
-        return self.model.jacobian_mul(refs, direction)
+        return self._jacobian_ops.batched_jvp(refs, direction, dof=dof)
 
     def _cached_torque_motion_vjp(self, groups):
         """Use JVP-built blocks for a sum of torque cotangents when available."""
@@ -595,6 +627,15 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
     ) -> Array:
         total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(state_ref)
         refs: Any = state_ref if total_joint_ref is None else list(total_joint_ref.refs)
+        if self.jacobian_method != "analytic" or self.jacobian_strategy == "dense":
+            matrices = self._jacobian_ops.dense(refs)
+            return np.stack([
+                self._chain_param_jac(
+                    matrix, key=key, jacobian_wrt=STATE_JACOBIAN_VAR,
+                    dqdp_k=self.trajectory_map.dqdp_at(k), dmotiondp_k=dmotiondp,
+                )
+                for k, matrix, dmotiondp in zip(self._batch_ks, matrices, dmotiondps, strict=True)
+            ])
         last_error: Exception | None = None
         for candidate_index in range(len(self._motion_jacobian_chain_candidates(
             dqdp_k=self.trajectory_map.dqdp_at(int(key.k)),
@@ -613,7 +654,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                     ],
                     axis=0,
                 )
-                return np.asarray(self.model.jacobian_mul(refs, cols), dtype=float)
+                return self._jacobian_ops.batched_jvp(refs, cols, dof=self._model_dof())
             except (AttributeError, KeyError, ValueError, TypeError, RuntimeError, IndexError) as exc:
                 last_error = exc
         if last_error is not None:
@@ -805,7 +846,9 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         except ValueError:
             field = str(getattr(key, "field", ""))
         field = canonical_field_name(field)
-        if field == "torque":
+        if field in ("momentum", "kinetic_energy"):
+            return min(self._model_order(), 2)
+        if field in ("torque", "force"):
             return min(self._model_order(), 3)
         deriv_order = torque_derivative_order(field)
         if deriv_order is None:
@@ -902,7 +945,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         dmotiondp_k: Array,
     ) -> bool:
         del key, state_ref, dqdp_k, dmotiondp_k
-        return str(getattr(self, "jacobian_strategy", "mul")) != "dense"
+        return self.jacobian_method == "analytic" and self.jacobian_strategy != "dense"
 
     def _param_jac_transpose_mul_from_state_ref(
         self,
@@ -987,7 +1030,8 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         Dynamics requests share the same cached outward state as batched VJPs.
         Unsupported families signal capability absence before changing state.
         """
-        if not self.batch_trajectory or not callable(getattr(self.model, "jacobian_mul", None)):
+        method = {"autodiff": "jacobian_autodiff", "numerical": "jacobian", "analytic": "jacobian_mul"}[self.jacobian_method]
+        if not self.batch_trajectory or not callable(getattr(self.model, method, None)):
             raise AttributeError("RoboKots batched JVP is unavailable.")
         requests = list(requests)
         if not requests:
@@ -997,6 +1041,8 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         steps = self._expected_steps(time=time)
         groups = {}
         for index, (key, direction) in enumerate(requests):
+            if self.jacobian_method != "analytic" and not self._dense_derivative_supports_key(key):
+                raise NotImplementedError("Numerical/AD batch JVP does not support this output.")
             if key.dtype != DTYPE_DYNAMICS:
                 raise AttributeError("Batched trajectory JVP currently supports dynamics only.")
             if key.owner.owner_type not in (self.dynamics_owner_type, _KINETIC_ENERGY_OWNER_TYPE):
@@ -1142,9 +1188,12 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         This is consumed by IOC's stacked state terms.  Unsupported state
         families deliberately use the existing single-state VJP path.
         """
-        if len(requests) < 2 or not self.batch_trajectory:
+        if (len(requests) < 2 and self.jacobian_method == "analytic") or not self.batch_trajectory:
             raise AttributeError("batched trajectory VJP requires at least two requests")
-        if not callable(getattr(self.model, "jacobian_transpose_mul", None)):
+        if not requests:
+            return []
+        method = {"autodiff": "jacobian_autodiff", "numerical": "jacobian", "analytic": "jacobian_transpose_mul"}[self.jacobian_method]
+        if not callable(getattr(self.model, method, None)):
             raise AttributeError("RoboKots model does not expose batched jacobian_transpose_mul")
         p = self._extract_q(np.asarray(x_all, dtype=float).reshape(-1), pack=pack)
         self._validate_trajectory_parameter_size(p)
@@ -1152,6 +1201,8 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
 
         prepared: list[tuple[StateKey, Array, Any, Any]] = []
         for key, rhs in requests:
+            if self.jacobian_method != "analytic" and not self._dense_derivative_supports_key(key):
+                raise NotImplementedError("Numerical/AD batch VJP does not support this output.")
             if not self._accept_required_key_for_traj(key, steps=steps):
                 raise ValueError(f"KotsTrajectoryStateBuilder: invalid batched VJP key: {key!r}")
             if getattr(key, "dtype", None) != DTYPE_DYNAMICS:
@@ -1195,7 +1246,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         # A backend with per-input output must opt in explicitly; probing the
         # normal fused API here would run an otherwise wasted reverse pass.
         use_multi_vjp = (
-            callable(multi_vjp)
+            self.jacobian_method == "analytic" and callable(multi_vjp)
             and len(grouped_items) >= 2
             and getattr(self.model, "jacobian_transpose_mul_many_contract", None) == "per_input"
         )
@@ -1229,7 +1280,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 rhs_batch = np.stack([rhs for _index, _key, rhs, _state_ref in group], axis=0)
                 backend_requests.append((refs, rhs_batch))
             try:
-                raw_multi_vjp = multi_vjp(backend_requests)
+                raw_multi_vjp = self._jacobian_ops.analytic_vjp_many(backend_requests)
                 if isinstance(raw_multi_vjp, (list, tuple)):
                     grouped_motion_grads = list(raw_multi_vjp)
                 elif (
@@ -1267,7 +1318,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                 pass
 
         for group in grouped_items:
-            if len(group) < 2:
+            if len(group) < 2 and self.jacobian_method == "analytic":
                 raise AttributeError("batched RoboKots VJP group has fewer than two requests")
             ks = [int(key.k) for _index, key, _rhs, _state_ref in group]
             motions = motions_for(ks)
@@ -1280,7 +1331,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
             total_joint_ref = self.adapter.as_total_joint_dynamics_state_ref(first_ref)
             refs: Any = first_ref if total_joint_ref is None else list(total_joint_ref.refs)
             rhs_batch = np.stack([rhs for _index, _key, rhs, _state_ref in group], axis=0)
-            motion_grads = np.asarray(self.model.jacobian_transpose_mul(refs, rhs_batch), dtype=float)
+            motion_grads = self._jacobian_ops.batched_vjp(refs, rhs_batch)
             self._chain_batched_param_vjp_group(
                 out=out,
                 group=group,
@@ -1305,6 +1356,23 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         """
         if len(request_groups) < 2 or not self.batch_trajectory:
             raise AttributeError("fused-column VJP requires at least two objective groups")
+        if self.jacobian_method != "analytic":
+            # One matrix RHS per state, not a repeated time batch per objective.
+            # All IOC columns share the same evaluated numerical/AD Jacobian.
+            count = len(request_groups)
+            merged: dict[StateKey, Array] = {}
+            for column, requests in enumerate(request_groups):
+                for key, rhs in requests:
+                    vector = np.asarray(rhs, dtype=float).reshape(-1)
+                    if key not in merged:
+                        merged[key] = np.zeros((len(vector), count))
+                    if merged[key].shape[0] != len(vector):
+                        raise ValueError("Inconsistent output size across VJP columns.")
+                    merged[key][:, column] += vector
+            products = self.param_jacobian_transpose_mul_many(
+                x_all, list(merged.items()), pack=pack, time=time,
+            )
+            return sum(products, np.zeros((self.trajectory_map.p_dim, count)))
         multi_vjp = getattr(self.model, "jacobian_transpose_mul_many", None)
         if not callable(multi_vjp):
             raise AttributeError("RoboKots model does not expose jacobian_transpose_mul_many")
@@ -1368,7 +1436,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
                     if rhs is not None:
                         rhs_batch[row, :, column] = rhs
             backend_requests.append((refs, rhs_batch))
-        motion_grads = np.asarray(multi_vjp(backend_requests), dtype=float)
+        motion_grads = np.asarray(self._jacobian_ops.analytic_vjp_many(backend_requests), dtype=float)
         if motion_grads.ndim != 3 or motion_grads.shape[0] != len(ks) or motion_grads.shape[2] != count:
             raise ValueError("RoboKots fused-column VJP output must be (time, motion, objective).")
         mapped = self._trajectory_motion_gradient_transpose_many(ks=ks, motion_grads=motion_grads)
@@ -1395,6 +1463,12 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
         """
         if len(requests) + len(squared_power_requests) < 2 or not self.batch_trajectory:
             raise AttributeError("fused batched trajectory VJP requires at least two requests")
+        if self.jacobian_method != "analytic":
+            if squared_power_requests:
+                raise AttributeError("Numerical/AD squared power uses the unfused expression path.")
+            return sum(self.param_jacobian_transpose_mul_many(
+                x_all, requests, pack=pack, time=time,
+            ), np.zeros(self.trajectory_map.p_dim))
         multi_vjp = getattr(self.model, "jacobian_transpose_mul_many", None)
         if not callable(multi_vjp):
             raise AttributeError("RoboKots model does not expose jacobian_transpose_mul_many")
@@ -1517,7 +1591,7 @@ class KotsTrajectoryStateBuilder(TrajectoryStateBuilderMixin, KotsStateBuilder):
 
         motion_grads = None if power_group else self._cached_torque_motion_vjp(grouped_items)
         if motion_grads is None:
-            motion_grads = np.asarray(multi_vjp(backend_requests), dtype=float)
+            motion_grads = np.asarray(self._jacobian_ops.analytic_vjp_many(backend_requests), dtype=float)
         if motion_grads.ndim < 2 or int(motion_grads.shape[0]) != len(motions):
             raise ValueError("RoboKots fused multi-VJP output must have one leading result per time step.")
         if direct_power_motion_vjp is not None:

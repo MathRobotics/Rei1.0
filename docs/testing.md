@@ -45,7 +45,8 @@ MPLBACKEND=Agg uv run --locked --group dev --group kots --group pinocchio \
 - UbuntuのPython 3.11／3.13で、dev依存と本体の全テスト。
 - UbuntuのPython 3.13で、実RoboKots RustとPinocchioの導入・インポート確認。
   DOC、URDF/JSON一致、モデル摂動、軌道更新、既知重みIOC、固定関節を
-  スキップ禁止で検証する。依存一覧と実ライブラリのパスをログへ残す。
+  スキップ禁止で検証する。数値／自動微分の一括評価、必要な運動次数の推定、
+  TOMLからのモデル読込も対象に含む。依存一覧と実ライブラリのパスをログへ残す。
 
 ネイティブcyipopt・liteoptの実ライブラリによる最適化は、このCI構成の対象外。
 各外部ソルバーの接続はモックを使ったAPIテストで確認する。

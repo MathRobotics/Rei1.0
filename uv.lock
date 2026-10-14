@@ -1360,7 +1360,7 @@ dev = [
 ]
 kots = [
     { name = "mathrobo", specifier = ">=0.0.3" },
-    { name = "robokots", git = "https://github.com/MathRobotics/RoboKots.git?rev=3703e91697c737d4ce1e91ef025c9f580ef45e9b" },
+    { name = "robokots", git = "https://github.com/MathRobotics/RoboKots.git?rev=acb2a041453d7c4d3170050e98a1ead81c1897ba" },
 ]
 pinocchio = [{ name = "pin", specifier = ">=4.1.0" }]
 plotting = [{ name = "matplotlib", specifier = ">=3.10.8" }]
@@ -1369,7 +1369,7 @@ solver-liteopt = [{ name = "liteopt", specifier = ">=0.1.9" }]
 [[package]]
 name = "robokots"
 version = "0.0.1"
-source = { git = "https://github.com/MathRobotics/RoboKots.git?rev=3703e91697c737d4ce1e91ef025c9f580ef45e9b#3703e91697c737d4ce1e91ef025c9f580ef45e9b" }
+source = { git = "https://github.com/MathRobotics/RoboKots.git?rev=acb2a041453d7c4d3170050e98a1ead81c1897ba#acb2a041453d7c4d3170050e98a1ead81c1897ba" }
 dependencies = [
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "jax", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },

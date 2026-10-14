@@ -68,3 +68,6 @@ jobs:
           tests/test_prepared_trajectory_maps.py
           tests/test_ioc_validation.py
           tests/test_urdf_joint_locking.py
+          tests/test_kots_autodiff_batch.py
+          tests/test_kots_compile_order.py
+          tests/test_model_file_spec.py
