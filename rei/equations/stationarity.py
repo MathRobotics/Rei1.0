@@ -201,7 +201,8 @@ def select_active_stationarity_indices(
     active_residual_idx = tuple(
         i
         for i, term in enumerate(terms)
-        if float(term.weighted_residual_norm) > residual_tol_f
+        if term.weighted_residual_norm is not None
+        and float(term.weighted_residual_norm) > residual_tol_f
     )
     active_idx = active_gradient_idx if mode_norm == "gradient" else active_residual_idx
     return active_idx, active_gradient_idx, active_residual_idx
