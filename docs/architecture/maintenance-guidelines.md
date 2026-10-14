@@ -18,6 +18,7 @@
 | 式木の子要素と走査 | 各Exprの `children()`、`rei/core/expr/traversal.py` |
 | バックエンド固有の式・微分積の一括評価 | `rei/optimize_backends/_robotics_products.py` |
 | 求解ループとその引数検証 | 各ソルバー。dispatchは数値を黙って丸めない |
+| Gauss–Newtonの反復・線探索・再試行・履歴 | `rei/optimize/solvers/_gauss_newton_loop.py` |
 | 外部ソルバーの呼び出し・API差分の吸収 | `rei/optimize/solvers/scipy.py`、`cyipopt.py`、`liteopt.py` |
 | 外部ソルバー共通の目的関数評価・初期点設定 | `rei/optimize/solvers/_external_common.py` |
 | バックエンド状態・ヤコビアンの取得 | 各バックエンドのadapter/API層 |
@@ -37,6 +38,10 @@ IOCの診断文言は数値判定の根拠にしない。階数・残差・制�
 ロボット状態名やバックエンド内部をランタイムから調べない。RoboKotsのコンパイル層が
 builderを明示的に渡して実行計画を設定し、未設定・非対応の項は通常のExpr評価へ戻る。
 層のimport方向は `tests/test_namespace_dependency_rules.py` で確認する。
+
+密行列版とoperator版のGauss–Newtonは同じ反復制御を使う。密行列版は拡大最小二乗、
+operator版はCGLS、Krylov版は差し替えた線形ステップを利用する。
+LM・LM-LSのアルゴリズムは各専用実装に置く。
 
 外部ソルバーの依存ライブラリは各求解関数内で遅延importする。
 `dispatch.py` は設定解決・オプション検証・呼び出し先の選択を担当する。
