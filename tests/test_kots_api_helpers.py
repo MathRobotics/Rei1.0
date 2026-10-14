@@ -1,43 +1,17 @@
 from __future__ import annotations
 
 import importlib
-import sys
-import types
 
 import numpy as np
 import pytest
 
 
-def _ensure_robokots_state_stub() -> None:
-    try:
-        importlib.import_module("robokots.core.state")
-        return
-    except ModuleNotFoundError as exc:
-        if exc.name not in {"robokots", "robokots.core", "robokots.core.state"}:
-            raise
-    robokots_mod = types.ModuleType("robokots")
-    core_mod = types.ModuleType("robokots.core")
-    state_mod = types.ModuleType("robokots.core.state")
-
-    class StateType:
-        def __init__(self, owner_type: str, owner_name: str, field: str, frame: str | None) -> None:
-            self.owner_type = owner_type
-            self.owner_name = owner_name
-            self.field = field
-            self.frame = frame
-
-    state_mod.StateType = StateType
-    core_mod.state = state_mod
-    robokots_mod.core = core_mod
-
-    sys.modules["robokots"] = robokots_mod
-    sys.modules["robokots.core"] = core_mod
-    sys.modules["robokots.core.state"] = state_mod
-
-
-_ensure_robokots_state_stub()
-kots_api = importlib.import_module("rei.backends.state.robotics.kots_api")
 optional = importlib.import_module("rei.backends.optional")
+
+
+@pytest.fixture(autouse=True)
+def _mock_kots_api(mock_kots_modules, monkeypatch):
+    monkeypatch.setitem(globals(), "kots_api", mock_kots_modules["rei.backends.state.robotics.kots_api"])
 
 
 @pytest.mark.parametrize("method", ["numerical", "autodiff"])

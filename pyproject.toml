@@ -35,6 +35,9 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["rei*"]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.uv.sources]
 # Includes reproducible model perturbations and TOML configuration support.
 robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "3703e91697c737d4ce1e91ef025c9f580ef45e9b" }

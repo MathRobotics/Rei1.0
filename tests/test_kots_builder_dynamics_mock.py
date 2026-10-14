@@ -4,7 +4,6 @@ import pytest
 
 import copy
 import importlib
-import sys
 import types
 
 import numpy as np
@@ -14,45 +13,24 @@ from rei.core.trajectory import BsplineTrajectoryOperator, TrajectoryMap
 from rei.optimize.reductions import build_nullspace_equality_reduction
 from rei.optimize.solvers import solve
 
-def _ensure_robokots_state_stub() -> None:
-    try:
-        importlib.import_module("robokots.core.state")
-        return
-    except ModuleNotFoundError as exc:
-        if exc.name not in {"robokots", "robokots.core", "robokots.core.state"}:
-            raise
-    robokots_mod = types.ModuleType("robokots")
-    core_mod = types.ModuleType("robokots.core")
-    state_mod = types.ModuleType("robokots.core.state")
-
-    class StateType:  # noqa: D401
-        """Minimal stub for RoboKots StateType."""
-
-        def __init__(self, owner_type: str, owner_name: str, field: str, frame: str) -> None:
-            self.owner_type = owner_type
-            self.owner_name = owner_name
-            self.field = field
-            self.frame = frame
-
-    state_mod.StateType = StateType
-    core_mod.state = state_mod
-    robokots_mod.core = core_mod
-
-    sys.modules["robokots"] = robokots_mod
-    sys.modules["robokots.core"] = core_mod
-    sys.modules["robokots.core.state"] = state_mod
-
-_ensure_robokots_state_stub()
-_kots_state_mod = importlib.import_module("rei.backends.state.robotics.kots")
-_kots_opt_mod = importlib.import_module("rei.optimize_backends.kots")
 _traj_ioc_mod = importlib.import_module("rei.optimize_backends.trajectory_ioc")
 _traj_diag_mod = importlib.import_module("rei.optimize_backends.trajectory_diagnostics")
-KotsTrajectoryStateBuilder = _kots_state_mod.KotsTrajectoryStateBuilder
-compile_kots_trajectory_problem = _kots_opt_mod.compile_kots_trajectory_problem
-compile_kots_trajectory_problem_template = _kots_opt_mod.compile_kots_trajectory_problem_template
 compile_trajectory_ioc_problem = _traj_ioc_mod.compile_trajectory_ioc_problem
 estimate_ioc_weights = _traj_ioc_mod.estimate_ioc_weights
 inspect_trajectory_problem_backend = _traj_diag_mod.inspect_trajectory_problem_backend
+
+
+@pytest.fixture(autouse=True)
+def _mock_kots_backend(mock_kots_modules, monkeypatch):
+    state = mock_kots_modules["rei.backends.state.robotics.kots"]
+    optimize = mock_kots_modules["rei.optimize_backends.kots"]
+    monkeypatch.setitem(globals(), "_kots_state_mod", state)
+    monkeypatch.setitem(globals(), "KotsTrajectoryStateBuilder", state.KotsTrajectoryStateBuilder)
+    monkeypatch.setitem(globals(), "compile_kots_trajectory_problem", optimize.compile_kots_trajectory_problem)
+    monkeypatch.setitem(
+        globals(), "compile_kots_trajectory_problem_template", optimize.compile_kots_trajectory_problem_template
+    )
+
 
 def test_total_joint_refs_are_prepared_once_and_reused(monkeypatch):
     adapter_module = importlib.import_module("rei.backends.state.robotics.kots_adapter")

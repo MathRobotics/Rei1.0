@@ -7,13 +7,11 @@ from pathlib import Path
 
 import numpy as np
 
+# Check the optional dependency before importing Rei's RoboKots bridge.
+Kots = pytest.importorskip("robokots.kots").Kots
+
 from rei.optimize_backends.kots import compile_kots_trajectory_problem
 from rei.optimize_backends.trajectory_ioc import compile_trajectory_ioc_problem, estimate_ioc_weights
-
-try:
-    from robokots.kots import Kots
-except ImportError:  # pragma: no cover
-    Kots = None
 
 _MODEL_CASES = (
     ("planar2", 2),
@@ -137,8 +135,6 @@ class TestKotsUrdfJsonParity:
         model_name: str,
         q_dim: int,
     ) -> None:
-        if Kots is None:
-            pytest.skip("RoboKots is not installed.")
         if not hasattr(Kots, "from_urdf_file"):
             pytest.skip("RoboKots does not expose Kots.from_urdf_file yet.")
 
@@ -195,9 +191,6 @@ class TestKotsUrdfJsonParity:
 
 
 def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
-    if Kots is None:
-        pytest.skip("RoboKots is not installed.")
-
     root = Path(__file__).resolve().parents[1]
     model_path = root / "examples" / "models" / "planar2.json"
     dsl = _minimal_kots_trajectory_dsl(2)
@@ -226,8 +219,6 @@ def test_kots_batched_trajectory_dynamics_matches_stepwise() -> None:
 @pytest.mark.parametrize("method", ["numerical", "autodiff"])
 @pytest.mark.parametrize("strategy", ["dense", "mul"])
 def test_kots_derivative_methods_match_analytic_doc_and_ioc(method, strategy):
-    if Kots is None:
-        pytest.skip("RoboKots is not installed.")
     if method == "autodiff":
         pytest.importorskip("jax")
     model_path = Path(__file__).resolve().parents[1] / "examples/models/planar2.json"
@@ -253,9 +244,6 @@ def test_kots_derivative_methods_match_analytic_doc_and_ioc(method, strategy):
 
 def test_kots_total_body_kinetic_energy_matches_stepwise_with_torque() -> None:
     """The frame-free total_body StateType works beside joint torque terms."""
-    if Kots is None:
-        pytest.skip("RoboKots is not installed.")
-
     root = Path(__file__).resolve().parents[1]
     model_path = root / "examples" / "models" / "planar2.json"
     dsl = _minimal_kots_trajectory_dsl(2)
@@ -307,9 +295,6 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise(
     gravity: tuple[float, float, float] | None,
 ) -> None:
     """IOC stacks trajectory state VJPs into one RoboKots batch request."""
-    if Kots is None:
-        pytest.skip("RoboKots is not installed.")
-
     class _VjpProbe:
         def __init__(self, model) -> None:
             self._model = model
@@ -412,9 +397,6 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise(
 
 def test_kots_multi_vjp_combines_torque_fields() -> None:
     """Prefer RoboKots' heterogeneous-state VJP API over field grouping."""
-    if Kots is None:
-        pytest.skip("RoboKots is not installed.")
-
     class _VjpProbe:
         def __init__(self, model, *, expose_many: bool) -> None:
             self._model = model
@@ -579,8 +561,6 @@ def test_kots_multi_vjp_combines_torque_fields() -> None:
 @pytest.mark.parametrize("batch_trajectory", [False, True])
 def test_current_kots_state_api_and_torque_derivatives(backend, strategy, batch_trajectory):
     """Exercise model-owned state, nonzero higher motion orders, and JVP/VJP."""
-    if Kots is None:
-        pytest.skip("RoboKots is not installed.")
     from rei.backends.state.robotics.kots import KotsTrajectoryStateBuilder
     from rei.core.state_schema import make_key, make_jac_key
     from rei.core.trajectory import TrajectoryMap

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import importlib
-import sys
 import types
 
 import numpy as np
 import pytest
 
 from rei.core.state_schema import DTYPE_COORD
+from rei.optimize_backends.trajectory_diagnostics import inspect_trajectory_problem_backend
+from rei.optimize_backends.trajectory_ioc import compile_trajectory_ioc_problem, estimate_ioc_weights
 
 def _make_pinocchio_stub():
     pin = types.ModuleType("pinocchio")
@@ -59,25 +59,17 @@ def _make_pinocchio_stub():
 
     return pin
 
-try:
-    _pin_module = importlib.import_module("pinocchio")
-except ModuleNotFoundError as exc:
-    if exc.name != "pinocchio":
-        raise
-    _pin_module = _make_pinocchio_stub()
-    sys.modules["pinocchio"] = _pin_module
-
-
 @pytest.fixture(autouse=True)
-def _isolated_pinocchio_mock(monkeypatch):
-    stub = _make_pinocchio_stub()
-    adapter = importlib.import_module("rei.backends.state.robotics.pinocchio_adapter")
-    monkeypatch.setattr(adapter, "pin", stub)
-
-_pin_opt_mod = importlib.import_module("rei.optimize_backends.pinocchio")
-compile_pinocchio_trajectory_problem = _pin_opt_mod.compile_pinocchio_trajectory_problem
-from rei.optimize_backends.trajectory_diagnostics import inspect_trajectory_problem_backend
-from rei.optimize_backends.trajectory_ioc import compile_trajectory_ioc_problem, estimate_ioc_weights
+def compile_pinocchio_trajectory_problem(isolated_backend_imports):
+    module_names = (
+        "rei.backends.state.robotics.pinocchio_adapter",
+        "rei.backends.state.robotics.pinocchio",
+        "rei.optimize_backends.pinocchio",
+    )
+    with isolated_backend_imports(
+        module_names, stubs={"pinocchio": _make_pinocchio_stub()}
+    ) as modules:
+        yield modules["rei.optimize_backends.pinocchio"].compile_pinocchio_trajectory_problem
 
 class _FakePinModel:
     nq = 1
@@ -97,7 +89,9 @@ class _FakePinData:
         self.oMf = [frame]
 
 class TestPinocchioTrajectoryCompileMock:
-    def test_compile_pinocchio_trajectory_problem_for_joint_q_constraints(self) -> None:
+    def test_compile_pinocchio_trajectory_problem_for_joint_q_constraints(
+        self, compile_pinocchio_trajectory_problem
+    ) -> None:
         dsl = {
             "time": {"N": 1, "dt": 0.2},
             "trajectory": {
@@ -170,7 +164,9 @@ class TestPinocchioTrajectoryCompileMock:
         assert np.allclose(r, np.array([-1.0, -2.0], dtype=float))
         assert np.allclose(J, np.eye(2, dtype=float))
 
-    def test_compile_pinocchio_trajectory_problem_torque_uses_trajectory_dynamics(self) -> None:
+    def test_compile_pinocchio_trajectory_problem_torque_uses_trajectory_dynamics(
+        self, compile_pinocchio_trajectory_problem
+    ) -> None:
         dsl = {
             "time": {"N": 2, "dt": 0.5},
             "trajectory": {
@@ -226,7 +222,9 @@ class TestPinocchioTrajectoryCompileMock:
         assert not (np.allclose(r, np.zeros_like(r)))
         assert not (np.allclose(J, np.zeros_like(J)))
 
-    def test_compile_pinocchio_trajectory_problem_torque_uses_analytic_derivatives(self) -> None:
+    def test_compile_pinocchio_trajectory_problem_torque_uses_analytic_derivatives(
+        self, compile_pinocchio_trajectory_problem
+    ) -> None:
         dsl = {
             "time": {"N": 2, "dt": 0.5},
             "trajectory": {
@@ -280,7 +278,9 @@ class TestPinocchioTrajectoryCompileMock:
         )
         assert np.allclose(J, J_ref)
 
-    def test_compile_pinocchio_trajectory_problem_warn_skip_unsupported_torque_d1(self) -> None:
+    def test_compile_pinocchio_trajectory_problem_warn_skip_unsupported_torque_d1(
+        self, compile_pinocchio_trajectory_problem
+    ) -> None:
         dsl = {
             "time": {"N": 1, "dt": 0.5},
             "trajectory": {
@@ -377,7 +377,9 @@ class TestPinocchioTrajectoryCompileMock:
         payload = report.to_json_dict()
         assert payload["unsupported_terms"][0]["field"] == "qdddot"
 
-    def test_compile_pinocchio_trajectory_problem_warn_skip_low_derivative_order(self) -> None:
+    def test_compile_pinocchio_trajectory_problem_warn_skip_low_derivative_order(
+        self, compile_pinocchio_trajectory_problem
+    ) -> None:
         dsl = {
             "time": {"N": 2, "dt": 0.5},
             "trajectory": {

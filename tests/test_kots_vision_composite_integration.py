@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import importlib
-import sys
-import types
 from typing import Any
 
 import numpy as np
+import pytest
 
 from rei.backends.state.dispatch.composite import CompositeStateBuilder
 from rei.backends.state.vision.provider import CameraCalibrationStateProvider, VisionFieldHandler
@@ -13,40 +11,11 @@ from rei.core.state_schema import DTYPE_KINEMATICS, make_key
 from rei.optimize.builder import compile_nls_problem
 from rei.optimize.solvers import solve
 
-def _ensure_robokots_state_stub() -> None:
-    try:
-        importlib.import_module("robokots.core.state")
-        return
-    except ModuleNotFoundError as exc:
-        if exc.name not in {"robokots", "robokots.core", "robokots.core.state"}:
-            raise
-    robokots_mod = types.ModuleType("robokots")
-    core_mod = types.ModuleType("robokots.core")
-    state_mod = types.ModuleType("robokots.core.state")
+@pytest.fixture(autouse=True)
+def _mock_kots_backend(mock_kots_modules, monkeypatch):
+    state = mock_kots_modules["rei.backends.state.robotics.kots"]
+    monkeypatch.setitem(globals(), "KotsStateBuilder", state.KotsStateBuilder)
 
-    class StateType:  # noqa: D401
-        """Minimal stub for RoboKots StateType."""
-
-        def __init__(self, owner_type: str, owner_name: str, field: str, frame: str | None) -> None:
-            self.owner_type = owner_type
-            self.owner_name = owner_name
-            self.field = field
-            self.frame = frame
-
-    state_mod.StateType = StateType
-    core_mod.state = state_mod
-    robokots_mod.core = core_mod
-
-    sys.modules["robokots"] = robokots_mod
-    sys.modules["robokots.core"] = core_mod
-    sys.modules["robokots.core.state"] = state_mod
-
-_ensure_robokots_state_stub()
-if "rei.backends.state.robotics.kots" in sys.modules:
-    _kots_mod = importlib.reload(sys.modules["rei.backends.state.robotics.kots"])
-else:
-    _kots_mod = importlib.import_module("rei.backends.state.robotics.kots")
-KotsStateBuilder = _kots_mod.KotsStateBuilder
 
 class _FakeKotsModel:
     def __init__(self) -> None:

@@ -30,7 +30,7 @@ Run commands through the managed environment:
 
 ```bash
 uv run python examples/minimize_quadratic.py
-uv run --group dev python -m pytest tests
+uv run --group dev python -m pytest -q -rs
 ```
 
 Optional solver and backend groups:
@@ -777,8 +777,23 @@ See `examples/README.md` for the full sample list and spec/DSL/model file guide.
 Run the test suite:
 
 ```bash
-uv run --group dev python -m pytest tests
+MPLBACKEND=Agg uv run --group dev python -m pytest -q -rs
 ```
+
+Pytest collects `tests/` by default. Model repositories linked under `examples/`
+are excluded from default discovery. Pass a test file explicitly to run a subset.
+`MPLBACKEND=Agg` lets plotting checks run without a display.
+
+Backend mocks are scoped to individual tests. Tests requiring an unavailable
+optional library are skipped; `-rs` shows why. To include the real robotics
+backends, run:
+
+```bash
+MPLBACKEND=Agg uv run --group dev --group kots --group pinocchio python -m pytest -q -rs
+```
+
+Check the skip reasons when validating a backend. Passing mock tests or skipping
+integration tests does not verify the real library.
 
 Compile-check the package:
 
