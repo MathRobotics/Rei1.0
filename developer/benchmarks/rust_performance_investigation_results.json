@@ -1,0 +1,1676 @@
+{
+  "date": "2026-11-05",
+  "native_build": {
+    "source": "local robokots-rs working tree, including uncommitted changes",
+    "base_commit": "daeb48e",
+    "source_fingerprint_sha256": "3e9d507b2a6bb7ab78a01adaaf83cd5ecb9d761a8205b32389e5e778e3bbedc7",
+    "build": "maturin build --offline --release --manifest-path /tmp/rei-native-audit/python/Cargo.toml --interpreter /Users/a896/Documents/workspace/Rei/.venv/bin/python --out /tmp/rei-native-audit/wheels",
+    "environment": "wheel extracted under /tmp/rei-native-audit/import; installed .venv wheel preserved",
+    "wheel_sha256": "9e12c865ccd16cf640aa370062d76d0797d32418eb5e564e4dc035e17f663d76"
+  },
+  "note": "Measurements run serially after the release build completed. Initial profiles made during compilation were discarded.",
+  "validation": {
+    "fresh_native_regression_tests": "78 passed; --fail-on-skip",
+    "selected_tests": [
+      "test_kots_compile_order.py",
+      "test_kots_urdf_json_parity.py",
+      "test_kots_perturbation.py",
+      "test_urdf_joint_locking.py"
+    ]
+  },
+  "runs": {
+    "installed_wheel": {
+      "label": "installed-wheel",
+      "native_module": "/Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots_native/__init__.py",
+      "native_hashes": {
+        "robokots_native.cpython-313-darwin.so": "bd4f4da10ece6bf9a470e7f23d7a7cdf9626aa4ca782d9303511116f0bacfef6"
+      },
+      "models": {
+        "planar2": {
+          "pinocchio": {
+            "linearize_ms": [
+              15.694708097726107,
+              15.83162508904934,
+              15.264791902154684,
+              15.252500073984265,
+              14.938042033463717,
+              14.917375054210424,
+              15.010874951258302
+            ],
+            "linearize_median_ms": 15.252500073984265,
+            "solve_median_ms": 205.34475008025765,
+            "solves": [
+              {
+                "ms": 224.6585839893669,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 205.34475008025765,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 186.22904201038182,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         151553 function calls (147515 primitive calls) in 0.039 seconds\n\n   Ordered by: cumulative time\n   List reduced from 157 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.035    0.035 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.035    0.035 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.034    0.034 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:93(build_state)\n      201    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:247(_compose_motion_and_jac)\n      201    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:260(compose_stacked_motion_and_jac)\n      804    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.014    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n      402    0.000    0.000    0.006    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:67(_evaluate_trajectory_entry)\n      804    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      201    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:253(torque_jac)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      201    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:273(torque_motion_jacobian)\n     9570    0.002    0.000    0.002    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n     4020    0.001    0.000    0.002    0.000 <string>:26(__hash__)\n      201    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:244(torque)\n     2630    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:42(shape)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n      402    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:196(motion_triplet)\n     1608    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py:207(reshape)\n        6    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n      402    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:222(<lambda>)\n      402    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/dispatch/template.py:242(_state_ref)\n\n\n"
+          },
+          "selected-mul": {
+            "linearize_ms": [
+              48.140249913558364,
+              39.04654202051461,
+              17.969249980524182,
+              17.29379198513925,
+              17.384542152285576,
+              18.093374790623784,
+              22.229583002626896
+            ],
+            "linearize_median_ms": 18.093374790623784,
+            "solve_median_ms": 389.0432089101523,
+            "solves": [
+              {
+                "ms": 389.0432089101523,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 228.9002500474453,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 659.1779170557857,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                6,
+                100
+              ]
+            ],
+            "profile": "         155273 function calls (151234 primitive calls) in 0.075 seconds\n\n   Ordered by: cumulative time\n   List reduced from 270 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.075    0.075 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.068    0.068 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.067    0.067 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.067    0.067 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.065    0.065 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.034    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      805    0.001    0.000    0.034    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      201    0.002    0.000    0.034    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.002    0.000    0.031    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      805    0.004    0.000    0.027    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        1    0.000    0.000    0.024    0.024 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      805    0.007    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n      202    0.001    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n      804    0.001    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      805    0.005    0.000    0.008    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n        1    0.000    0.000    0.007    0.007 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.001    0.000    0.007    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.003    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      805    0.003    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      808    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:150(_rust_selected_dynamics_apply)\n        1    0.004    0.004    0.004    0.004 {method 'apply' of 'builtins.RustSelectedWorkspace' objects}\n      808    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/motion.py:85(interleaved_motion_jacobian_used_order)\n     7171    0.002    0.000    0.002    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n     4020    0.001    0.000    0.002    0.000 <string>:26(__hash__)\n\n\n"
+          },
+          "selected-dense": {
+            "linearize_ms": [
+              16.393791884183884,
+              16.61366713233292,
+              18.576042028144002,
+              36.54370806179941,
+              21.942790830507874,
+              23.74295797199011,
+              15.757458982989192
+            ],
+            "linearize_median_ms": 18.576042028144002,
+            "solve_median_ms": 177.60395910590887,
+            "solves": [
+              {
+                "ms": 177.60395910590887,
+                "cost": 0.41542365434226425,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 173.2510831207037,
+                "cost": 0.41542365434226425,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 178.055000025779,
+                "cost": 0.41542365434226425,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141622 function calls (137583 primitive calls) in 0.038 seconds\n\n   Ordered by: cumulative time\n   List reduced from 259 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.034    0.034 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.033    0.033 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.033    0.033 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.031    0.031 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.001    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      804    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      804    0.004    0.000    0.010    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        1    0.000    0.000    0.007    0.007 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n     4020    0.001    0.000    0.002    0.000 <string>:26(__hash__)\n      201    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:768(_chain_param_jac)\n     7166    0.001    0.000    0.001    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n     2630    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:42(shape)\n        6    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n     1608    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py:207(reshape)\n8041/4021    0.001    0.000    0.001    0.000 {built-in method builtins.hash}\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n      812    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_twodim_base_impl.py:178(eye)\n\n\n"
+          },
+          "specialized-mul": {
+            "linearize_ms": [
+              22.200209088623524,
+              23.751833010464907,
+              45.34870898351073,
+              57.170042069628835,
+              52.10337485186756,
+              41.87291720882058,
+              27.154541108757257
+            ],
+            "linearize_median_ms": 41.87291720882058,
+            "solve_median_ms": 249.90483280271292,
+            "solves": [
+              {
+                "ms": 249.90483280271292,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 235.63891695812345,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 390.6794579233974,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                6,
+                100
+              ]
+            ],
+            "profile": "         155289 function calls (151250 primitive calls) in 0.049 seconds\n\n   Ordered by: cumulative time\n   List reduced from 274 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.049    0.049 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.045    0.045 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.044    0.044 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.043    0.043 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.041    0.041 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.021    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.001    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.001    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n        1    0.000    0.000    0.016    0.016 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      805    0.002    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      805    0.004    0.000    0.010    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n      202    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:266(_rust_torque_jacobian_apply)\n        1    0.005    0.005    0.005    0.005 {method 'dynamics_jacobian_matmul_rhs_batch' of 'builtins.RustCompiledRobot' objects}\n      804    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      805    0.002    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      808    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n     4020    0.001    0.000    0.002    0.000 <string>:26(__hash__)\n      808    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/motion.py:85(interleaved_motion_jacobian_used_order)\n     7172    0.001    0.000    0.001    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n\n\n"
+          },
+          "specialized-dense": {
+            "linearize_ms": [
+              15.812624944373965,
+              13.950208900496364,
+              13.643542071804404,
+              13.427291065454483,
+              14.042790979146957,
+              14.048042008653283,
+              13.931832974776626
+            ],
+            "linearize_median_ms": 13.950208900496364,
+            "solve_median_ms": 175.85491691716015,
+            "solves": [
+              {
+                "ms": 185.36358303390443,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 173.0107080657035,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 175.85491691716015,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141634 function calls (137595 primitive calls) in 0.037 seconds\n\n   Ordered by: cumulative time\n   List reduced from 263 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.037    0.037 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.033    0.033 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.033    0.033 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.032    0.032 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.031    0.031 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      804    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      201    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      804    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      804    0.004    0.000    0.010    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        1    0.000    0.000    0.009    0.009 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      201    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:768(_chain_param_jac)\n     4020    0.000    0.000    0.001    0.000 <string>:26(__hash__)\n     2630    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:42(shape)\n     7166    0.001    0.000    0.001    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n     1608    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py:207(reshape)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n      812    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_twodim_base_impl.py:178(eye)\n        6    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n      201    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:312(chain_param_jacobian)\n      201    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:124(eval)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n\n\n"
+          }
+        },
+        "fr3v2.1_franka_hand": {
+          "pinocchio": {
+            "linearize_ms": [
+              35.96200002357364,
+              36.43537499010563,
+              35.04279092885554,
+              37.99624997191131,
+              37.345292046666145,
+              34.85458390787244,
+              40.909749921411276
+            ],
+            "linearize_median_ms": 36.43537499010563,
+            "solve_median_ms": 762.3583332169801,
+            "solves": [
+              {
+                "ms": 764.488915912807,
+                "cost": 1.454007234781015,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 762.3583332169801,
+                "cost": 1.454007234781015,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 740.0885419920087,
+                "cost": 1.454007234781015,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         151553 function calls (147515 primitive calls) in 0.064 seconds\n\n   Ordered by: cumulative time\n   List reduced from 157 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.064    0.064 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.041    0.041 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.040    0.040 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.002    0.002    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:93(build_state)\n        1    0.002    0.002    0.022    0.022 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.021    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:247(_compose_motion_and_jac)\n      201    0.002    0.000    0.021    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:260(compose_stacked_motion_and_jac)\n      804    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.002    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.012    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.004    0.000    0.010    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        6    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n      402    0.000    0.000    0.006    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:67(_evaluate_trajectory_entry)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        2    0.001    0.000    0.005    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      804    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.001    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n      219    0.003    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n      201    0.000    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:253(torque_jac)\n     1439    0.003    0.000    0.003    0.000 {built-in method numpy.zeros}\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n        6    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/optimize/costs.py:84(apply)\n\n\n"
+          },
+          "selected-mul": {
+            "linearize_ms": [
+              96.42866696231067,
+              95.61304119415581,
+              95.40041699074209,
+              94.40654190257192,
+              92.35891699790955,
+              93.27837498858571,
+              93.52391702122986
+            ],
+            "linearize_median_ms": 94.40654190257192,
+            "solve_median_ms": 1478.7310420069844,
+            "solves": [
+              {
+                "ms": 1497.6257500238717,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 1478.7310420069844,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 1397.0406248699874,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                21,
+                350
+              ]
+            ],
+            "profile": "         155478 function calls (151439 primitive calls) in 0.117 seconds\n\n   Ordered by: cumulative time\n   List reduced from 270 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.117    0.117 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.097    0.097 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.096    0.096 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.096    0.096 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.093    0.093 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        1    0.001    0.001    0.068    0.068 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:150(_rust_selected_dynamics_apply)\n        1    0.054    0.054    0.054    0.054 {method 'apply' of 'builtins.RustSelectedWorkspace' objects}\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n        1    0.001    0.001    0.019    0.019 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      805    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      805    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.012    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n      202    0.001    0.000    0.007    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        6    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.000    0.005    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      808    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      808    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/motion.py:85(interleaved_motion_jacobian_used_order)\n     2248    0.004    0.000    0.004    0.000 {built-in method numpy.zeros}\n\n\n"
+          },
+          "selected-dense": {
+            "linearize_ms": [
+              38.569334195926785,
+              38.92112500034273,
+              42.04137483611703,
+              36.640125093981624,
+              37.09116578102112,
+              38.19245798513293,
+              38.842791924253106
+            ],
+            "linearize_median_ms": 38.569334195926785,
+            "solve_median_ms": 768.4819169808179,
+            "solves": [
+              {
+                "ms": 770.4705419018865,
+                "cost": 1.4540072347810158,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 755.4655831772834,
+                "cost": 1.4540072347810158,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 768.4819169808179,
+                "cost": 1.4540072347810158,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141827 function calls (137788 primitive calls) in 0.059 seconds\n\n   Ordered by: cumulative time\n   List reduced from 259 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.059    0.059 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.037    0.037 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.035    0.035 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n        1    0.001    0.001    0.020    0.020 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      804    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.013    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        1    0.000    0.000    0.010    0.010 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.000    0.005    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      804    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n     1640    0.003    0.000    0.003    0.000 {built-in method numpy.zeros}\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      219    0.003    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n      201    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:768(_chain_param_jac)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n\n\n"
+          },
+          "specialized-mul": {
+            "linearize_ms": [
+              141.4136670064181,
+              140.09766606613994,
+              140.35245799459517,
+              140.95058385282755,
+              143.08054116554558,
+              139.7527081426233,
+              138.78187513910234
+            ],
+            "linearize_median_ms": 140.35245799459517,
+            "solve_median_ms": 1780.279166996479,
+            "solves": [
+              {
+                "ms": 1781.13824990578,
+                "cost": 1.4540072347810171,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 1780.279166996479,
+                "cost": 1.4540072347810171,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 1764.5119589287788,
+                "cost": 1.4540072347810171,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                21,
+                350
+              ]
+            ],
+            "profile": "         155544 function calls (151505 primitive calls) in 0.161 seconds\n\n   Ordered by: cumulative time\n   List reduced from 274 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.161    0.161 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.141    0.141 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.140    0.140 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.140    0.140 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.138    0.138 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        1    0.001    0.001    0.113    0.113 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n        1    0.000    0.000    0.099    0.099 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.099    0.099 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.099    0.099 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.099    0.099 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.099    0.099 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:266(_rust_torque_jacobian_apply)\n        1    0.099    0.099    0.099    0.099 {method 'dynamics_jacobian_matmul_rhs_batch' of 'builtins.RustCompiledRobot' objects}\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n        1    0.001    0.001    0.020    0.020 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.002    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      805    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.012    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n      202    0.001    0.000    0.007    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        6    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.005    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.000    0.005    0.002 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      808    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      808    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/motion.py:85(interleaved_motion_jacobian_used_order)\n\n\n"
+          },
+          "specialized-dense": {
+            "linearize_ms": [
+              38.8029171153903,
+              38.49762515164912,
+              39.86312495544553,
+              52.51683294773102,
+              40.38162506185472,
+              40.4104171320796,
+              39.47670804336667
+            ],
+            "linearize_median_ms": 39.86312495544553,
+            "solve_median_ms": 785.7983328867704,
+            "solves": [
+              {
+                "ms": 787.2828750405461,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 761.598541866988,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 785.7983328867704,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141884 function calls (137845 primitive calls) in 0.059 seconds\n\n   Ordered by: cumulative time\n   List reduced from 263 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.059    0.059 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.040    0.040 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.037    0.037 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n        1    0.001    0.001    0.019    0.019 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.012    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        1    0.000    0.000    0.012    0.012 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.001    0.005    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      804    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:302(dense)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:140(jacobian)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:667(jacobian)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:161(_jacobian_from_state)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:236(_rust_torque_jacobian)\n        1    0.004    0.004    0.004    0.004 {method 'dynamics_jacobian_batch' of 'builtins.RustCompiledRobot' objects}\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n\n\n"
+          }
+        }
+      }
+    },
+    "fresh_release": {
+      "label": "fresh-release",
+      "native_module": "/tmp/rei-native-audit/import/robokots_native/__init__.py",
+      "native_hashes": {
+        "robokots_native.cpython-313-darwin.so": "6a35e38dfee774344fd21a6dcaf4837297dd33ed6b9683a7221d2c190ac208ee"
+      },
+      "models": {
+        "planar2": {
+          "pinocchio": {
+            "linearize_ms": [
+              16.066374955698848,
+              15.96849993802607,
+              16.06737496331334,
+              15.843125060200691,
+              15.683625126257539,
+              27.07737497985363,
+              15.761333983391523
+            ],
+            "linearize_median_ms": 15.96849993802607,
+            "solve_median_ms": 190.2006659656763,
+            "solves": [
+              {
+                "ms": 220.53041588515043,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 190.2006659656763,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 188.71637480333447,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         151785 function calls (147747 primitive calls) in 0.039 seconds\n\n   Ordered by: cumulative time\n   List reduced from 157 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.036    0.036 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.035    0.035 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.034    0.034 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:93(build_state)\n      201    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:247(_compose_motion_and_jac)\n      201    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:260(compose_stacked_motion_and_jac)\n      804    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.014    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n      402    0.000    0.000    0.006    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:67(_evaluate_trajectory_entry)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      201    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:253(torque_jac)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      201    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:273(torque_motion_jacobian)\n     9570    0.002    0.000    0.002    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n     4020    0.001    0.000    0.002    0.000 <string>:26(__hash__)\n      201    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:244(torque)\n     2630    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:42(shape)\n     1608    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py:207(reshape)\n      402    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:196(motion_triplet)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n      402    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:222(<lambda>)\n        6    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n      402    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/dispatch/template.py:242(_state_ref)\n\n\n"
+          },
+          "selected-mul": {
+            "linearize_ms": [
+              60.55662501603365,
+              26.850084075704217,
+              17.35695800743997,
+              17.575125209987164,
+              17.353874864056706,
+              17.691042041406035,
+              17.250708071514964
+            ],
+            "linearize_median_ms": 17.575125209987164,
+            "solve_median_ms": 213.02400017157197,
+            "solves": [
+              {
+                "ms": 211.05862502008677,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 249.45945804938674,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 213.02400017157197,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                6,
+                100
+              ]
+            ],
+            "profile": "         155265 function calls (151226 primitive calls) in 0.040 seconds\n\n   Ordered by: cumulative time\n   List reduced from 270 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.040    0.040 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.036    0.036 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.036    0.036 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.035    0.035 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.034    0.034 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.000    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      805    0.001    0.000    0.014    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        1    0.000    0.000    0.012    0.012 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      805    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      202    0.001    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n      805    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:150(_rust_selected_dynamics_apply)\n        1    0.003    0.003    0.003    0.003 {method 'apply' of 'builtins.RustSelectedWorkspace' objects}\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      808    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n     4020    0.000    0.000    0.001    0.000 <string>:26(__hash__)\n      808    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/motion.py:85(interleaved_motion_jacobian_used_order)\n     2631    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:42(shape)\n\n\n"
+          },
+          "selected-dense": {
+            "linearize_ms": [
+              13.965083053335547,
+              13.854291988536716,
+              14.39591683447361,
+              51.440499955788255,
+              30.187209136784077,
+              15.064917039126158,
+              13.911667047068477
+            ],
+            "linearize_median_ms": 14.39591683447361,
+            "solve_median_ms": 252.4536249693483,
+            "solves": [
+              {
+                "ms": 299.4786249473691,
+                "cost": 0.41542365434226425,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 252.4536249693483,
+                "cost": 0.41542365434226425,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 181.7729170434177,
+                "cost": 0.41542365434226425,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141614 function calls (137575 primitive calls) in 0.036 seconds\n\n   Ordered by: cumulative time\n   List reduced from 259 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.036    0.036 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.032    0.032 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.032    0.032 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.031    0.031 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.029    0.029 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      804    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.014    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        1    0.000    0.000    0.007    0.007 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      201    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:768(_chain_param_jac)\n     4020    0.001    0.000    0.002    0.000 <string>:26(__hash__)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n     2630    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:42(shape)\n     7166    0.001    0.000    0.001    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n        6    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n     1608    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py:207(reshape)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n      812    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_twodim_base_impl.py:178(eye)\n8041/4021    0.001    0.000    0.001    0.000 {built-in method builtins.hash}\n\n\n"
+          },
+          "specialized-mul": {
+            "linearize_ms": [
+              19.892374984920025,
+              21.183416014537215,
+              69.49750008061528,
+              29.096041806042194,
+              19.969125045463443,
+              19.977375166490674,
+              19.249209202826023
+            ],
+            "linearize_median_ms": 19.977375166490674,
+            "solve_median_ms": 266.3957909680903,
+            "solves": [
+              {
+                "ms": 241.59179185517132,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 266.3957909680903,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 492.61200008913875,
+                "cost": 0.41542365434226536,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                6,
+                100
+              ]
+            ],
+            "profile": "         155281 function calls (151242 primitive calls) in 0.043 seconds\n\n   Ordered by: cumulative time\n   List reduced from 274 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.043    0.043 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.036    0.036 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.000    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n        1    0.000    0.000    0.014    0.014 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      805    0.001    0.000    0.014    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      805    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.005    0.005 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:266(_rust_torque_jacobian_apply)\n        1    0.005    0.005    0.005    0.005 {method 'dynamics_jacobian_matmul_rhs_batch' of 'builtins.RustCompiledRobot' objects}\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      202    0.001    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      805    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      808    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n     4020    0.001    0.000    0.001    0.000 <string>:26(__hash__)\n     7172    0.001    0.000    0.001    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n      808    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/motion.py:85(interleaved_motion_jacobian_used_order)\n\n\n"
+          },
+          "specialized-dense": {
+            "linearize_ms": [
+              13.527791015803814,
+              13.620167039334774,
+              14.066792093217373,
+              13.725250028073788,
+              13.865582877770066,
+              13.798166066408157,
+              13.951583066955209
+            ],
+            "linearize_median_ms": 13.798166066408157,
+            "solve_median_ms": 315.95429102890193,
+            "solves": [
+              {
+                "ms": 425.69854110479355,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 315.95429102890193,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 239.1565830912441,
+                "cost": 0.415423654342264,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141626 function calls (137587 primitive calls) in 0.034 seconds\n\n   Ordered by: cumulative time\n   List reduced from 263 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.034    0.034 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.030    0.030 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.030    0.030 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.029    0.029 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.028    0.028 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      804    0.000    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.013    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        1    0.000    0.000    0.006    0.006 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      201    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:768(_chain_param_jac)\n     4020    0.000    0.000    0.001    0.000 <string>:26(__hash__)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n     2630    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:42(shape)\n     7166    0.001    0.000    0.001    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n        6    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n     1608    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/fromnumeric.py:207(reshape)\n        8    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n8041/4021    0.001    0.000    0.001    0.000 {built-in method builtins.hash}\n      201    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:124(eval)\n\n\n"
+          }
+        },
+        "fr3v2.1_franka_hand": {
+          "pinocchio": {
+            "linearize_ms": [
+              57.11825005710125,
+              51.78958410397172,
+              36.97379189543426,
+              38.45120803453028,
+              37.074541905894876,
+              35.8220839407295,
+              39.42600009031594
+            ],
+            "linearize_median_ms": 38.45120803453028,
+            "solve_median_ms": 910.966333001852,
+            "solves": [
+              {
+                "ms": 910.966333001852,
+                "cost": 1.454007234781015,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 951.9742080010474,
+                "cost": 1.454007234781015,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 827.2583750076592,
+                "cost": 1.454007234781015,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         151785 function calls (147747 primitive calls) in 0.061 seconds\n\n   Ordered by: cumulative time\n   List reduced from 157 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.061    0.061 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:93(build_state)\n        1    0.001    0.001    0.021    0.021 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:247(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:260(compose_stacked_motion_and_jac)\n      804    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.013    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.004    0.000    0.010    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n      402    0.000    0.000    0.006    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:67(_evaluate_trajectory_entry)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.000    0.005    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      804    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      219    0.003    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n      201    0.000    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:253(torque_jac)\n     1439    0.003    0.000    0.003    0.000 {built-in method numpy.zeros}\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n      201    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:273(torque_motion_jacobian)\n\n\n"
+          },
+          "selected-mul": {
+            "linearize_ms": [
+              94.53308396041393,
+              115.00550014898181,
+              103.02212508395314,
+              96.39762504957616,
+              94.43133301101625,
+              94.33879214338958,
+              113.77704190090299
+            ],
+            "linearize_median_ms": 96.39762504957616,
+            "solve_median_ms": 1461.5260420832783,
+            "solves": [
+              {
+                "ms": 1551.2344168964773,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 1433.0462499056011,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 1461.5260420832783,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                21,
+                350
+              ]
+            ],
+            "profile": "         155470 function calls (151431 primitive calls) in 0.121 seconds\n\n   Ordered by: cumulative time\n   List reduced from 270 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.121    0.121 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.097    0.097 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.096    0.096 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.096    0.096 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.093    0.093 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        1    0.001    0.001    0.068    0.068 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:150(_rust_selected_dynamics_apply)\n        1    0.054    0.054    0.054    0.054 {method 'apply' of 'builtins.RustSelectedWorkspace' objects}\n        1    0.002    0.002    0.023    0.023 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      805    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.013    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n      202    0.001    0.000    0.007    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      808    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n        4    0.000    0.000    0.005    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n     2248    0.004    0.000    0.004    0.000 {built-in method numpy.zeros}\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n\n\n"
+          },
+          "selected-dense": {
+            "linearize_ms": [
+              36.98833379894495,
+              43.05541585199535,
+              85.27275011874735,
+              38.899665931239724,
+              41.49899980984628,
+              38.71725010685623,
+              40.2125830296427
+            ],
+            "linearize_median_ms": 40.2125830296427,
+            "solve_median_ms": 893.9125000033528,
+            "solves": [
+              {
+                "ms": 932.2437921073288,
+                "cost": 1.4540072347810158,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 893.9125000033528,
+                "cost": 1.4540072347810158,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 893.8239580020308,
+                "cost": 1.4540072347810158,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141819 function calls (137780 primitive calls) in 0.077 seconds\n\n   Ordered by: cumulative time\n   List reduced from 259 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.077    0.077 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.048    0.048 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.048    0.048 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.047    0.047 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.045    0.045 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        1    0.002    0.002    0.027    0.027 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.025    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.025    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      804    0.001    0.000    0.023    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.002    0.000    0.021    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.002    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.001    0.000    0.018    0.005 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        1    0.000    0.000    0.013    0.013 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.005    0.000    0.011    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.010    0.002 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.009    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        2    0.002    0.001    0.008    0.004 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.007    0.001    0.007    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        4    0.000    0.000    0.005    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      804    0.003    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n     1640    0.004    0.000    0.004    0.000 {built-in method numpy.zeros}\n      804    0.001    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n      219    0.004    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n      201    0.000    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:768(_chain_param_jac)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n\n\n"
+          },
+          "specialized-mul": {
+            "linearize_ms": [
+              142.51270797103643,
+              147.19274989329278,
+              210.10704198852181,
+              143.12699995934963,
+              142.0203330926597,
+              189.85441699624062,
+              139.1574579756707
+            ],
+            "linearize_median_ms": 143.12699995934963,
+            "solve_median_ms": 2065.375375095755,
+            "solves": [
+              {
+                "ms": 2065.375375095755,
+                "cost": 1.4540072347810171,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 2381.148457992822,
+                "cost": 1.4540072347810171,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 2027.1869581192732,
+                "cost": 1.4540072347810171,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                21,
+                350
+              ]
+            ],
+            "profile": "         155536 function calls (151497 primitive calls) in 0.173 seconds\n\n   Ordered by: cumulative time\n   List reduced from 274 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.173    0.173 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.148    0.148 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.148    0.148 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.147    0.147 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.145    0.145 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        1    0.000    0.000    0.119    0.119 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n        1    0.000    0.000    0.106    0.106 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.106    0.106 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.106    0.106 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.106    0.106 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.001    0.001    0.106    0.106 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:266(_rust_torque_jacobian_apply)\n        1    0.105    0.105    0.105    0.105 {method 'dynamics_jacobian_matmul_rhs_batch' of 'builtins.RustCompiledRobot' objects}\n        1    0.001    0.001    0.024    0.024 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n        4    0.001    0.000    0.015    0.004 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n      805    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n      202    0.001    0.000    0.007    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      808    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n     2248    0.005    0.000    0.005    0.000 {built-in method numpy.zeros}\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n\n\n"
+          },
+          "specialized-dense": {
+            "linearize_ms": [
+              43.555499985814095,
+              41.47195792756975,
+              40.622750064358115,
+              41.29775008186698,
+              41.51183390058577,
+              41.50545806623995,
+              42.85341687500477
+            ],
+            "linearize_median_ms": 41.50545806623995,
+            "solve_median_ms": 973.6009167972952,
+            "solves": [
+              {
+                "ms": 795.2169999480247,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 973.6009167972952,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 1125.5368748679757,
+                "cost": 1.4540072347810145,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141876 function calls (137837 primitive calls) in 0.064 seconds\n\n   Ordered by: cumulative time\n   List reduced from 263 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.064    0.064 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.041    0.041 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.040    0.040 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.039    0.039 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        1    0.002    0.002    0.023    0.023 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      804    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.015    0.004 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        1    0.000    0.000    0.012    0.012 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:302(dense)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:140(jacobian)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:667(jacobian)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:161(_jacobian_from_state)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:236(_rust_torque_jacobian)\n      804    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n     1640    0.004    0.000    0.004    0.000 {built-in method numpy.zeros}\n        1    0.004    0.004    0.004    0.004 {method 'dynamics_jacobian_batch' of 'builtins.RustCompiledRobot' objects}\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n\n\n"
+          }
+        }
+      }
+    },
+    "fresh_gauss_newton_201": {
+      "label": "fresh-release",
+      "solver": "gauss_newton",
+      "torque_step": 1,
+      "native_module": "/tmp/rei-native-audit/import/robokots_native/__init__.py",
+      "native_hashes": {
+        "robokots_native.cpython-313-darwin.so": "6a35e38dfee774344fd21a6dcaf4837297dd33ed6b9683a7221d2c190ac208ee"
+      },
+      "models": {
+        "fr3v2.1_franka_hand": {
+          "pinocchio": {
+            "linearize_ms": [
+              45.27804208919406,
+              43.31362503580749,
+              40.671042166650295,
+              46.47041694261134,
+              42.43579087778926,
+              41.58370802178979,
+              40.49112484790385
+            ],
+            "linearize_median_ms": 42.43579087778926,
+            "solve_median_ms": 212.87220786325634,
+            "solves": [
+              {
+                "ms": 242.79941711574793,
+                "cost": 1.4540072347810065,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 212.87220786325634,
+                "cost": 1.4540072347810065,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 202.72437506355345,
+                "cost": 1.4540072347810065,
+                "iterations": 2,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         151689 function calls (147651 primitive calls) in 0.064 seconds\n\n   Ordered by: cumulative time\n   List reduced from 157 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.064    0.064 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.042    0.042 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.042    0.042 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.002    0.002    0.041    0.041 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:93(build_state)\n        1    0.002    0.002    0.022    0.022 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.021    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:247(_compose_motion_and_jac)\n      201    0.002    0.000    0.021    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:260(compose_stacked_motion_and_jac)\n      804    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.002    0.000    0.016    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.014    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      804    0.004    0.000    0.010    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n      402    0.000    0.000    0.007    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:67(_evaluate_trajectory_entry)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      804    0.001    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      804    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      804    0.001    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n      219    0.003    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n      201    0.000    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:253(torque_jac)\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n     1439    0.003    0.000    0.003    0.000 {built-in method numpy.zeros}\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n      201    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio_adapter.py:273(torque_motion_jacobian)\n\n\n"
+          },
+          "selected-mul": {
+            "linearize_ms": [
+              99.63408415205777,
+              94.89825018681586,
+              98.98624988272786,
+              92.96804200857878,
+              94.89408298395574,
+              99.42970797419548,
+              94.2725830245763
+            ],
+            "linearize_median_ms": 94.89825018681586,
+            "solve_median_ms": 383.1819170154631,
+            "solves": [
+              {
+                "ms": 392.1365840360522,
+                "cost": 1.4540072347810098,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 383.1819170154631,
+                "cost": 1.4540072347810098,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 382.1785419713706,
+                "cost": 1.4540072347810098,
+                "iterations": 2,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                201,
+                21,
+                350
+              ]
+            ],
+            "profile": "         155478 function calls (151439 primitive calls) in 0.121 seconds\n\n   Ordered by: cumulative time\n   List reduced from 270 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.121    0.121 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.096    0.096 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.096    0.096 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.095    0.095 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.093    0.093 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        1    0.001    0.001    0.068    0.068 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n        1    0.000    0.000    0.055    0.055 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.054    0.054 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:150(_rust_selected_dynamics_apply)\n        1    0.054    0.054    0.054    0.054 {method 'apply' of 'builtins.RustSelectedWorkspace' objects}\n        1    0.003    0.003    0.024    0.024 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n      805    0.000    0.000    0.018    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      805    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      805    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.001    0.000    0.014    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n      805    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n      202    0.001    0.000    0.007    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:858(_motion_jacobian_chain_candidates)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n      808    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:819(_motion_jacobian_used_order_candidate)\n      804    0.000    0.000    0.005    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n     2248    0.004    0.000    0.004    0.000 {built-in method numpy.zeros}\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n\n\n"
+          },
+          "selected-dense": {
+            "linearize_ms": [
+              36.07625002041459,
+              37.15566685423255,
+              37.49483288265765,
+              36.3044161349535,
+              35.99195787683129,
+              36.977624986320734,
+              35.71670898236334
+            ],
+            "linearize_median_ms": 36.3044161349535,
+            "solve_median_ms": 211.0644169151783,
+            "solves": [
+              {
+                "ms": 205.1332499831915,
+                "cost": 1.4540072347810065,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 211.0644169151783,
+                "cost": 1.4540072347810065,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 212.90012495592237,
+                "cost": 1.4540072347810065,
+                "iterations": 2,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         141827 function calls (137788 primitive calls) in 0.058 seconds\n\n   Ordered by: cumulative time\n   List reduced from 259 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.058    0.058 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.000    0.000    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.037    0.037 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.001    0.001    0.037    0.037 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.001    0.001    0.035    0.035 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n      201    0.000    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n      201    0.002    0.000    0.020    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n        1    0.001    0.001    0.019    0.019 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n      804    0.000    0.000    0.019    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n      804    0.001    0.000    0.017    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n      804    0.001    0.000    0.015    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        4    0.000    0.000    0.012    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        1    0.000    0.000    0.010    0.010 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n      804    0.004    0.000    0.009    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        6    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.005    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.001    0.005    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n      804    0.000    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n      804    0.003    0.000    0.004    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n      804    0.001    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n     1640    0.003    0.000    0.003    0.000 {built-in method numpy.zeros}\n      804    0.002    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:445(_parse_einsum_input)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n      219    0.003    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n      201    0.000    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:768(_chain_param_jac)\n      804    0.001    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:61(matvec_at)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n\n\n"
+          }
+        }
+      }
+    },
+    "fresh_gauss_newton_5": {
+      "label": "fresh-release",
+      "solver": "gauss_newton",
+      "torque_step": 50,
+      "native_module": "/tmp/rei-native-audit/import/robokots_native/__init__.py",
+      "native_hashes": {
+        "robokots_native.cpython-313-darwin.so": "6a35e38dfee774344fd21a6dcaf4837297dd33ed6b9683a7221d2c190ac208ee"
+      },
+      "models": {
+        "fr3v2.1_franka_hand": {
+          "pinocchio": {
+            "linearize_ms": [
+              15.89379203505814,
+              16.282333061099052,
+              17.4090841319412,
+              15.066583873704076,
+              16.341625014320016,
+              16.306875040754676,
+              15.163334086537361
+            ],
+            "linearize_median_ms": 16.282333061099052,
+            "solve_median_ms": 130.9940831270069,
+            "solves": [
+              {
+                "ms": 126.60991703160107,
+                "cost": 1.4539759857346064,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 131.5268750768155,
+                "cost": 1.4539759857346064,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 130.9940831270069,
+                "cost": 1.4539759857346064,
+                "iterations": 2,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         5229 function calls (5111 primitive calls) in 0.017 seconds\n\n   Ordered by: cumulative time\n   List reduced from 157 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.017    0.017 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.001    0.001    0.015    0.015 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n        4    0.000    0.000    0.010    0.002 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        6    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.000    0.005    0.002 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n       23    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n       67    0.002    0.000    0.002    0.000 {built-in method numpy.zeros}\n        5    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:93(build_state)\n        6    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/optimize/costs.py:84(apply)\n       42    0.001    0.000    0.001    0.000 {method 'copy' of 'numpy.ndarray' objects}\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:247(_compose_motion_and_jac)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:260(compose_stacked_motion_and_jac)\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        2    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:806(eval)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n       10    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:67(_evaluate_trajectory_entry)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n       32    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:513(expand_dims)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1144(bmm_einsum)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:207(apply_at)\n\n\n"
+          },
+          "selected-mul": {
+            "linearize_ms": [
+              20.92058304697275,
+              20.3494590241462,
+              19.852166064083576,
+              23.257625056430697,
+              20.829499932006,
+              20.358666079118848,
+              21.655207965523005
+            ],
+            "linearize_median_ms": 20.829499932006,
+            "solve_median_ms": 137.56741699762642,
+            "solves": [
+              {
+                "ms": 136.621167184785,
+                "cost": 1.4539759857346044,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 139.94250004179776,
+                "cost": 1.4539759857346044,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 137.56741699762642,
+                "cost": 1.4539759857346044,
+                "iterations": 2,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                5,
+                21,
+                350
+              ]
+            ],
+            "profile": "         6118 function calls (5999 primitive calls) in 0.022 seconds\n\n   Ordered by: cumulative time\n   List reduced from 270 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.022    0.022 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.001    0.001    0.018    0.018 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n        4    0.000    0.000    0.011    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.000    0.000    0.003    0.003 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n       23    0.003    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n       92    0.002    0.000    0.002    0.000 {built-in method numpy.zeros}\n        1    0.000    0.000    0.002    0.002 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:150(_rust_selected_dynamics_apply)\n        1    0.001    0.001    0.001    0.001 {method 'apply' of 'builtins.RustSelectedWorkspace' objects}\n        6    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/optimize/costs.py:84(apply)\n       28    0.001    0.000    0.001    0.000 {method 'copy' of 'numpy.ndarray' objects}\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n       21    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n       21    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n\n\n"
+          },
+          "selected-dense": {
+            "linearize_ms": [
+              17.382916994392872,
+              17.88062509149313,
+              17.702999990433455,
+              19.851000048220158,
+              19.03454214334488,
+              19.81220906600356,
+              17.700540833175182
+            ],
+            "linearize_median_ms": 17.88062509149313,
+            "solve_median_ms": 132.7939999755472,
+            "solves": [
+              {
+                "ms": 145.87237522937357,
+                "cost": 1.453975985734605,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 130.58608304709196,
+                "cost": 1.453975985734605,
+                "iterations": 2,
+                "converged": true
+              },
+              {
+                "ms": 132.7939999755472,
+                "cost": 1.453975985734605,
+                "iterations": 2,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         5599 function calls (5480 primitive calls) in 0.041 seconds\n\n   Ordered by: cumulative time\n   List reduced from 259 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.002    0.002    0.041    0.041 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.003    0.003    0.038    0.038 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n        4    0.001    0.000    0.026    0.007 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        6    0.000    0.000    0.017    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        2    0.002    0.001    0.016    0.008 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        8    0.000    0.000    0.014    0.002 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        4    0.001    0.000    0.010    0.003 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n       23    0.010    0.000    0.010    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n        8    0.000    0.000    0.009    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.008    0.001    0.009    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n       72    0.004    0.000    0.004    0.000 {built-in method numpy.zeros}\n       28    0.004    0.000    0.004    0.000 {method 'copy' of 'numpy.ndarray' objects}\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n        6    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/optimize/costs.py:84(apply)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        2    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:806(eval)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n        8    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:199(apply)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        8    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:107(__matmul__)\n        8    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:54(matvec)\n        1    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n\n\n"
+          }
+        }
+      }
+    },
+    "fresh_lm_5": {
+      "label": "fresh-release",
+      "solver": "levenberg_marquardt",
+      "torque_step": 50,
+      "native_module": "/tmp/rei-native-audit/import/robokots_native/__init__.py",
+      "native_hashes": {
+        "robokots_native.cpython-313-darwin.so": "6a35e38dfee774344fd21a6dcaf4837297dd33ed6b9683a7221d2c190ac208ee"
+      },
+      "models": {
+        "fr3v2.1_franka_hand": {
+          "pinocchio": {
+            "linearize_ms": [
+              15.374082839116454,
+              15.407833037897944,
+              13.830708805471659,
+              16.531874891370535,
+              14.21662513166666,
+              15.633709030225873,
+              17.847332870587707
+            ],
+            "linearize_median_ms": 15.407833037897944,
+            "solve_median_ms": 767.1236670576036,
+            "solves": [
+              {
+                "ms": 767.1236670576036,
+                "cost": 1.4539759857346122,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 828.1709998846054,
+                "cost": 1.4539759857346122,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 580.8355419430882,
+                "cost": 1.4539759857346122,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         5221 function calls (5103 primitive calls) in 0.022 seconds\n\n   Ordered by: cumulative time\n   List reduced from 157 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.000    0.000    0.022    0.022 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.001    0.001    0.021    0.021 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n        4    0.000    0.000    0.012    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        8    0.000    0.000    0.011    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.009    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        6    0.000    0.000    0.009    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.009    0.001    0.009    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        4    0.000    0.000    0.006    0.002 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n       23    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n       67    0.002    0.000    0.002    0.000 {built-in method numpy.zeros}\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n        6    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/optimize/costs.py:84(apply)\n       42    0.001    0.000    0.001    0.000 {method 'copy' of 'numpy.ndarray' objects}\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:93(build_state)\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/pinocchio.py:247(_compose_motion_and_jac)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:260(compose_stacked_motion_and_jac)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        2    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:806(eval)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n       10    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:67(_evaluate_trajectory_entry)\n       32    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:513(expand_dims)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:226(q_at)\n        8    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:199(apply)\n      358    0.000    0.000    0.000    0.000 {method 'reshape' of 'numpy.ndarray' objects}\n\n\n"
+          },
+          "selected-mul": {
+            "linearize_ms": [
+              19.588832976296544,
+              16.944166971370578,
+              18.205958884209394,
+              21.462625125423074,
+              18.343500094488263,
+              17.6147089805454,
+              19.125625025480986
+            ],
+            "linearize_median_ms": 18.343500094488263,
+            "solve_median_ms": 524.7780000790954,
+            "solves": [
+              {
+                "ms": 575.8933341130614,
+                "cost": 1.4539759857346124,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 523.6965829972178,
+                "cost": 1.4539759857346124,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 524.7780000790954,
+                "cost": 1.4539759857346124,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [
+              [
+                5,
+                21,
+                350
+              ]
+            ],
+            "profile": "         6118 function calls (5999 primitive calls) in 0.022 seconds\n\n   Ordered by: cumulative time\n   List reduced from 270 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.022    0.022 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.001    0.001    0.017    0.017 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n        4    0.000    0.000    0.011    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        6    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        8    0.000    0.000    0.006    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        2    0.001    0.001    0.006    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        4    0.000    0.000    0.004    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n        1    0.000    0.000    0.004    0.004 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n        1    0.001    0.001    0.003    0.003 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n       23    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n       92    0.002    0.000    0.002    0.000 {built-in method numpy.zeros}\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_api.py:343(batched_jvp)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:692(jacobian_mul)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:387(_jacobian_mul_from_state)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/derivatives.py:300(_jacobian_matmul_rhs_from_state)\n        1    0.000    0.000    0.001    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/robokots/api/rust_derivatives.py:150(_rust_selected_dynamics_apply)\n        1    0.001    0.001    0.001    0.001 {method 'apply' of 'builtins.RustSelectedWorkspace' objects}\n       28    0.001    0.000    0.001    0.000 {method 'copy' of 'numpy.ndarray' objects}\n        6    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/optimize/costs.py:84(apply)\n       21    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n       21    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n\n\n"
+          },
+          "selected-dense": {
+            "linearize_ms": [
+              18.75766715966165,
+              18.860916839912534,
+              18.885749857872725,
+              18.587333150207996,
+              18.75608297996223,
+              23.18520820699632,
+              23.866291856393218
+            ],
+            "linearize_median_ms": 18.860916839912534,
+            "solve_median_ms": 549.2390000727028,
+            "solves": [
+              {
+                "ms": 549.2390000727028,
+                "cost": 1.4539759857346128,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 565.0829998776317,
+                "cost": 1.4539759857346128,
+                "iterations": 9,
+                "converged": true
+              },
+              {
+                "ms": 528.6081659141928,
+                "cost": 1.4539759857346128,
+                "iterations": 9,
+                "converged": true
+              }
+            ],
+            "jvp_rhs_shapes": [],
+            "profile": "         5599 function calls (5480 primitive calls) in 0.024 seconds\n\n   Ordered by: cumulative time\n   List reduced from 259 to 30 due to restriction <30>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n        1    0.001    0.001    0.024    0.024 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:162(linearize)\n        1    0.002    0.002    0.021    0.021 /Users/a896/Documents/workspace/Rei/rei/problem/nls.py:72(linearize)\n        4    0.001    0.000    0.013    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1084(eval)\n        6    0.000    0.000    0.009    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:865(eval)\n        8    0.000    0.000    0.008    0.001 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:370(eval)\n        2    0.001    0.001    0.007    0.003 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:1321(eval)\n        8    0.000    0.000    0.007    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:98(to_dense)\n        8    0.006    0.001    0.006    0.001 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/lib/_shape_base_impl.py:1038(kron)\n        4    0.000    0.000    0.005    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:128(copy)\n        4    0.000    0.000    0.003    0.001 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:118(__getitem__)\n       23    0.003    0.000    0.003    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:59(_add_variable_blocks)\n        1    0.000    0.000    0.002    0.002 /Users/a896/Documents/workspace/Rei/rei/optimize/runtime.py:156(update_state_if_needed)\n        1    0.000    0.000    0.002    0.002 /Users/a896/Documents/workspace/Rei/rei/core/state_cache.py:106(update_if_needed)\n        1    0.000    0.000    0.002    0.002 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:736(build_state)\n       72    0.002    0.000    0.002    0.000 {built-in method numpy.zeros}\n        1    0.000    0.000    0.002    0.002 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:664(_build_state_batched)\n        5    0.002    0.000    0.002    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/shape_base.py:218(vstack)\n        6    0.001    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/optimize/costs.py:84(apply)\n       28    0.001    0.000    0.001    0.000 {method 'copy' of 'numpy.ndarray' objects}\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:412(_compose_motion_and_jac)\n        5    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/trajectory.py:222(compose_interleaved_motion_and_jac)\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:233(dqdp_at)\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/rei/core/trajectory.py:83(rmatvec_at)\n       20    0.000    0.000    0.001    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:1242(einsum)\n        2    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/core/expr/nodes.py:806(eval)\n       20    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/.venv/lib/python3.13/site-packages/numpy/_core/einsumfunc.py:634(einsum_path)\n        1    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:621(_batched_dynamics_param_jacobian)\n        1    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots.py:523(_update_batched_dynamics)\n        1    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_adapter.py:87(update_dynamics_if_available)\n        1    0.000    0.000    0.000    0.000 /Users/a896/Documents/workspace/Rei/rei/backends/state/robotics/kots_adapter.py:47(_call_update_method)\n\n\n"
+          }
+        }
+      }
+    },
+    "fresh_three_backends_dense": {
+      "platform": "macOS-15.7.4-arm64-arm-64bit-Mach-O",
+      "python": "3.13.1",
+      "versions": {
+        "numpy": "2.5.3",
+        "scipy": "1.18.1",
+        "pin": "4.1.0",
+        "mathrobo": "0.0.6",
+        "robokots": "0.0.1",
+        "robokots-native": "0.0.1"
+      },
+      "native_api": 1,
+      "robokots_source": {
+        "url": "https://github.com/MathRobotics/RoboKots.git",
+        "vcs_info": {
+          "vcs": "git",
+          "commit_id": "24acfc36a54e889332db798004b37122ce77843d",
+          "requested_revision": "main"
+        }
+      },
+      "thread_environment": {
+        "OPENBLAS_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1",
+        "VECLIB_MAXIMUM_THREADS": "1"
+      },
+      "settings": {
+        "repeat": 7,
+        "warmup": 2,
+        "solve_repeat": 3,
+        "jacobian_strategy": "dense",
+        "output": "/tmp/rei-three-backends-dense.json"
+      },
+      "models": {
+        "planar2": {
+          "correctness": {
+            "against_pinocchio": {
+              "robokots-numpy": {
+                "residual_max_abs": 1.8189894035458565e-12,
+                "jacobian_max_abs": 9.094947017729282e-12
+              },
+              "robokots-rust": {
+                "residual_max_abs": 9.094947017729282e-13,
+                "jacobian_max_abs": 1.4551915228366852e-11
+              }
+            },
+            "rust_state_type": "RustBatchOutwardState"
+          },
+          "timings": {
+            "robokots-numpy": {
+              "first_compile_ms": 4.001666093245149,
+              "first_linearize_ms": 55.12529192492366,
+              "compile_ms": {
+                "median": 3.564458806067705,
+                "min": 3.3058340195566416,
+                "max": 3.835416864603758,
+                "samples": [
+                  3.7469591479748487,
+                  3.444917034357786,
+                  3.7004591431468725,
+                  3.37720918469131,
+                  3.3058340195566416,
+                  3.564458806067705,
+                  3.835416864603758
+                ]
+              },
+              "linearize_ms": {
+                "median": 62.67937505617738,
+                "min": 54.01287483982742,
+                "max": 92.8792089689523,
+                "samples": [
+                  64.96395799331367,
+                  55.02562504261732,
+                  54.01287483982742,
+                  56.370874866843224,
+                  92.8792089689523,
+                  62.67937505617738,
+                  63.245374942198396
+                ]
+              },
+              "reduction_ms": {
+                "median": 2.055125078186393,
+                "min": 2.0547090098261833,
+                "max": 2.607415895909071,
+                "samples": [
+                  2.607415895909071,
+                  2.055125078186393,
+                  2.0547090098261833
+                ]
+              },
+              "solve_ms": {
+                "median": 712.8075000364333,
+                "min": 624.5665408205241,
+                "max": 755.8159588370472,
+                "samples": [
+                  755.8159588370472,
+                  712.8075000364333,
+                  624.5665408205241
+                ]
+              },
+              "solves": [
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.4154236543422647
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.4154236543422647
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.4154236543422647
+                }
+              ],
+              "jacobian_shape": [
+                2018,
+                100
+              ]
+            },
+            "pinocchio": {
+              "first_compile_ms": 2.437083050608635,
+              "first_linearize_ms": 15.309208072721958,
+              "compile_ms": {
+                "median": 2.5545419193804264,
+                "min": 2.26658396422863,
+                "max": 4.400457954034209,
+                "samples": [
+                  2.636916935443878,
+                  2.5545419193804264,
+                  2.4727911222726107,
+                  2.6056249625980854,
+                  2.5125418324023485,
+                  2.26658396422863,
+                  4.400457954034209
+                ]
+              },
+              "linearize_ms": {
+                "median": 15.414334135130048,
+                "min": 15.1313750538975,
+                "max": 18.16070801578462,
+                "samples": [
+                  18.01262516528368,
+                  15.370083041489124,
+                  15.1313750538975,
+                  15.202082926407456,
+                  15.414334135130048,
+                  16.031499952077866,
+                  18.16070801578462
+                ]
+              },
+              "reduction_ms": {
+                "median": 2.2868330124765635,
+                "min": 2.0180409774184227,
+                "max": 5.903249839320779,
+                "samples": [
+                  2.2868330124765635,
+                  5.903249839320779,
+                  2.0180409774184227
+                ]
+              },
+              "solve_ms": {
+                "median": 214.12604209035635,
+                "min": 197.9162918869406,
+                "max": 233.69366698898375,
+                "samples": [
+                  197.9162918869406,
+                  233.69366698898375,
+                  214.12604209035635
+                ]
+              },
+              "solves": [
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.415423654342264
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.415423654342264
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.415423654342264
+                }
+              ],
+              "jacobian_shape": [
+                2018,
+                100
+              ]
+            },
+            "robokots-rust": {
+              "first_compile_ms": 3.7420829758048058,
+              "first_linearize_ms": 14.248166931793094,
+              "compile_ms": {
+                "median": 3.6021668929606676,
+                "min": 3.494041971862316,
+                "max": 4.333459073677659,
+                "samples": [
+                  4.265000112354755,
+                  3.511124989017844,
+                  3.6021668929606676,
+                  3.7681669928133488,
+                  3.494041971862316,
+                  3.5842088982462883,
+                  4.333459073677659
+                ]
+              },
+              "linearize_ms": {
+                "median": 14.174625044688582,
+                "min": 13.983374927192926,
+                "max": 19.015292171388865,
+                "samples": [
+                  15.959207899868488,
+                  14.174625044688582,
+                  13.983374927192926,
+                  14.348292024806142,
+                  14.140916988253593,
+                  13.984166085720062,
+                  19.015292171388865
+                ]
+              },
+              "reduction_ms": {
+                "median": 2.9578329995274544,
+                "min": 2.1184170618653297,
+                "max": 2.9779579490423203,
+                "samples": [
+                  2.1184170618653297,
+                  2.9578329995274544,
+                  2.9779579490423203
+                ]
+              },
+              "solve_ms": {
+                "median": 200.44133299961686,
+                "min": 181.0550841037184,
+                "max": 213.92204193398356,
+                "samples": [
+                  213.92204193398356,
+                  200.44133299961686,
+                  181.0550841037184
+                ]
+              },
+              "solves": [
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.41542365434226425
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.41542365434226425
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 0.41542365434226425
+                }
+              ],
+              "jacobian_shape": [
+                2018,
+                100
+              ]
+            }
+          }
+        },
+        "fr3v2.1_franka_hand": {
+          "correctness": {
+            "against_pinocchio": {
+              "robokots-numpy": {
+                "residual_max_abs": 2.2737367544323206e-12,
+                "jacobian_max_abs": 1.6007106751203537e-10
+              },
+              "robokots-rust": {
+                "residual_max_abs": 2.2737367544323206e-12,
+                "jacobian_max_abs": 5.4569682106375694e-11
+              }
+            },
+            "rust_state_type": "RustBatchOutwardState"
+          },
+          "timings": {
+            "robokots-numpy": {
+              "first_compile_ms": 4.311334108933806,
+              "first_linearize_ms": 793.2040409650654,
+              "compile_ms": {
+                "median": 5.685959011316299,
+                "min": 4.446875071153045,
+                "max": 20.790457958355546,
+                "samples": [
+                  6.7263750825077295,
+                  4.783208016306162,
+                  4.446875071153045,
+                  5.273499991744757,
+                  5.685959011316299,
+                  20.790457958355546,
+                  9.1344581451267
+                ]
+              },
+              "linearize_ms": {
+                "median": 740.1058750692755,
+                "min": 645.4078329261392,
+                "max": 765.1936251204461,
+                "samples": [
+                  687.9856251180172,
+                  645.4078329261392,
+                  704.7402081079781,
+                  765.1936251204461,
+                  749.1252499166876,
+                  740.699915913865,
+                  740.1058750692755
+                ]
+              },
+              "reduction_ms": {
+                "median": 41.914750123396516,
+                "min": 16.59166580066085,
+                "max": 48.82216593250632,
+                "samples": [
+                  48.82216593250632,
+                  16.59166580066085,
+                  41.914750123396516
+                ]
+              },
+              "solve_ms": {
+                "median": 8553.766124881804,
+                "min": 8351.831416832283,
+                "max": 9641.749875154346,
+                "samples": [
+                  8553.766124881804,
+                  8351.831416832283,
+                  9641.749875154346
+                ]
+              },
+              "solves": [
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.454007234781016
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.454007234781016
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.454007234781016
+                }
+              ],
+              "jacobian_shape": [
+                7063,
+                350
+              ]
+            },
+            "pinocchio": {
+              "first_compile_ms": 6.0157079715281725,
+              "first_linearize_ms": 34.773292019963264,
+              "compile_ms": {
+                "median": 3.267124993726611,
+                "min": 2.967375097796321,
+                "max": 3.9311659056693316,
+                "samples": [
+                  2.967375097796321,
+                  3.2808331307023764,
+                  3.267124993726611,
+                  3.1648329459130764,
+                  3.4409170038998127,
+                  3.9311659056693316,
+                  3.0898749828338623
+                ]
+              },
+              "linearize_ms": {
+                "median": 37.18862519599497,
+                "min": 31.62891697138548,
+                "max": 126.29233300685883,
+                "samples": [
+                  37.18862519599497,
+                  34.77445803582668,
+                  31.62891697138548,
+                  38.65962498821318,
+                  36.69058298692107,
+                  62.12220806628466,
+                  126.29233300685883
+                ]
+              },
+              "reduction_ms": {
+                "median": 16.049416968598962,
+                "min": 15.481416834518313,
+                "max": 23.917749989777803,
+                "samples": [
+                  15.481416834518313,
+                  16.049416968598962,
+                  23.917749989777803
+                ]
+              },
+              "solve_ms": {
+                "median": 1061.3169169519097,
+                "min": 856.6838749684393,
+                "max": 1075.276541057974,
+                "samples": [
+                  1075.276541057974,
+                  856.6838749684393,
+                  1061.3169169519097
+                ]
+              },
+              "solves": [
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.454007234781015
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.454007234781015
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.454007234781015
+                }
+              ],
+              "jacobian_shape": [
+                7063,
+                350
+              ]
+            },
+            "robokots-rust": {
+              "first_compile_ms": 7.925874786451459,
+              "first_linearize_ms": 38.94537501037121,
+              "compile_ms": {
+                "median": 5.766584072262049,
+                "min": 4.610999953001738,
+                "max": 14.383584028109908,
+                "samples": [
+                  5.601666169241071,
+                  4.610999953001738,
+                  5.89850009419024,
+                  5.766584072262049,
+                  6.330000003799796,
+                  14.383584028109908,
+                  4.705042112618685
+                ]
+              },
+              "linearize_ms": {
+                "median": 77.09887507371604,
+                "min": 29.533208115026355,
+                "max": 92.0397499576211,
+                "samples": [
+                  85.6639170087874,
+                  77.28858292102814,
+                  29.533208115026355,
+                  37.97487495467067,
+                  92.0397499576211,
+                  77.09887507371604,
+                  40.70066590793431
+                ]
+              },
+              "reduction_ms": {
+                "median": 14.71579191274941,
+                "min": 14.254458015784621,
+                "max": 24.731333134695888,
+                "samples": [
+                  24.731333134695888,
+                  14.71579191274941,
+                  14.254458015784621
+                ]
+              },
+              "solve_ms": {
+                "median": 869.8840839788318,
+                "min": 858.9932499453425,
+                "max": 1200.8013329468668,
+                "samples": [
+                  858.9932499453425,
+                  869.8840839788318,
+                  1200.8013329468668
+                ]
+              },
+              "solves": [
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.4540072347810158
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.4540072347810158
+                },
+                {
+                  "status": "converged",
+                  "iterations": 9,
+                  "cost": 1.4540072347810158
+                }
+              ],
+              "jacobian_shape": [
+                7063,
+                350
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

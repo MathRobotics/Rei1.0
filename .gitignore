@@ -1,4 +1,6 @@
 /build
+/.venv-python-tests/
+/.python-test-results/
 */__pycache__
 /eiopt.egg-info/
 /rei.egg-info/
@@ -10,6 +12,8 @@
 *.log
 *.csv
 *.json
+!developer/benchmarks/three_backends_comparison_results.json
+!developer/benchmarks/rust_performance_investigation_results.json
 !examples/spec/*.json
 !developer/benchmarks/kots_doc_krylov_investigation_results.json
 !developer/benchmarks/krylov_fr3_profile_results.json

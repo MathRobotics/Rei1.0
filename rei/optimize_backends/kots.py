@@ -619,6 +619,12 @@ def compile_kots_trajectory_problem(
     values and all derivatives use that same model, including template windows.
     The realized changes are available as ``perturbation_report``.
 
+    For dense solvers such as LM, pass ``jacobian_strategy="dense"`` to form
+    the motion Jacobian before chaining trajectory maps. The default ``mul``
+    is useful for direct products, but assembling all trajectory columns via
+    JVP can cost more than the small dense motion Jacobian. This compiler
+    does not know which solver will consume the runtime.
+
     Model motion order is inferred from the problem and explicit derivative/
     dynamics options, and set before preparing trajectory maps. This mutates
     the supplied model (preserving gravity); use separate models for live

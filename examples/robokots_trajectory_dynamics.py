@@ -10,19 +10,23 @@ from rei.optimize.history import format_solver_history
 
 _EXAMPLES_DIR = Path(__file__).resolve().parent
 _SPEC_PATH = _EXAMPLES_DIR / "spec" / "robokots_traj_dynamics_d12.toml"
-_KOTS_BACKEND = "rust"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="RoboKots trajectory dynamics example.")
+    parser.add_argument("--backend", choices=("numpy", "rust"), default="rust",
+                        help="Rust requires a separately installed robokots-native wheel.")
     parser.add_argument("--jacobian-method", choices=("analytic", "numerical", "autodiff"), default="analytic")
-    parser.add_argument("--jacobian-strategy", choices=("dense", "mul"), default="mul")
+    parser.add_argument("--jacobian-strategy", choices=("dense", "mul"),
+                        help="Default: dense for dense solvers, mul for operator/Krylov solvers.")
     parser.add_argument("--batch-trajectory", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--numerical-eps", type=float, default=1e-8)
     parser.add_argument("--autodiff-mode", choices=("forward", "reverse"), default="forward")
     parser.add_argument("--autodiff-jit", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--history", type=Path, help="Stream history to a new JSONL file.")
     parser.add_argument("--solver", choices=("levenberg_marquardt", "gauss_newton", "gauss_newton_operator", "gauss_newton_krylov", "lm-ls"), default="levenberg_marquardt")
+    parser.add_argument("--globalization", choices=("line_search", "trust_region"),
+                        help="Krylov only; default is line_search.")
     parser.add_argument("--trial-history", type=Path, help="LM or Krylov trust-region trial JSONL path.")
     parser.add_argument("--show-trials", action="store_true", help="Show LM or Krylov trust-region trials.")
     parser.add_argument("--history-vectors", action="store_true", help="Include reduced variables and Jᵀr vectors.")
@@ -36,11 +40,18 @@ def main() -> None:
         help="Plot series declared by term plot metadata.",
     )
     args = parser.parse_args()
-    trust_solver = args.solver in ("levenberg_marquardt", "gauss_newton_krylov")
+    jacobian_strategy = args.jacobian_strategy or (
+        "mul" if args.solver in ("gauss_newton_operator", "gauss_newton_krylov") else "dense"
+    )
+    if args.globalization is not None and args.solver != "gauss_newton_krylov":
+        parser.error("--globalization requires --solver gauss_newton_krylov")
+    trust_solver = args.solver == "levenberg_marquardt" or (
+        args.solver == "gauss_newton_krylov" and args.globalization == "trust_region"
+    )
     if trust_solver and (args.line_search_history or args.show_line_search):
-        parser.error("--line-search-history/--show-line-search require --solver gauss_newton, gauss_newton_operator or lm-ls")
+        parser.error("--line-search-history/--show-line-search require a line-search solver (Krylov defaults to line_search)")
     if not trust_solver and (args.trial_history or args.show_trials):
-        parser.error("--trial-history/--show-trials require --solver levenberg_marquardt or gauss_newton_krylov")
+        parser.error("--trial-history/--show-trials require LM or Krylov with --globalization trust_region")
 
     if not _SPEC_PATH.is_file():
         raise SystemExit(f"TOML spec file not found: {_SPEC_PATH}")
@@ -49,12 +60,12 @@ def main() -> None:
 
     compiled = compile_kots_trajectory_problem(
         problem,
-        kots_backend=_KOTS_BACKEND,
+        kots_backend=args.backend,
         jacobian_method=args.jacobian_method,
         jacobian_options=({"eps": args.numerical_eps} if args.jacobian_method == "numerical" else
                           {"mode": args.autodiff_mode, "jit": args.autodiff_jit}
                           if args.jacobian_method == "autodiff" else None),
-        jacobian_strategy=args.jacobian_strategy,
+        jacobian_strategy=jacobian_strategy,
         batch_trajectory=args.batch_trajectory,
     )
     runtime = compiled.runtime
@@ -73,6 +84,8 @@ def main() -> None:
                     {"tol_dx": 1e-8 if args.solver == "gauss_newton" else 1e-12}),
                  "history_path": args.history, "history_vectors": args.history_vectors,
                  "verbose": not args.quiet,
+                 **({"globalization": args.globalization or "line_search"}
+                    if args.solver == "gauss_newton_krylov" else {}),
                  **({"line_search_history_path": args.line_search_history} if not trust_solver
                     else {"trial_history_path": args.trial_history})},
     )
@@ -99,7 +112,7 @@ def main() -> None:
     print("=== robokots_trajectory_dynamics ===")
     print(f"derivatives={compiled.derivative_settings}")
     print(f"spec={_SPEC_PATH}")
-    print(f"model={problem['model']['file']} (order={compiled.model_order}, kots_backend={_KOTS_BACKEND})")
+    print(f"model={problem['model']['file']} (order={compiled.model_order}, kots_backend={args.backend})")
     print(
         "nullspace="
         f"rank={reduction.rank} "
@@ -118,7 +131,7 @@ def main() -> None:
                 "dt": compiled.dt,
                 "p_dim": compiled.trajectory_map.p_dim,
                 "dynamics_fields": compiled.dynamics_fields,
-                "kots_backend": _KOTS_BACKEND,
+                "kots_backend": args.backend,
             },
         )
     )

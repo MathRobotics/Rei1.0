@@ -39,8 +39,7 @@ include = ["rei*"]
 testpaths = ["tests"]
 
 [tool.uv.sources]
-# Includes Rust numerical Jacobians and cached JIT autodiff output lists.
-robokots = { git = "https://github.com/MathRobotics/RoboKots.git", rev = "acb2a041453d7c4d3170050e98a1ead81c1897ba" }
+robokots = { git = "https://github.com/MathRobotics/RoboKots.git", branch = "main" }
 
 [dependency-groups]
 dev = [
@@ -51,7 +50,7 @@ plotting = [
     "matplotlib>=3.10.8",
 ]
 kots = [
-    "mathrobo>=0.0.3",
+    "mathrobo==0.0.6",
     "robokots",
 ]
 pinocchio = [

@@ -807,7 +807,7 @@ wheels = [
 
 [[package]]
 name = "mathrobo"
-version = "0.0.4"
+version = "0.0.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -817,9 +817,9 @@ dependencies = [
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/49/0c035b2ae20664b224025bfcf037a9e1ef06e327ffae7c36e28deb837c22/mathrobo-0.0.4.tar.gz", hash = "sha256:7a04ffe1aab25cef4ef92cfb3d08be2fb220f81833d6785e254c6732393553bc", size = 119318, upload-time = "2026-05-31T06:58:50.371Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/56/8df9cbf14c15e4e112a02fd1e7c116d819029418b47d705336e1f2caa652/mathrobo-0.0.6.tar.gz", hash = "sha256:b6b4815f7ee0ade3496abed0bd04a7ef2580146313dd767d1a695de6af54e9a1", size = 163627, upload-time = "2026-11-05T06:13:25.067Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e7/3f/6480ce680ac524c4f2e965ba17634fe544677e705e8f51eac5576375ce0a/mathrobo-0.0.4-py3-none-any.whl", hash = "sha256:347a2a678ce070736254fd952e5d1efc2af70c3b15af518b6a9ff4a4995a048a", size = 29179, upload-time = "2026-05-31T06:58:48.732Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/17/6cae680b2928d668608c22098db71fa9ec4337c5a8b96ccbcb7791f426d4/mathrobo-0.0.6-py3-none-any.whl", hash = "sha256:85843a37f22c28a7dbdde183d82a1e69375ddc245f11b78184c367c697da4ee8", size = 33858, upload-time = "2026-11-05T06:13:23.501Z" },
 ]
 
 [[package]]
@@ -1359,8 +1359,8 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
 ]
 kots = [
-    { name = "mathrobo", specifier = ">=0.0.3" },
-    { name = "robokots", git = "https://github.com/MathRobotics/RoboKots.git?rev=acb2a041453d7c4d3170050e98a1ead81c1897ba" },
+    { name = "mathrobo", specifier = "==0.0.6" },
+    { name = "robokots", git = "https://github.com/MathRobotics/RoboKots.git?branch=main" },
 ]
 pinocchio = [{ name = "pin", specifier = ">=4.1.0" }]
 plotting = [{ name = "matplotlib", specifier = ">=3.10.8" }]
@@ -1369,7 +1369,7 @@ solver-liteopt = [{ name = "liteopt", specifier = ">=0.1.9" }]
 [[package]]
 name = "robokots"
 version = "0.0.1"
-source = { git = "https://github.com/MathRobotics/RoboKots.git?rev=acb2a041453d7c4d3170050e98a1ead81c1897ba#acb2a041453d7c4d3170050e98a1ead81c1897ba" }
+source = { git = "https://github.com/MathRobotics/RoboKots.git?branch=main#24acfc36a54e889332db798004b37122ce77843d" }
 dependencies = [
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "jax", version = "0.11.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },

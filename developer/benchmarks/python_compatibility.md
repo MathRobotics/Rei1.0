@@ -122,3 +122,103 @@ The new AD test module skips before importing the optional backend when RoboKots
 is absent, so core CI can collect successfully. The native CI selection now
 also includes AD batching, motion-order inference and TOML model loading tests.
 GitHub Actions / Linux execution has not been performed locally.
+
+## Dependency update verification on 2026-11-05
+
+Updated the existing project environment on macOS 15.7.4 ARM64, Python 3.13.1,
+using the committed lock with the dev, kots and pinocchio groups. RoboKots now
+tracks `main`; the lock resolves to `24acfc36a54e889332db798004b37122ce77843d`.
+
+| Dependency / check | Result |
+|---|---|
+| MathRobo | 0.0.6 |
+| RoboKots / robokots-native | 0.0.1 / 0.0.1, native API 1 |
+| NumPy / SciPy / JAX | 2.5.3 / 1.18.1 / 0.11.2 |
+| Pinocchio / pytest | 4.1.0 / 9.1.1 |
+| Full suite (`--fail-on-skip`) | 1013 passed, no skips |
+| CI portable selection, native import deliberately blocked | 23 passed, 115 deselected, no skips |
+| Trajectory dynamics example, NumPy and Rust | Both converged in 9 iterations, cost 0.4154 |
+| `uv pip check` | Passed, 38 packages |
+
+Installed the separately supplied local wheel
+`robokots_native-0.0.1-cp313-cp313-macosx_11_0_arm64.whl` after synchronizing.
+Its SHA-256 is `a6772f039cfb74b286f27d2c7aac6561740b2cfd93c91b988ec33f831d44bb2c`.
+No native source build was required. See [testing instructions](../../docs/testing.md)
+for preserving the additional wheel during subsequent uv runs.
+
+The initial suite had two failures comparing batched and stepwise IOC residuals:
+the maximum discrepancy was `1.023e-12` at a residual magnitude of approximately
+121 (relative difference `8.48e-15`). CM coefficient reconstruction and fused
+products change floating-point accumulation order. The comparison now allows
+`64 * float64 epsilon` relative error in addition to the existing `1e-12`
+absolute tolerance; the weight and cache/call-count assertions are unchanged.
+Rei's calculation code required no API or derivative-unit changes.
+
+The revised workflow runs the portable selection using RoboKots NumPy and
+Pinocchio. CI does not install or execute the RoboKots Rust backend; native
+coverage is verified locally with the separately supplied wheel.
+GitHub Actions / Linux and Python 3.11 were not rerun for this dependency update.
+
+### Follow-up Rei integration review, 2026-11-05
+
+The project environment passes **1016 tests with no skips** using
+`MPLBACKEND=Agg .venv/bin/python -m pytest -q -rs --fail-on-skip`.
+The additional three tests run the NumPy trajectory example and verify its
+actual history files for LM, Krylov line search and Krylov trust region.
+Krylov defaults to line search; the example now exposes `--globalization`
+and routes the appropriate history options.
+
+The portable CI selection was expanded from 23 to **105 passing tests**:
+99 tests in portable modules with Rust parameters excluded and 6 NumPy
+variants in modules containing unlabelled native-only tests. Both selections
+were run in fresh Python subprocesses with `robokots_native` imports blocked;
+there were no skips. GitHub Actions / Linux itself was not run locally.
+
+The noisy DOC/IOC example and the Pinocchio/NumPy comparison example both
+run successfully after explicitly selecting dense assembly for their dense
+forward solvers. The compiler API's default remains `mul`, with dense-solver
+guidance added to its docstring and README. The uv documentation now distinguishes
+optional `uv run --no-sync` from `uv sync --inexact`, which preserves extra packages.
+
+## Python matrix script verification, 2026-11-05
+
+The new `scripts/test-python.sh` was exercised on macOS 15.7.4 ARM64 with
+uv 0.9.18 and the current committed dependency lock. Every version/suite used
+a separate environment under `/tmp/rei-python-matrix`; the project `.venv`
+was not synchronized or replaced.
+
+| Python | Core suite | NumPy / Pinocchio suite | Dependency checks |
+|---|---|---|---|
+| 3.11.14 | 904 passed, 76 skipped | 105 passed, no skips | Passed |
+| 3.12.12 | 904 passed, 76 skipped | 105 passed, no skips | Passed |
+| 3.13.1 | 904 passed, 76 skipped | 105 passed, no skips | Passed |
+| 3.14.3 | 904 passed, 76 skipped | 105 passed, no skips | Passed |
+
+The core environments contain only core/dev dependencies, so optional-backend
+skips are expected and are listed in the logs. The robotics suite runs the
+two portable selections from CI (99 and 6 passing tests), enforcing
+`--fail-on-skip`. These matrix runs do not verify Rust wheels or native external
+solvers, and they do not establish support on other operating systems.
+
+The script's own five regression tests also pass, including continuation
+after sync/dependency-check/pytest failures, final nonzero exit status,
+the robotics selection, and rejecting unsupported Python before invoking uv.
+The script was verified with macOS Bash 3.2, including empty pytest arguments.
+
+Reproduce:
+
+```sh
+./scripts/test-python.sh --suite all 3.11 3.12 3.13 3.14 \
+  --env-dir /tmp/rei-python-matrix --log-dir /tmp/rei-python-matrix-results
+```
+
+The successful run saved individual logs and a machine-readable summary to
+`/tmp/rei-python-matrix-results/20261105-231246-12373/summary.tsv`.
+Future runs use a new run directory and may select a newer installed patch
+version unless an exact version is requested.
+
+Final pre-commit verification on 2026-11-06: the project Python 3.13.1
+environment, including the installed Rust extension, passes **1021 tests with
+no skips** (`--fail-on-skip`). `uv lock --check --offline` and `uv pip check`
+also pass. The shell script passes `bash -n`, the CI YAML parses, and the saved
+benchmark result files parse as JSON.

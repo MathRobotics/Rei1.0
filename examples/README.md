@@ -42,11 +42,18 @@ python examples/compare_robotics_backends.py --backend pinocchio
 ```bash
 uv sync --group kots
 python examples/robokots_ik.py
-python examples/robokots_trajectory_dynamics.py
-python examples/robokots_trajectory_dynamics.py --plot
-python examples/robokots_doc_noise_ioc.py --noise-std 0.001 --seed 42
+python examples/robokots_trajectory_dynamics.py --backend numpy
+python examples/robokots_trajectory_dynamics.py --backend numpy --plot
+python examples/robokots_doc_noise_ioc.py --backend numpy --noise-std 0.001 --seed 42
 python examples/compare_robotics_backends.py --backend robokots
 ```
+
+MathRoboは0.0.6、RoboKotsはmainから解決した `uv.lock` のコミットを使います。
+軌道dynamicsとノイズIOCの例は既定でRustを選択します。Rustを使う場合は、
+対応する `robokots-native` wheel（native API 1）を `uv pip install --no-deps /path/to/wheel.whl` で追加し、
+`--backend rust` を指定してください。通常の `uv run` は追加wheelを保持します。
+`uv sync` で再同期するときは `--inexact` を付けて保持します。`uv run --no-sync` は同期を省く任意指定です。
+詳細は [テストと依存更新](../docs/testing.md) を参照してください。
 
 ## サンプル一覧
 
@@ -58,11 +65,16 @@ python examples/compare_robotics_backends.py --backend robokots
 制約付きKKT推定は `constrained_stationarity_ioc.py` を参照してください。
 
 RoboKots / Pinocchio の軌道最適化例は LM が既定です。
+RoboKots軌道例のヤコビアン構築は、密行列ソルバーで `dense`、operator／Krylov系で `mul` を既定にします。
+`--jacobian-strategy` で明示指定できます。350列の軌道パラメータを積APIへ渡す `mul` は、
+密行列を使うLMでは遅くなる場合があります。[性能調査](../developer/benchmarks/rust_performance_investigation.md) を参照してください。
 反復を実行中に自動表示し（`--quiet` で抑制）、`--show-trials` で試行詳細も表示します。
 `--history history.jsonl` で反復を `history.jsonl`、詳細を `history.lm_trials.jsonl` に分けて保存します。
 詳細の保存先は `--trial-history trials.jsonl` で変更できます。
-従来方式は `--solver gauss_newton` で再現し、`--show-line-search` と
-`--line-search-history line_search.jsonl` はこの方式に限って使用できます。
+`--solver gauss_newton`、`lm-ls` とRoboKotsのoperator／既定のKrylovでは、
+`--show-line-search` と `--line-search-history line_search.jsonl` を使えます。
+RoboKotsのKrylovで信頼領域法を使う場合は `--globalization trust_region` を付け、
+`--show-trials` と `--trial-history` で試行履歴を確認します。
 `--history-vectors` で変数と
 `Jᵀr` の全成分も含めます。保存先は新しいファイル名を指定してください。
 詳細は [ソルバの履歴](../docs/solver-history.md) を参照してください。

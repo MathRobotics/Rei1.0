@@ -373,6 +373,12 @@ Dense Jacobian assembly is still available by passing
 default strategy is `"mul"`. The older `prefer_matvec_jacobian` option is kept
 only as a deprecated compatibility alias.
 
+For dense solvers such as Levenberg–Marquardt and dense Gauss–Newton, use
+`jacobian_strategy="dense"`: forming the small motion Jacobian before chaining
+the spline maps can be faster than passing every spline parameter through JVP.
+Use `"mul"` for operator/Krylov workflows. The trajectory example selects this
+default from `--solver`; the compiler API cannot infer the solver used later.
+
 For trajectory problems containing `total_joint` coordinates and dynamics,
 Rei batches all requested time steps into RoboKots' batch state and Jacobian
 APIs by default. Set `batch_trajectory=False` to retain per-step evaluation;
@@ -844,13 +850,39 @@ uv run python examples/pinocchio_ik.py
 uv run python examples/pinocchio_trajectory_dynamics.py
 
 uv sync --group kots
-uv run python examples/robokots_ik.py
-uv run python examples/robokots_trajectory_dynamics.py
+uv run --group kots python examples/robokots_ik.py
+uv run --group kots python examples/robokots_trajectory_dynamics.py --backend numpy
 ```
+
+The `kots` group uses MathRobo 0.0.6 and RoboKots `main`, with the resolved
+commit recorded in `uv.lock`. Rust execution additionally requires a separately
+supplied `robokots-native` wheel (native API 1) matching Python, OS, and CPU.
+Install it with `uv pip install --no-deps /path/to/wheel.whl`, then use
+`uv run --no-sync --group kots python examples/robokots_trajectory_dynamics.py --backend rust`.
+Ordinary `uv run` also retains additional installed packages by default;
+`--no-sync` explicitly runs the existing environment without synchronizing it.
+When running `uv sync`, add `--inexact` to retain the separately installed wheel.
+The trajectory dynamics and noisy IOC examples default to Rust; pass
+`--backend numpy` to run them without the native wheel.
+See [testing and dependency updates](docs/testing.md) for native installation and CI setup.
 
 See `examples/README.md` for the full sample list and spec/DSL/model file guide.
 
 ## Development
+
+Run Python-version checks in separate environments (defaults: 3.11–3.14):
+
+```bash
+./scripts/test-python.sh
+./scripts/test-python.sh --suite all 3.11 3.12 3.13 3.14
+```
+
+The default `core` suite allows optional-backend skips; `robotics` checks
+NumPy/Pinocchio without Rust and rejects skips. The script uses `uv.lock`,
+keeps the existing `.venv`, continues after failures, and saves logs plus a
+per-version summary. See [testing instructions](docs/testing.md).
+Core and portable robotics checks have passed on Python 3.11, 3.12, 3.13,
+and 3.14 on macOS ARM64; see the [verification record](developer/benchmarks/python_compatibility.md).
 
 Run the test suite:
 
@@ -876,7 +908,8 @@ integration tests does not verify the real library.
 
 The committed `uv.lock` and pinned RoboKots revision reproduce the development
 dependencies. CI tests Python 3.11/3.13 with the core dependencies and runs a
-separate native robotics job that rejects skips. See [testing and dependency
+separate RoboKots NumPy / Pinocchio job that rejects skips. RoboKots Rust is
+verified locally and is not installed or executed in CI. See [testing and dependency
 updates](docs/testing.md) for exact commands and verification scope.
 
 Compile-check the package:

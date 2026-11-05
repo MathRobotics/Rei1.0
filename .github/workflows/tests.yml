@@ -38,36 +38,34 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install uv==0.9.18
-      - name: Prepare Rust for the pinned RoboKots source build
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
       - run: uv sync --locked --group dev --group kots --group pinocchio
       - run: uv pip check
       - run: uv pip list
-      - name: Verify native libraries before running integration tests
+      - name: Verify Python backends before running integration tests
         run: |
-          uv run --locked --group kots --group pinocchio python - <<'PY'
+          uv run --no-sync --locked --group kots --group pinocchio python - <<'PY'
           import platform
           import pinocchio
-          import robokots._rust_core
           from robokots.kots import Kots
           print(platform.platform(), platform.python_version())
           print("Pinocchio:", pinocchio.__version__, pinocchio.__file__)
-          print("RoboKots Rust:", robokots._rust_core.__file__)
-          model = Kots.from_urdf_file("examples/models/planar2.urdf", order=3)
+          model = Kots.from_urdf_file("examples/models/planar2.urdf", order=3, backend="numpy")
           print("RoboKots model:", type(model).__name__)
           PY
-      - name: Run real backend checks without skips
+      - name: Run portable robotics checks without skips
         run: >-
-          uv run --locked --group dev --group kots --group pinocchio
-          python -m pytest -q -rs --fail-on-skip
-          tests/test_kots_operator_doc.py
-          tests/test_kots_urdf_json_parity.py
+          uv run --no-sync --locked --group dev --group kots --group pinocchio
+          python -m pytest -q -rs --fail-on-skip -k 'not rust'
           tests/test_kots_perturbation.py
-          tests/test_prepared_trajectory_maps.py
           tests/test_ioc_validation.py
           tests/test_urdf_joint_locking.py
-          tests/test_kots_autodiff_batch.py
           tests/test_kots_compile_order.py
           tests/test_model_file_spec.py
+          tests/test_prepared_trajectory_maps.py
+          tests/test_trajectory_example_cli.py
+      - name: Run NumPy variants in modules containing native-only checks
+        run: >-
+          uv run --no-sync --locked --group dev --group kots --group pinocchio
+          python -m pytest -q -rs --fail-on-skip -k numpy
+          tests/test_kots_urdf_json_parity.py
+          tests/test_kots_autodiff_batch.py

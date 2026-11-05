@@ -362,12 +362,13 @@ def test_kots_batched_ioc_state_vjp_matches_stepwise(
     batched, batched_shapes, batched_imports, batched_updates, batched_compiled = estimate(batch_trajectory=True)
 
     # Same stationarity result, while the two per-step VJPs become one batch.
-    # Matrix-RHS fusion changes only floating-point accumulation order.
+    # Matrix-RHS fusion and CM coefficient reconstruction change floating-point
+    # accumulation order. Allow roundoff relative to the residual scale too.
     np.testing.assert_allclose(batched["weights"], stepwise["weights"], rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(
         batched["stationarity"]["ikkt_residual"],
         stepwise["stationarity"]["ikkt_residual"],
-        rtol=0.0,
+        rtol=64 * np.finfo(float).eps,
         atol=1e-12,
     )
     assert stepwise_shapes == [(2,)] * (2 * len(fields))

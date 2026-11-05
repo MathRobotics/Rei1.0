@@ -56,7 +56,10 @@ def main():
 
     def compile_problem():
         model = Kots.from_json_data(model_data, order=3, backend=args.backend)
-        return compile_kots_trajectory_problem(spec, model=model, kots_backend=args.backend, gravity=args.gravity)
+        return compile_kots_trajectory_problem(
+            spec, model=model, kots_backend=args.backend, gravity=args.gravity,
+            jacobian_strategy="dense",
+        )
 
     doc = compile_problem()
     print(f"Model DOF: {doc.trajectory_map.q_dim}; locked joints: {reduced.locked_joints}")

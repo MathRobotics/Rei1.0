@@ -121,6 +121,8 @@ def _run_backend(
             backend=config.backend,
             model=model,
             data=data,
+            **({"jacobian_strategy": "dense", "kots_backend": "numpy"}
+               if config.backend == "robokots" else {}),
         )
         result.compile_s = time.perf_counter() - t0
         result.steps = int(compiled.trajectory_map.steps)
