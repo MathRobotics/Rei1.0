@@ -1,11 +1,13 @@
 """IOC fitting over stationarity capabilities, independent of backend compilation."""
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
 import numpy as np
 
 from ._ioc_diagnostics import diagnose_ioc_fit
+from ._svd_weights import SVDWeightError, solve_svd_weights
 from .simplex import solve_simplex_min_norm
 from .stationarity import (
     StationaritySource,
@@ -82,20 +84,35 @@ def estimate_stationarity_weights(
     p: Array | Any | None = None,
     include_constraints: bool = False,
     active_mode: str = "gradient",
-    stationarity_scaling: str = "gradient_norm",
+    stationarity_scaling: str | None = None,
     stationarity_scale_eps: float = 1e-12,
     simplex_method: str = "qr_nullspace",
     simplex_max_iters: int = 2000,
     simplex_tol: float = 1e-10,
+    weight_method: str = "simplex",
+    svd_rtol: float | None = None,
+    svd_nonnegative_tol: float = 1e-10,
 ) -> dict[str, Any]:
     """Estimate normalized coefficients of the original, unweighted objectives.
 
-    ``scaled_weights`` contains the simplex coefficients used internally after
+    ``scaled_weights`` contains the coefficients used internally after
     column scaling. ``weights`` converts those coefficients back to the original
     objective scale. For noisy data, the selected scaling still determines the
     fitting objective. Constraint terms are not KKT multipliers; see the returned
     ``validation`` diagnostics before interpreting a constrained demonstration.
+
+    ``weight_method="svd"`` fits the smallest right-singular-vector direction,
+    rejects mixed signs or a repeated minimum, and normalizes to unit sum.
+    Scaling defaults to ``none`` for SVD and ``gradient_norm`` for simplex.
+    Explicit column scaling is not supported for SVD. SVD solves an L2-direction
+    problem before L1 normalization, not the simplex-constrained least squares.
     """
+    if weight_method not in ("simplex", "svd"):
+        raise ValueError("weight_method must be 'simplex' or 'svd'.")
+    if stationarity_scaling is None:
+        stationarity_scaling = "none" if weight_method == "svd" else "gradient_norm"
+    if weight_method == "svd" and str(stationarity_scaling).strip().lower() != "none":
+        raise ValueError("weight_method='svd' requires stationarity_scaling='none'.")
     if p is not None:
         source.set_point(np.asarray(p, dtype=float).reshape(-1))
 
@@ -109,6 +126,8 @@ def estimate_stationarity_weights(
         contributions,
         n_total=int(source.n_total),
     )
+    if weight_method == "svd" and not np.all(np.isfinite(A)):
+        raise ValueError("SVD weight fitting requires a finite gradient matrix.")
     A_scaled, scales = _scale_columns(
         A,
         contributions,
@@ -123,9 +142,26 @@ def estimate_stationarity_weights(
     weights = np.zeros((len(contributions),), dtype=float)
     scaled_weights = np.zeros_like(weights)
     simplex_out = None
+    svd_out = None
     ikkt_residual = np.zeros((A.shape[0],), dtype=float)
     ikkt_residual_scaled = np.zeros((A.shape[0],), dtype=float)
-    if len(active_idx) > 0:
+    solve_started = perf_counter()
+    if weight_method == "svd":
+        active = np.asarray(active_idx, dtype=int)
+        try:
+            solution, svd_out = solve_svd_weights(
+                A_scaled[:, active], rtol=svd_rtol, nonnegative_tol=svd_nonnegative_tol,
+            )
+        except SVDWeightError as exc:
+            exc.diagnostics["active_indices"] = list(active_idx)
+            exc.diagnostics["active_term_indices"] = [int(term_indices[i]) for i in active_idx]
+            exc.diagnostics["weight_solve_seconds"] = perf_counter() - solve_started
+            raise
+        scaled_weights[active] = solution
+        weights[active] = solution
+        ikkt_residual = A @ weights
+        ikkt_residual_scaled = ikkt_residual.copy()
+    elif len(active_idx) > 0:
         active = np.asarray(active_idx, dtype=int)
         x0 = build_reference_simplex_init(contributions, active_idx)
         if x0 is not None:
@@ -147,6 +183,8 @@ def estimate_stationarity_weights(
         ikkt_residual = A @ weights
         ikkt_residual_scaled = A_scaled @ scaled_weights
 
+    weight_solve_seconds = perf_counter() - solve_started
+
     fit_diagnostics = diagnose_ioc_fit(
         contributions_all=contributions_all,
         contributions=contributions,
@@ -157,6 +195,9 @@ def estimate_stationarity_weights(
     )
 
     return {
+        "weight_method": weight_method,
+        "weight_solve_seconds": weight_solve_seconds,
+        "svd": svd_out,
         "active_terms": [
             _contribution_json(contributions[i], weight=float(weights[i]))
             for i in active_idx
@@ -201,4 +242,4 @@ def estimate_stationarity_weights(
     }
 
 
-__all__ = ["estimate_stationarity_weights"]
+__all__ = ["estimate_stationarity_weights", "SVDWeightError"]

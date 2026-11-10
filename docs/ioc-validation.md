@@ -33,6 +33,69 @@
 既存の呼び出し側は、正規化後係数を必要とする場合に `scaled_weights` を使用する。
 ノイズがある場合は正規化方式が近似問題の解に影響する。今回の修正はその差を消すものではない。
 
+## SVDによる重み推定
+
+目的項の勾配行列を `A` として、`weight_method="svd"` で最小特異値の右特異ベクトルを使う。
+既定の `weight_method="simplex"` は従来の単体法で、既存の呼び出しの動作は維持する。
+
+```python
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from rei import estimate_ioc_weights
+
+# DOCで使用した境界条件のnullspace縮約と、同じ目的項・順番を使用する。
+result = estimate_ioc_weights(
+    SimpleNamespace(runtime=reduction.runtime),
+    weight_method="svd",
+    stationarity_scaling="none",
+)
+print(result["weights"])
+print(result["svd"]["singular_values"])
+print(result["stationarity"]["ikkt_residual_norm"])
+print(result["weight_solve_seconds"])
+Path("ioc_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+```
+
+`p` を渡す場合は対象runtimeの座標を使う。縮約runtimeには縮約座標を渡し、
+元の軌道パラメータへ戻してから勾配を組み立て直す処理は追加しない。
+ロボットに依存しない `estimate_stationarity_weights(source, weight_method="svd")` でも利用できる。
+勾配行列の構築・有効項の選択・項順は既存経路を使い、除外項の重みは元の位置にゼロで保持する。
+
+SVDでは、未指定の `stationarity_scaling` は `none`、単体法とKKTでは従来の
+`gradient_norm` になる。SVDに明示的な列スケーリングを指定するとエラーになる。
+全体の符号を合計が正になるように合わせ、`svd_nonnegative_tol`（既定 `1e-10`）を
+超える負値があれば拒否する。許容範囲の負値だけゼロにし、合計1へ正規化する。
+ノイズがある場合、これはL2ノルム1の最小特異方向を合計1へ正規化する方法であり、
+合計1・非負制約下で残差を最小にする単体法とは異なる解になる場合がある。
+
+`svd` には特異値、行列形状、階数、零空間次元、最小特異値の重複度、符号調整後の方向を記録する。
+横長行列で特異値配列に現れないゼロ特異値は `implicit_zero_singular_values` として記録し、
+重複度の判定に含める。数値階数と重複度の許容値は
+`svd_rtol * 最大特異値`（未指定時の `svd_rtol = eps * max(A.shape)`）を使う。
+
+最小特異値が重複する場合は、恣意的な1本のベクトルを重みとして採用しない。
+重複・符号混在・有効項なしの場合は、`ValueError` の派生型 `SVDWeightError` を送出する。
+`rei.equations` からimportし、例外の `diagnostics` を保存すれば失敗理由・特異値・有効項・計算時間を記録できる。
+複数次元の特異部分空間から非負解を探す処理や、単体法への暗黙の切り替えは行わない。
+
+`stationarity.ikkt_residual` は正規化後の **`A @ weights`** を保存する。
+`weight_solve_seconds` は重みの求解と残差評価の時間で、勾配行列の構築や共通の識別性診断は含まない。
+既存の重み誤差・停留残差の集計には同じ `weights` と `stationarity` を使用できる。
+`format_ioc_report()` と `build_ioc_log_sections()` には
+`svd_result=result["svd"]`、`weight_solve_seconds=result["weight_solve_seconds"]` を渡すと
+特異値と計時も表示・記録できる。`simplex` はSVD選択時に `None` となる。
+
+SVDは制約乗数を推定しないため、`constraint_mode="kkt"` とは併用できない。
+境界条件などを既存の縮約で処理した場合はその縮約runtimeを使う。
+非一意性・除外項・非ゼロ停留残差については既存の `validation`／`identifiability` も確認する。
+
+SVDの回帰テストは `tests/test_ioc_svd.py` にまとめている。
+既知重み、ノイズ、横長／縦長行列、暗黙の零特異値、重複・符号混在、丸め誤差の負値、
+無効な許容値、除外項、縮約座標、BスプラインのDOC→IOC、レポート・JSON保存を検証する。
+Python 3.11〜3.14で、このテストと既存のIOCレポートテスト計32件がスキップなしで成功した。
+Python 3.13の既存Rust／Pinocchio環境でも、全1050件が `--fail-on-skip` で成功した。
+
 ## 制約付きの反例
 
 上記と同じ目的項の真の重みを `[0.1, 0.9]` にすると、無制約の最適点は `x=1.8`。

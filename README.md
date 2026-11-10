@@ -290,6 +290,15 @@ equality and active inequality multipliers alongside the weights. KKT fit and
 weight identification are reported separately. See the [IOC validation report](docs/ioc-validation.md)
 for known-answer tests, migration details, and remaining limitations.
 
+Select `weight_method="svd"` to estimate weights from the smallest right
+singular vector of the active gradient matrix. SVD defaults to no column
+scaling (`stationarity_scaling="none"`); it rejects mixed signs and repeated
+minimum singular values with `rei.equations.SVDWeightError`, whose `diagnostics`
+can be saved. Results include `svd`, the existing stationarity residuals, and
+`weight_solve_seconds`. Pass the DOC's nullspace-reduced runtime when fitting
+in reduced coordinates. The default simplex estimator remains unchanged;
+SVD is not available in KKT multiplier-fitting mode.
+
 ### RoboKots Jacobians
 
 Choose the differentiation method independently of the matrix strategy:

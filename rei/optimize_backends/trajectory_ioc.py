@@ -96,7 +96,7 @@ def estimate_ioc_weights(
     p: Array | Any | None = None,
     include_constraints: bool = False,
     active_mode: str = "gradient",
-    stationarity_scaling: str = "gradient_norm",
+    stationarity_scaling: str | None = None,
     stationarity_scale_eps: float = 1e-12,
     simplex_method: str = "qr_nullspace",
     simplex_max_iters: int = 2000,
@@ -104,6 +104,9 @@ def estimate_ioc_weights(
     constraint_mode: str = "objective_stationarity",
     kkt_active_tol: float = 1e-8,
     kkt_feasibility_tol: float = 1e-8,
+    weight_method: str = "simplex",
+    svd_rtol: float | None = None,
+    svd_nonnegative_tol: float = 1e-10,
 ) -> dict[str, Any]:
     """Adapt a compiled trajectory to the backend-independent IOC fitter.
 
@@ -114,7 +117,15 @@ def estimate_ioc_weights(
     ``active_mode``; ``include_constraints=True`` is rejected because constraints
     have multipliers rather than objective weights. ``simplex_max_iters`` and
     ``simplex_tol`` also control the KKT active-set least-squares solver.
+
+    ``weight_method="svd"`` selects unscaled objective-stationarity fitting,
+    including for a runtime already reduced by nullspace equality elimination.
+    It does not fit KKT multipliers and cannot be combined with KKT mode.
     """
+    if weight_method not in ("simplex", "svd"):
+        raise ValueError("weight_method must be 'simplex' or 'svd'.")
+    if constraint_mode == "kkt" and weight_method != "simplex":
+        raise ValueError("weight_method='svd' is incompatible with constraint_mode='kkt'.")
     backend, compiled_obj, diagnostics = _as_compiled_ioc(compiled)
     runtime = compiled_obj.runtime
     source = RuntimeStationaritySource(runtime)
@@ -131,7 +142,7 @@ def estimate_ioc_weights(
         g, Jg = runtime.linearize_inequality_constraints(term_indices=ineq_indices)
         result = estimate_kkt_weights(
             source, KktConstraintData(h, Jh, g, Jg),
-            stationarity_scaling=stationarity_scaling,
+            stationarity_scaling="gradient_norm" if stationarity_scaling is None else stationarity_scaling,
             stationarity_scale_eps=stationarity_scale_eps,
             active_tol=kkt_active_tol, feasibility_tol=kkt_feasibility_tol,
             max_iters=simplex_max_iters, tol=simplex_tol,
@@ -142,6 +153,8 @@ def estimate_ioc_weights(
             active_mode=active_mode, stationarity_scaling=stationarity_scaling,
             stationarity_scale_eps=stationarity_scale_eps, simplex_method=simplex_method,
             simplex_max_iters=simplex_max_iters, simplex_tol=simplex_tol,
+            weight_method=weight_method, svd_rtol=svd_rtol,
+            svd_nonnegative_tol=svd_nonnegative_tol,
         )
     else:
         raise ValueError("constraint_mode must be 'objective_stationarity' or 'kkt'.")

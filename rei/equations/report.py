@@ -68,6 +68,8 @@ def build_ioc_log_sections(
     w_true: Array | Sequence[float] | None = None,
     kkt: Any | None = None,
     simplex_out: SolveOutcome | None = None,
+    svd_result: Mapping[str, Any] | None = None,
+    weight_solve_seconds: float | None = None,
     callback_rows: int | None = None,
     contributions: Iterable[StationarityTermContribution] | None = None,
     precision: int = 6,
@@ -134,6 +136,11 @@ def build_ioc_log_sections(
             )
         )
 
+    if svd_result is not None:
+        svd_section = dict(svd_result)
+        if weight_solve_seconds is not None:
+            svd_section["weight_solve_seconds"] = float(weight_solve_seconds)
+        sections.append(("svd.result", svd_section))
     if simplex_out is not None:
         simplex_stats = simplex_out.stats
         sections.append(
@@ -198,6 +205,8 @@ def format_ioc_report(
     w_true: Array | Sequence[float] | None = None,
     kkt: Any | None = None,
     simplex_out: SolveOutcome | None = None,
+    svd_result: Mapping[str, Any] | None = None,
+    weight_solve_seconds: float | None = None,
     contributions: Iterable[StationarityTermContribution] | None = None,
     include_stationarity_terms: bool = False,
     title: str = "IOC",
@@ -254,6 +263,15 @@ def format_ioc_report(
             f"ineq_violation_inf={float(getattr(kkt, 'ineq_violation_inf')):.3e}"
         )
 
+    if svd_result is not None:
+        lines.append(
+            f"- svd: status={svd_result['status']} "
+            f"sigma_min={float(svd_result['smallest_singular_value']):.3e} "
+            f"multiplicity={int(svd_result['smallest_multiplicity'])}"
+        )
+        lines.append(f"- singular_values={_format_vector(np.asarray(svd_result['singular_values']), precision=int(precision))}")
+        if weight_solve_seconds is not None:
+            lines.append(f"- weight_solve_seconds={float(weight_solve_seconds):.3e}")
     if simplex_out is not None:
         simplex_stats = simplex_out.stats
         lines.append(
